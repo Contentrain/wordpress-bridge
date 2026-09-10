@@ -2,8 +2,8 @@
 /**
  * Plugin Name:       Contentrain Bridge
  * Plugin URI:        https://contentrain.io/wordpress
- * Description:       Export WordPress content to a portable RawIR JSON file for migration.
- * Version:           0.1.0
+ * Description:       Model and export WordPress content and interface text as Contentrain JSON/Markdown, with optional GitHub delivery.
+ * Version:           0.2.0
  * Requires at least: 6.2
  * Requires PHP:      7.4
  * Author:            Contentrain
@@ -11,88 +11,39 @@
  * License:           GPL-2.0-or-later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain:       contentrain-bridge
+ *
+ * @package ContentrainBridge
  */
 
-if ( ! defined( 'ABSPATH' ) ) {
-	exit;
-}
-
-define( 'CONTENTRAIN_BRIDGE_VERSION', '0.1.0' );
+defined( 'ABSPATH' ) || exit;
+define( 'CONTENTRAIN_BRIDGE_VERSION', '0.2.0' );
 define( 'CONTENTRAIN_BRIDGE_FILE', __FILE__ );
 
-require_once __DIR__ . '/includes/class-contentrain-bridge-exporter.php';
-
-/** Register the local export screen under Tools. */
-function contentrain_bridge_register_tools_page() {
-	add_management_page(
-		__( 'Contentrain Bridge', 'contentrain-bridge' ),
-		__( 'Contentrain Bridge', 'contentrain-bridge' ),
-		'export',
-		'contentrain-bridge',
-		'contentrain_bridge_render_tools_page'
-	);
+foreach ( array( 'policy', 'files', 'exporter', 'source', 'scanner', 'models', 'validator', 'jobs', 'github', 'admin' ) as $contentrain_bridge_class ) {
+	require_once __DIR__ . '/includes/class-contentrain-bridge-' . $contentrain_bridge_class . '.php';
 }
-add_action( 'admin_menu', 'contentrain_bridge_register_tools_page' );
+unset( $contentrain_bridge_class );
 
-/** Render a deliberately local-first export flow. */
-function contentrain_bridge_render_tools_page() {
-	if ( ! current_user_can( 'export' ) ) {
-		wp_die( esc_html__( 'You do not have permission to export this site.', 'contentrain-bridge' ) );
+\Contentrain\Bridge\Admin::register();
+foreach ( array( 'save_post', 'deleted_post', 'added_post_meta', 'updated_post_meta', 'deleted_post_meta', 'created_term', 'edited_term', 'delete_term', 'added_term_meta', 'updated_term_meta', 'deleted_term_meta', 'comment_post', 'edit_comment', 'deleted_comment', 'transition_comment_status', 'profile_update', 'switch_theme' ) as $contentrain_bridge_hook ) {
+	add_action( $contentrain_bridge_hook, array( '\Contentrain\Bridge\Source', 'changed' ), 10, 0 );
+}
+unset( $contentrain_bridge_hook );
+add_action( 'updated_option', array( '\Contentrain\Bridge\Source', 'option_changed' ), 10, 1 );
+add_action( 'added_option', array( '\Contentrain\Bridge\Source', 'option_changed' ), 10, 1 );
+add_action( 'deleted_option', array( '\Contentrain\Bridge\Source', 'option_changed' ), 10, 1 );
+add_action( 'contentrain_bridge_cleanup', array( '\Contentrain\Bridge\Files', 'cleanup' ) );
+register_activation_hook( __FILE__, 'contentrain_bridge_activate' );
+register_deactivation_hook( __FILE__, 'contentrain_bridge_deactivate' );
+
+/** Schedule cleanup of private export files. */
+function contentrain_bridge_activate() {
+	if ( ! wp_next_scheduled( 'contentrain_bridge_cleanup' ) ) {
+		wp_schedule_event( time() + HOUR_IN_SECONDS, 'hourly', 'contentrain_bridge_cleanup' );
 	}
-	?>
-	<div class="wrap">
-		<h1><?php esc_html_e( 'Contentrain Bridge', 'contentrain-bridge' ); ?></h1>
-		<p><?php esc_html_e( 'Download a portable RawIR JSON export. This action does not contact Contentrain or any other external service.', 'contentrain-bridge' ); ?></p>
-		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
-			<input type="hidden" name="action" value="contentrain_bridge_export" />
-			<?php wp_nonce_field( 'contentrain_bridge_export', 'contentrain_bridge_nonce' ); ?>
-			<label>
-				<input type="checkbox" name="include_comments" value="1" />
-				<?php esc_html_e( 'Include comments (author name, URL, content, status, and user ID; email and IP address are excluded)', 'contentrain-bridge' ); ?>
-			</label>
-			<?php submit_button( __( 'Download RawIR JSON', 'contentrain-bridge' ) ); ?>
-		</form>
-	</div>
-	<?php
 }
 
-/** Generate and download the export only after an explicit administrator action. */
-function contentrain_bridge_handle_export() {
-	if ( ! current_user_can( 'export' ) ) {
-		wp_die(
-			esc_html__( 'You do not have permission to export this site.', 'contentrain-bridge' ),
-			'',
-			array( 'response' => 403 )
-		);
-	}
-
-	check_admin_referer( 'contentrain_bridge_export', 'contentrain_bridge_nonce' );
-
-	$include_comments = isset( $_POST['include_comments'] ) && '1' === sanitize_text_field( wp_unslash( $_POST['include_comments'] ) );
-	$payload          = \Contentrain\Bridge\Exporter::build( $include_comments );
-	$filename         = sanitize_file_name( wp_parse_url( home_url(), PHP_URL_HOST ) . '-contentrain-rawir.json' );
-
-	nocache_headers();
-	header( 'Content-Type: application/json; charset=' . get_option( 'blog_charset' ) );
-	header( 'Content-Disposition: attachment; filename="' . $filename . '"' );
-	header( 'X-Content-Type-Options: nosniff' );
-
-	echo wp_json_encode( $payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- JSON download, not HTML.
-	exit;
+/** Remove the recurring hook; unfinished exports remain until expiry/uninstall. */
+function contentrain_bridge_deactivate() {
+	wp_clear_scheduled_hook( 'contentrain_bridge_cleanup' );
 }
-add_action( 'admin_post_contentrain_bridge_export', 'contentrain_bridge_handle_export' );
-
-/** Explain the plugin's data behavior in WordPress' privacy-policy helper. */
-function contentrain_bridge_add_privacy_policy_content() {
-	if ( ! function_exists( 'wp_add_privacy_policy_content' ) ) {
-		return;
-	}
-
-	wp_add_privacy_policy_content(
-		__( 'Contentrain Bridge', 'contentrain-bridge' ),
-		wp_kses_post(
-			__( 'Contentrain Bridge creates a local JSON download only after an authorized administrator explicitly requests it. The plugin sends no telemetry and makes no external network requests. Comment export is off by default; when enabled, comment email addresses and IP addresses are excluded.', 'contentrain-bridge' )
-		)
-	);
-}
-add_action( 'admin_init', 'contentrain_bridge_add_privacy_policy_content' );

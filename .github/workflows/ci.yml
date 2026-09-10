@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: PHP ${{ matrix.php }} syntax
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The plugin header promises 7.4; the test container runs 8.3.
+        php: ['7.4', '8.3']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+      - name: Lint every PHP file
+        run: find . -name '*.php' -not -path './.git/*' -print0 | xargs -0 -n1 -P4 php -l
+
+  metadata:
+    name: Plugin metadata is consistent
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Header version, constant and readme stable tag agree
+        run: |
+          header=$(sed -n 's/^ \* Version: *//p' contentrain-bridge.php | tr -d '[:space:]')
+          constant=$(sed -n "s/.*CONTENTRAIN_BRIDGE_VERSION', *'\([^']*\)'.*/\1/p" contentrain-bridge.php)
+          stable=$(sed -n 's/^Stable tag: *//p' readme.txt | tr -d '[:space:]')
+          echo "header=$header constant=$constant stable=$stable"
+          test "$header" = "$constant" && test "$header" = "$stable"
+      - name: External requests are disclosed in readme.txt
+        # The plugin calls the GitHub API. A readme that says otherwise is both
+        # a WordPress.org review failure and an inaccurate privacy statement.
+        run: |
+          if grep -rqE 'wp_remote_(get|post|request|head)' includes/; then
+            grep -q '= External services =' readme.txt
+            grep -q 'api.github.com' readme.txt
+          fi
+          ! grep -qiE 'no external (network )?requests|makes no external requests' readme.txt README.md
+
+  acceptance:
+    name: WordPress acceptance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the acceptance script in a throwaway WordPress
+        run: tests/run.sh
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: The published Contentrain toolchain reads the exported store
+        run: node tests/verify-store.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exported-store
+          path: tests/.out/store
+          if-no-files-found: warn

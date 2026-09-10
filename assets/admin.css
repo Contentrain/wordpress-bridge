@@ -1,0 +1,13 @@
+.cr-bridge { max-width: 1100px; }
+.cr-bridge section { background: #fff; border: 1px solid #c3c4c7; padding: 20px; margin: 20px 0; }
+.cr-bridge label { display: block; margin: 12px 0 6px; }
+.cr-bridge fieldset { border: 1px solid #c3c4c7; padding: 12px; margin: 16px 0; }
+.cr-bridge legend { overflow-wrap: anywhere; max-width: 100%; }
+.cr-bridge fieldset input { display: block; width: min(100%, 600px); }
+.cr-bridge .cr-type { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.cr-bridge .cr-type label { min-width: 240px; }
+.cr-bridge .cr-actions { display: flex; gap: 8px; }
+.cr-bridge [hidden] { display: none !important; }
+#cr-status { margin-top: 16px; font-weight: 600; }
+#cr-error { padding: 12px; }
+@media (max-width: 600px) { .cr-bridge section { padding: 12px; } }

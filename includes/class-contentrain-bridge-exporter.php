@@ -68,7 +68,7 @@ final class Exporter {
 	}
 
 	/** Load posts in bounded database pages while preserving every status. */
-	private static function all_posts( $post_type ) {
+	public static function all_posts( $post_type ) {
 		$results = array();
 		$page    = 1;
 
@@ -91,7 +91,7 @@ final class Exporter {
 	}
 
 	/** Map a WordPress post without interpreting or rewriting its HTML. */
-	private static function map_post( $post ) {
+	public static function map_post( $post, $selected = array(), &$excluded = array() ) {
 		$author = get_userdata( $post->post_author );
 		$terms  = wp_get_object_terms( $post->ID, get_object_taxonomies( $post->post_type ) );
 
@@ -111,7 +111,7 @@ final class Exporter {
 			'parent'         => (int) $post->post_parent ?: null,
 			'menu_order'     => (int) $post->menu_order,
 			'sticky'         => is_sticky( $post->ID ),
-			'password'       => $post->post_password ?: null,
+			'password'       => null,
 			'comment_status' => $post->comment_status,
 			'ping_status'    => $post->ping_status,
 			'terms'          => is_wp_error( $terms ) ? array() : array_map(
@@ -125,12 +125,12 @@ final class Exporter {
 				},
 				$terms
 			),
-			'meta'           => get_post_meta( $post->ID ),
+			'meta'           => Policy::meta( get_post_meta( $post->ID ), $selected, $excluded, 'post/' . $post->ID ),
 		);
 	}
 
 	/** Map an attachment as metadata; binary transfer is a downstream concern. */
-	private static function map_attachment( $attachment ) {
+	public static function map_attachment( $attachment ) {
 		$author = get_userdata( $attachment->post_author );
 		return array(
 			'id'              => (int) $attachment->ID,
@@ -141,19 +141,19 @@ final class Exporter {
 			'caption'         => $attachment->post_excerpt,
 			'description'     => $attachment->post_content,
 			'file'            => get_post_meta( $attachment->ID, '_wp_attached_file', true ) ?: null,
-			'image_meta'      => wp_get_attachment_metadata( $attachment->ID ),
+			'image_meta'      => wp_get_attachment_metadata( $attachment->ID ) ?: null,
 			'mime'            => $attachment->post_mime_type ?: null,
 			'parent'          => (int) $attachment->post_parent ?: null,
 			'parent_resolved' => 0 === (int) $attachment->post_parent || null !== get_post( $attachment->post_parent ),
 			'author'          => $author ? $author->user_login : null,
 			'date'            => self::utc_date( $attachment->post_date_gmt ),
 			'status'          => $attachment->post_status,
-			'meta'            => get_post_meta( $attachment->ID ),
+			'meta'            => array(),
 		);
 	}
 
 	/** Return authors without email addresses; the contract permits omission. */
-	private static function authors() {
+	public static function authors() {
 		return array_map(
 			static function ( $user ) {
 				return array(
@@ -169,7 +169,7 @@ final class Exporter {
 	}
 
 	/** Export public taxonomy terms with parent slugs. */
-	private static function terms() {
+	public static function terms() {
 		$results = array();
 		foreach ( get_taxonomies( array( 'public' => true ), 'names' ) as $taxonomy ) {
 			$terms = get_terms( array( 'taxonomy' => $taxonomy, 'hide_empty' => false ) );
@@ -193,7 +193,7 @@ final class Exporter {
 	}
 
 	/** Export registered navigation menus and resolved target metadata. */
-	private static function menus() {
+	public static function menus() {
 		$results = array();
 		foreach ( wp_get_nav_menus() as $menu ) {
 			$items = wp_get_nav_menu_items( $menu->term_id );
@@ -208,7 +208,7 @@ final class Exporter {
 	}
 
 	/** Map one menu item into the shared target union. */
-	private static function map_menu_item( $item ) {
+	public static function map_menu_item( $item ) {
 		if ( 'post_type' === $item->type ) {
 			$target_post = get_post( $item->object_id );
 			$target      = array(
@@ -248,7 +248,7 @@ final class Exporter {
 	}
 
 	/** Export comments without email, IP, or user-agent fields. */
-	private static function comments() {
+	public static function comments() {
 		return array_map(
 			static function ( $comment ) {
 				$post = get_post( $comment->comment_post_ID );
@@ -265,7 +265,7 @@ final class Exporter {
 					'approved'        => (string) $comment->comment_approved,
 					'type'            => $comment->comment_type,
 					'user_id'         => (int) $comment->user_id ?: null,
-					'meta'            => get_comment_meta( $comment->comment_ID ),
+					'meta'            => (object) array(),
 				);
 			},
 			get_comments( array( 'status' => 'all', 'number' => 0, 'orderby' => 'comment_ID', 'order' => 'ASC' ) )
@@ -273,7 +273,7 @@ final class Exporter {
 	}
 
 	/** Export only migration-relevant, non-secret WordPress options. */
-	private static function options() {
+	public static function options() {
 		$keys   = array( 'permalink_structure', 'show_on_front', 'page_on_front', 'page_for_posts', 'posts_per_page', 'timezone_string', 'date_format', 'time_format' );
 		$result = array();
 		foreach ( $keys as $key ) {
@@ -283,7 +283,7 @@ final class Exporter {
 	}
 
 	/** Convert a WordPress GMT timestamp to ISO 8601 or null. */
-	private static function utc_date( $value ) {
+	public static function utc_date( $value ) {
 		if ( ! $value || '0000-00-00 00:00:00' === $value ) {
 			return null;
 		}

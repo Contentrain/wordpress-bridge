@@ -1,0 +1,52 @@
+name: contentrain-bridge-test
+services:
+  db:
+    image: mariadb:11
+    environment:
+      MARIADB_ROOT_PASSWORD: bridge-local-only
+      MARIADB_DATABASE: bridge
+      MARIADB_USER: bridge
+      MARIADB_PASSWORD: bridge-local-only
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 2s
+      timeout: 5s
+      retries: 40
+    volumes:
+      - db:/var/lib/mysql
+  wordpress:
+    image: wordpress:php8.3-apache
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8094:80"
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_NAME: bridge
+      WORDPRESS_DB_USER: bridge
+      WORDPRESS_DB_PASSWORD: bridge-local-only
+      WORDPRESS_CONFIG_EXTRA: |
+        define('WP_ENVIRONMENT_TYPE', 'local');
+        define('WP_DEBUG', true);
+        define('WP_DEBUG_DISPLAY', false);
+    volumes:
+      - wp:/var/www/html
+      - ..:/var/www/html/wp-content/plugins/contentrain-bridge:ro
+  cli:
+    image: wordpress:cli-php8.3
+    user: "33:33"
+    depends_on:
+      - wordpress
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_NAME: bridge
+      WORDPRESS_DB_USER: bridge
+      WORDPRESS_DB_PASSWORD: bridge-local-only
+    volumes:
+      - wp:/var/www/html
+      - ..:/var/www/html/wp-content/plugins/contentrain-bridge:ro
+    entrypoint: ["wp"]
+volumes:
+  db:
+  wp:

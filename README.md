@@ -1,10 +1,10 @@
 # Contentrain Bridge
 
-Free, local-first WordPress extraction bridge for the Contentrain RawIR v1 migration contract.
+Free, local-first WordPress bridge: models site content and interface text as Contentrain JSON/Markdown, delivered as a ZIP or to a branch in your own GitHub repository.
 
 - License: GPL-2.0-or-later
 - No account or paid service required
-- No telemetry or external requests
+- No telemetry, and no network request until you start a GitHub delivery yourself
 - Explicit, nonce-protected administrator export
 - Comment export off by default and privacy-minimized
 
