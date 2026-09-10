@@ -42,6 +42,22 @@ $book = wp_insert_post( array( 'post_type' => 'bridge_book', 'post_title' => 'Hi
 update_post_meta( $post, 'api_token', 'never-export-me' );
 update_post_meta( $post, 'selected_copy', 'Editable custom content' );
 update_post_meta( $post, 'structured', array( 'title' => 'Hero title', 'api_key' => 'never-export-nested', 'items' => array( array( 'label' => 'First', 'enabled' => true ) ) ) );
+// A real upload, so media transfer and relinking are exercised end to end.
+require_once ABSPATH . 'wp-admin/includes/image.php';
+$uploads = wp_get_upload_dir();
+$png = base64_decode( 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==' );
+$image_path = $uploads['path'] . '/bridge-pixel.png';
+wp_mkdir_p( $uploads['path'] );
+file_put_contents( $image_path, $png );
+$attachment = wp_insert_attachment( array( 'post_mime_type' => 'image/png', 'post_title' => 'Bridge pixel', 'post_status' => 'inherit' ), $image_path );
+wp_update_attachment_metadata( $attachment, wp_generate_attachment_metadata( $attachment, $image_path ) );
+$image_url = wp_get_attachment_url( $attachment );
+$missing_path = $uploads['path'] . '/bridge-ghost.png';
+file_put_contents( $missing_path, $png );
+$ghost = wp_insert_attachment( array( 'post_mime_type' => 'image/png', 'post_title' => 'Bridge ghost', 'post_status' => 'inherit' ), $missing_path );
+unlink( $missing_path );
+$illustrated = wp_insert_post( array( 'post_type' => 'post', 'post_title' => 'Illustrated', 'post_content' => '<p>Before</p><img src="' . esc_url( $image_url ) . '" alt="Pixel" /><p>After</p>', 'post_status' => 'publish', 'post_author' => $admin->ID ) );
+
 $comment = wp_insert_comment( array( 'comment_post_ID' => $post, 'comment_author' => 'Reviewer', 'comment_author_email' => 'private@example.test', 'comment_author_IP' => '192.0.2.1', 'comment_content' => 'Public comment', 'comment_approved' => 1 ) );
 update_comment_meta( $comment, 'other_email', 'private-in-meta@example.test' );
 $warnings = array();
@@ -63,7 +79,7 @@ check( in_array( 'Full name', $values, true ), 'accessible label is captured' );
 check( ! in_array( 'Do not export this script', $values, true ), 'script text is not treated as rendered content' );
 unlink( $fixture );
 
-$summary = Jobs::create( array( 'types' => array( 'post', 'page', 'bridge_book' ), 'comments' => true, 'private' => false, 'scan_sources' => false, 'selected_meta' => array( 'selected_copy', 'structured', 'api_token' ) ) );
+$summary = Jobs::create( array( 'types' => array( 'post', 'page', 'bridge_book', 'attachment' ), 'comments' => true, 'private' => false, 'scan_sources' => false, 'selected_meta' => array( 'selected_copy', 'structured', 'api_token' ) ) );
 $id = $summary['id'];
 check( Admin::permitted(), 'administrator with export capability is allowed' );
 wp_set_current_user( 0 );
@@ -129,6 +145,26 @@ foreach ( array_keys( $job['files'] ) as $path ) {
 	if ( $has_null( $decoded ) ) { throw new RuntimeException( 'Null value in canonical store file: ' . $path ); }
 }
 check( true, 'no canonical store file contains a null value' );
+
+// Media has to travel with the content: an export whose images still point at
+// WordPress is not a delivery the user can turn WordPress off after.
+$stored = 'media/' . ltrim( get_post_meta( $attachment, '_wp_attached_file', true ), '/' );
+check( isset( $job['files'][ $stored ] ), 'the original upload is copied into the export' );
+check( hash( 'sha256', $png ) === $job['files'][ $stored ]['sha256'], 'copied media is byte-identical' );
+$media_entry = json_decode( Files::read( $dir, Models::content_path( $job, 'wp-media', $job['default_locale'] ) ), true )[ substr( hash( 'sha256', 'media:' . $attachment ), 0, 12 ) ];
+check( $stored === $media_entry['file'], 'the media record points at the stored path' );
+check( $image_url === $media_entry['url'], 'the source URL is kept alongside it' );
+$illustrated_body = Files::read( $dir, Models::content_path( $job, 'wp-post', $job['default_locale'], Source::address( get_post( $illustrated ) )['entry_id'] ) );
+check( false !== strpos( $illustrated_body, 'src="' . $stored . '"' ), 'content is relinked to the stored media path' );
+check( false === strpos( $illustrated_body, $image_url ), 'no WordPress upload URL is left in the relinked body' );
+// A file that is not in the export must keep its working WordPress URL.
+$ghost_entry = json_decode( Files::read( $dir, Models::content_path( $job, 'wp-media', $job['default_locale'] ) ), true )[ substr( hash( 'sha256', 'media:' . $ghost ), 0, 12 ) ];
+check( ! isset( $ghost_entry['file'] ), 'a missing upload is not claimed as transferred' );
+// A re-used test database accumulates fixtures, so this counts at least the
+// ghost rather than pinning an exact total.
+check( $job['counts']['media_kept_remote'] >= 1, 'media kept remote is counted' );
+$manifest_media = json_decode( Files::read( $dir, 'bridge/manifest.json' ), true )['media'];
+check( $manifest_media['transferred_files'] >= 1 && 'media/' === $manifest_media['stored_under'], 'the manifest reports real media counts' );
 
 check( Validator::run( $job )['valid'], 'generated relation graph validates' );
 $broken = $job;

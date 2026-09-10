@@ -21,7 +21,7 @@ Contentrain Bridge turns your WordPress content into editable JSON and Markdown 
 * Metadata that looks like a password, token, key, credential or personal identifier is never exported, including inside selected fields.
 * Exported site data remains the site owner's data and is not placed under the plugin's GPL license merely by being exported.
 
-The export reports what it did not cover. Media binaries are referenced by their original URL and are not transferred; dynamic WordPress and plugin output is not rendered during a source scan. These limits are written into the coverage report rather than implied to be complete.
+Media travels with the content: uploads are copied into `media/` and the content is relinked to them, so the delivered repository does not depend on this site for images. A file over 8 MB, or one missing from the uploads directory, keeps its WordPress URL and is named in the coverage report. Dynamic WordPress and plugin output is not rendered during a source scan. These limits are written into the coverage report rather than implied to be complete.
 
 = External services =
 
@@ -50,7 +50,7 @@ No. It collects no analytics and contacts no Contentrain server. The only extern
 
 = Are media files exported? =
 
-Media records carry their title, alt text, caption and original URL. Binary files are not transferred, so a delivered repository still points at this site for images. The coverage report states this.
+Yes, when you include the Media type. Each upload and its generated sizes are copied into `media/` in the export, and content that pointed at a WordPress upload URL is rewritten to that path, so images keep working after this site is gone. Media records also keep the original URL. Files larger than 8 MB, files missing from disk, and anything past the export's total media budget keep their WordPress URL instead of being half-copied; the coverage report lists them. The 8 MB ceiling exists because GitHub delivery has to hold a file in memory to upload it.
 
 = Which comment data is exported? =
 
@@ -68,6 +68,7 @@ The plugin stores no settings and sends nothing anywhere on its own. Export file
 
 = 0.2.0 =
 
+* Media transfer: uploads and their generated sizes are copied into `media/` and content is relinked to them.
 * Contentrain models: JSON collections, Markdown documents, a site singleton and an interface-text dictionary.
 * Interface-text discovery in theme and plugin source, with a mandatory review step before anything is exported.
 * Bounded, resumable export with validation before delivery.

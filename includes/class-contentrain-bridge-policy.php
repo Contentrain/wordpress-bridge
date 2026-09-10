@@ -6,6 +6,16 @@ defined( 'ABSPATH' ) || exit;
 
 final class Policy {
 
+	/**
+	 * Largest single exported file. GitHub delivery base64-encodes a file into
+	 * memory, so the export cannot contain what it cannot deliver; larger media
+	 * keeps its source URL and is reported.
+	 */
+	const MAX_FILE = 8388608;
+
+	/** Total media budget for one export; beyond it, files keep their source URL. */
+	const MAX_MEDIA_TOTAL = 536870912;
+
 	/** Unknown metadata requires selection; these content keys are understood. */
 	const CORE = array( '_thumbnail_id', '_wp_page_template', '_wp_attachment_image_alt', '_wp_attached_file', '_wp_attachment_metadata' );
 

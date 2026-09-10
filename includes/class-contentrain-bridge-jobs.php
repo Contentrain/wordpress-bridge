@@ -27,10 +27,11 @@ final class Jobs {
 		$languages = array_values( array_unique( array_map( array( Source::class, 'locale' ), (array) $inventory['languages'] ) ) );
 		$job = array(
 			'id' => $id, 'owner' => get_current_user_id(), 'blog' => get_current_blog_id(), 'created_at' => gmdate( 'c' ),
-			'revision' => Source::revision(), 'phase' => 'posts', 'cursor' => 0, 'step' => 0,
+			'revision' => Source::revision(), 'phase' => 'media', 'cursor' => 0, 'step' => 0,
 			'inventory' => $inventory, 'default_locale' => $locale, 'locales' => array( $locale => true ), 'i18n' => count( $languages ) > 1,
 			'options' => array( 'types' => $types, 'private' => ! empty( $input['private'] ), 'comments' => ! empty( $input['comments'] ), 'scan_plugins' => ! empty( $input['scan_plugins'] ), 'scan_sources' => ! empty( $input['scan_sources'] ), 'selected_meta' => array_values( array_filter( array_map( 'sanitize_text_field', (array) ( $input['selected_meta'] ?? array() ) ) ) ), 'labels' => array_map( 'sanitize_text_field', (array) ( $input['labels'] ?? array() ) ) ),
-			'models' => array(), 'tables' => array(), 'files' => array(), 'candidates' => array(), 'counts' => array( 'posts' => 0, 'media' => 0, 'comments' => 0, 'warnings' => 0 ),
+			'uploads' => array_intersect_key( (array) wp_get_upload_dir(), array_flip( array( 'basedir', 'baseurl' ) ) ),
+			'models' => array(), 'tables' => array(), 'files' => array(), 'candidates' => array(), 'counts' => array( 'posts' => 0, 'media' => 0, 'media_files' => 0, 'media_bytes' => 0, 'media_kept_remote' => 0, 'comments' => 0, 'warnings' => 0 ),
 		);
 		$site = array( 'url' => home_url( '/' ), 'title' => get_bloginfo( 'name' ), 'description' => get_bloginfo( 'description' ), 'language' => $locale, 'base_site_url' => site_url( '/' ), 'base_blog_url' => home_url( '/' ), 'generator' => 'WordPress/' . get_bloginfo( 'version' ), 'export_date' => $job['created_at'] );
 		Models::file( $job, 'bridge/site.json', Policy::json( $site ) );
@@ -99,7 +100,9 @@ final class Jobs {
 			if ( $job['revision'] !== Source::revision() ) {
 				throw new \RuntimeException( 'WordPress content changed during export. Restart to obtain a consistent snapshot.' );
 			}
-			if ( 'posts' === $job['phase'] ) {
+			if ( 'media' === $job['phase'] ) {
+				self::media( $job );
+			} elseif ( 'posts' === $job['phase'] ) {
 				self::posts( $job );
 			} elseif ( 'terms' === $job['phase'] ) {
 				self::terms( $job );
@@ -117,6 +120,91 @@ final class Jobs {
 			}
 			++$job['step'];
 		} );
+	}
+
+	/**
+	 * Media first: a post body can only be relinked to `media/...` once the file
+	 * it points at is actually in the export. Original and generated sizes are
+	 * both copied, because a theme references the sizes, not the original.
+	 */
+	private static function media( &$job ) {
+		global $wpdb;
+		if ( ! in_array( 'attachment', $job['options']['types'], true ) ) {
+			self::warning( $job, array( 'source' => 'media', 'reason' => 'attachments-not-selected: content keeps WordPress URLs' ) );
+			$job['phase'] = 'posts';
+			$job['cursor'] = 0;
+			return;
+		}
+		$ids = $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE ID > %d AND post_type = 'attachment' ORDER BY ID ASC LIMIT 25", $job['cursor'] ) );
+		if ( $wpdb->last_error ) {
+			throw new \RuntimeException( 'Cannot enumerate media.' );
+		}
+		$basedir = $job['uploads']['basedir'] ?? '';
+		foreach ( $ids as $id ) {
+			$p = get_post( $id );
+			$job['cursor'] = (int) $id;
+			if ( ! $p ) {
+				throw new \RuntimeException( 'Source attachment disappeared during export.' );
+			}
+			$a = Exporter::map_attachment( $p );
+			$image_meta = (array) $a['image_meta'];
+			$a['image_meta'] = array_intersect_key( $image_meta, array_flip( array( 'width', 'height', 'sizes', 'file' ) ) );
+			Models::row( $job, 'bridge/raw-attachments.json', $id, $a );
+			Models::model( $job, 'wp-media', 'collection', 'assets', 'Media', array( 'title' => array( 'type' => 'string' ), 'url' => array( 'type' => 'url' ), 'file' => array( 'type' => 'file' ), 'alt' => array( 'type' => 'text' ), 'caption' => array( 'type' => 'richtext' ), 'description' => array( 'type' => 'richtext' ) ) );
+			$data = array_intersect_key( $a, array_flip( array( 'title', 'alt', 'caption', 'description' ) ) );
+			if ( $a['url'] ) {
+				$data['url'] = $a['url'];
+			}
+			$relative = ltrim( (string) $a['file'], '/' );
+			$stored = null;
+			if ( $relative && $basedir ) {
+				$stored = self::transfer( $job, $basedir, $relative );
+				// Generated sizes live beside the original and are what a theme
+				// actually renders; without them a relinked page loads nothing.
+				foreach ( (array) ( $image_meta['sizes'] ?? array() ) as $size ) {
+					if ( ! empty( $size['file'] ) ) {
+						self::transfer( $job, $basedir, dirname( $relative ) . '/' . $size['file'] );
+					}
+				}
+			}
+			if ( $stored ) {
+				$data['file'] = $stored;
+			} else {
+				++$job['counts']['media_kept_remote'];
+			}
+			Models::entry( $job, 'wp-media', $job['default_locale'], substr( hash( 'sha256', 'media:' . $id ), 0, 12 ), $data );
+			++$job['counts']['media'];
+		}
+		if ( count( $ids ) < 25 ) {
+			$job['phase'] = 'posts';
+			$job['cursor'] = 0;
+		}
+	}
+
+	/** Copy one upload into the export; returns its stored path, or null with a reason. */
+	private static function transfer( &$job, $basedir, $relative ) {
+		$path = 'media/' . $relative;
+		if ( isset( $job['files'][ $path ] ) ) {
+			return $path;
+		}
+		$source = $basedir . '/' . $relative;
+		$real = realpath( $source );
+		if ( ! $real || 0 !== strpos( $real, realpath( $basedir ) . DIRECTORY_SEPARATOR ) || ! is_file( $real ) || is_link( $source ) ) {
+			self::warning( $job, array( 'source' => $path, 'reason' => 'media-file-missing-or-outside-uploads' ) );
+			return null;
+		}
+		$size = (int) filesize( $real );
+		if ( $size > Policy::MAX_FILE ) {
+			self::warning( $job, array( 'source' => $path, 'reason' => 'media-over-8MiB: kept as a WordPress URL' ) );
+			return null;
+		}
+		if ( $job['counts']['media_bytes'] + $size > Policy::MAX_MEDIA_TOTAL ) {
+			self::warning( $job, array( 'source' => $path, 'reason' => 'media-budget-exhausted: kept as a WordPress URL' ) );
+			return null;
+		}
+		$job['counts']['media_bytes'] += Models::binary( $job, $path, $real );
+		++$job['counts']['media_files'];
+		return $path;
 	}
 
 	private static function posts( &$job ) {
@@ -140,17 +228,7 @@ final class Jobs {
 				continue;
 			}
 			if ( 'attachment' === $p->post_type ) {
-				$a = Exporter::map_attachment( $p );
-				$a['image_meta'] = array_intersect_key( (array) $a['image_meta'], array_flip( array( 'width', 'height', 'sizes', 'file' ) ) );
-				Models::row( $job, 'bridge/raw-attachments.json', $id, $a );
-				Models::model( $job, 'wp-media', 'collection', 'assets', 'Media', array( 'title' => array( 'type' => 'string' ), 'url' => array( 'type' => 'url' ), 'alt' => array( 'type' => 'text' ), 'caption' => array( 'type' => 'richtext' ), 'description' => array( 'type' => 'richtext' ) ) );
-				$data = array_intersect_key( $a, array_flip( array( 'title', 'alt', 'caption', 'description' ) ) );
-				if ( $a['url'] ) {
-					$data['url'] = $a['url'];
-				}
-				Models::entry( $job, 'wp-media', $job['default_locale'], substr( hash( 'sha256', 'media:' . $id ), 0, 12 ), $data );
-				++$job['counts']['media'];
-				continue;
+				continue; // Handled in the media phase, before any content can link to it.
 			}
 			$excluded = array();
 			$record = Source::post( $p, $job['options']['selected_meta'], $excluded );
@@ -289,9 +367,9 @@ final class Jobs {
 
 	private static function finish( &$job ) {
 		Models::file( $job, 'bridge/validation.json', Policy::json( Validator::run( $job ) ) );
-		$manifest = array( 'format' => 'contentrain-bridge@1', 'version' => CONTENTRAIN_BRIDGE_VERSION, 'snapshot' => $job['id'], 'site' => $job['inventory']['site'], 'created_at' => $job['created_at'], 'scope' => $job['options'], 'counts' => $job['counts'], 'files' => $job['files'], 'media' => 'source-urls; binaries have not been transferred', 'source_reuse' => 'not-applied', 'complete_source_coverage' => false );
+		$manifest = array( 'format' => 'contentrain-bridge@1', 'version' => CONTENTRAIN_BRIDGE_VERSION, 'snapshot' => $job['id'], 'site' => $job['inventory']['site'], 'created_at' => $job['created_at'], 'scope' => $job['options'], 'counts' => $job['counts'], 'files' => $job['files'], 'media' => array( 'transferred_files' => $job['counts']['media_files'], 'transferred_bytes' => $job['counts']['media_bytes'], 'kept_as_source_url' => $job['counts']['media_kept_remote'], 'stored_under' => 'media/', 'note' => $job['counts']['media_kept_remote'] ? 'Some media still points at WordPress; see bridge/warnings.json' : 'All exported media travels with the content' ), 'source_reuse' => 'not-applied', 'complete_source_coverage' => false );
 		Models::file( $job, 'bridge/manifest.json', Policy::json( $manifest ) );
-		Models::file( $job, 'CONTENTRAIN-EXPORT.md', "# Contentrain WordPress export\n\nFree, editable JSON and Markdown content. Models live in `.contentrain/models`.\n\nMarkdown bodies preserve the original WordPress HTML; shortcodes and dynamic blocks require a renderer. Source files and the live WordPress theme have not been rewritten. Media still uses source URLs. Review `bridge/warnings.json` and `bridge/string-sources.json` for scope and text decisions.\n\nUse Contentrain Studio or the query SDK to edit/read this store. For an Astro website, choose the optional Migrate handoff from WordPress after delivery.\n" );
+		Models::file( $job, 'CONTENTRAIN-EXPORT.md', "# Contentrain WordPress export\n\nFree, editable JSON and Markdown content. Models live in `.contentrain/models`.\n\nMarkdown bodies preserve the original WordPress HTML; shortcodes and dynamic blocks require a renderer. Source files and the live WordPress theme have not been rewritten. Transferred media lives under `media/` and content links to it; anything too large or unreadable kept its WordPress URL and is listed in the warnings. Review `bridge/warnings.json` and `bridge/string-sources.json` for scope and text decisions.\n\nUse Contentrain Studio or the query SDK to edit/read this store. For an Astro website, choose the optional Migrate handoff from WordPress after delivery.\n" );
 		$job['phase'] = 'ready';
 		$job['cursor'] = 0;
 	}

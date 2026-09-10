@@ -13,6 +13,35 @@ final class Models {
 		$job['files'][ $path ] = array( 'sha256' => hash( 'sha256', $content ), 'bytes' => strlen( $content ) );
 	}
 
+	/** Copy a source file into the export and record it like any other output. */
+	public static function binary( &$job, $path, $source ) {
+		$bytes = Files::copy( Files::dir( $job['id'] ) . '/output', $path, $source );
+		$job['files'][ $path ] = array( 'sha256' => hash_file( 'sha256', Files::path( Files::dir( $job['id'] ) . '/output', $path ), false ), 'bytes' => $bytes );
+		return $bytes;
+	}
+
+	/**
+	 * Rewrite uploads URLs to the stored `media/...` path Contentrain reads.
+	 * Only URLs whose file was actually copied are rewritten: pointing content
+	 * at a path that is not in the export would trade a working WordPress link
+	 * for a broken local one.
+	 */
+	public static function relink( $job, $value ) {
+		$base = $job['uploads']['baseurl'] ?? '';
+		if ( ! $base || ! is_string( $value ) || false === strpos( $value, $base ) ) {
+			return $value;
+		}
+		$files = $job['files'];
+		return preg_replace_callback(
+			'#' . preg_quote( $base, '#' ) . '/([A-Za-z0-9_./-]+)#',
+			static function ( $match ) use ( $files ) {
+				$path = 'media/' . $match[1];
+				return isset( $files[ $path ] ) ? $path : $match[0];
+			},
+			$value
+		);
+	}
+
 	public static function row( &$job, $path, $key, $value ) {
 		$bucket = hash( 'sha256', $path );
 		$row = hash( 'sha256', (string) $key );
@@ -78,6 +107,16 @@ final class Models {
 	public static function entry( &$job, $model, $locale, $id, $data, $meta = null, $body = '' ) {
 		$job['locales'][ $locale ] = true;
 		$m = $job['models'][ $model ];
+		// `url` fields are addresses, not content: the media record's own source
+		// URL and a post's original permalink must survive relinking. Everything
+		// else — bodies, excerpts, and image/file fields — points at the copy.
+		foreach ( $data as $key => $value ) {
+			if ( 'url' === ( $m['fields'][ $key ]['type'] ?? '' ) ) {
+				continue;
+			}
+			$data[ $key ] = self::relink( $job, $value );
+		}
+		$body = self::relink( $job, $body );
 		$content = self::content_path( $job, $m, $locale, $id );
 		$meta_file = self::meta_path( $job, $m, $locale, $id );
 		$meta = $meta ?: self::meta();

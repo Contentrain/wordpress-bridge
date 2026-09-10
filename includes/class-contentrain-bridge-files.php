@@ -44,6 +44,23 @@ final class Files {
 		chmod( $path, 0600 );
 	}
 
+	/** Stream a source file in; media must not pass through memory as a string. */
+	public static function copy( $dir, $relative, $source ) {
+		$path = self::path( $dir, $relative );
+		if ( ! is_file( $source ) || is_link( $source ) || ! is_readable( $source ) ) {
+			throw new \RuntimeException( 'Source file is not readable.' );
+		}
+		if ( ! is_dir( dirname( $path ) ) && ! mkdir( dirname( $path ), 0700, true ) ) {
+			throw new \RuntimeException( 'Cannot create export directory.' );
+		}
+		$temp = $path . '.tmp';
+		if ( ! copy( $source, $temp ) || ! rename( $temp, $path ) ) {
+			throw new \RuntimeException( 'Cannot copy media into the export.' );
+		}
+		chmod( $path, 0600 );
+		return (int) filesize( $path );
+	}
+
 	public static function read( $dir, $relative ) {
 		$path = self::path( $dir, $relative );
 		if ( ! is_file( $path ) || is_link( $path ) ) {
