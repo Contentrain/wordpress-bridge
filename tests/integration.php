@@ -58,6 +58,46 @@ $ghost = wp_insert_attachment( array( 'post_mime_type' => 'image/png', 'post_tit
 unlink( $missing_path );
 $illustrated = wp_insert_post( array( 'post_type' => 'post', 'post_title' => 'Illustrated', 'post_content' => '<p>Before</p><img src="' . esc_url( $image_url ) . '" alt="Pixel" /><p>After</p>', 'post_status' => 'publish', 'post_author' => $admin->ID ) );
 
+// An ACF group whose shape is the point: a repeater of records and a group of
+// named fields must become models, not anonymous structured rows.
+// Not `$acf`: this script runs in global scope and ACF keeps its instance in
+// $GLOBALS['acf'], so that name would overwrite the plugin out from under itself.
+$has_acf = function_exists( 'acf_add_local_field_group' );
+if ( $has_acf ) {
+	acf_add_local_field_group( array(
+		'key' => 'group_bridge',
+		'title' => 'Bridge fields',
+		'location' => array( array( array( 'param' => 'post_type', 'operator' => '==', 'value' => 'page' ) ) ),
+		'fields' => array(
+			array( 'key' => 'field_bridge_tagline', 'name' => 'tagline', 'label' => 'Tagline', 'type' => 'text' ),
+			array( 'key' => 'field_bridge_rank', 'name' => 'rank', 'label' => 'Rank', 'type' => 'number' ),
+			array( 'key' => 'field_bridge_featured', 'name' => 'featured', 'label' => 'Featured', 'type' => 'true_false' ),
+			array(
+				'key' => 'field_bridge_hero', 'name' => 'hero', 'label' => 'Hero', 'type' => 'group',
+				'sub_fields' => array(
+					array( 'key' => 'field_bridge_hero_title', 'name' => 'heading', 'label' => 'Heading', 'type' => 'text' ),
+					array( 'key' => 'field_bridge_hero_cta', 'name' => 'cta', 'label' => 'Call to action', 'type' => 'text' ),
+				),
+			),
+			array(
+				'key' => 'field_bridge_quotes', 'name' => 'quotes', 'label' => 'Testimonials', 'type' => 'repeater',
+				'sub_fields' => array(
+					array( 'key' => 'field_bridge_quote_person', 'name' => 'person', 'label' => 'Person', 'type' => 'text' ),
+					array( 'key' => 'field_bridge_quote_text', 'name' => 'quote', 'label' => 'Quote', 'type' => 'textarea' ),
+				),
+			),
+		),
+	) );
+	update_field( 'tagline', 'Content you own', $page );
+	update_field( 'rank', 3, $page );
+	update_field( 'featured', true, $page );
+	update_field( 'hero', array( 'heading' => 'Own your words', 'cta' => 'Start now' ), $page );
+	update_field( 'quotes', array(
+		array( 'person' => 'Ada', 'quote' => 'It reads like my site.' ),
+		array( 'person' => 'Grace', 'quote' => 'The diff is the content.' ),
+	), $page );
+}
+
 $comment = wp_insert_comment( array( 'comment_post_ID' => $post, 'comment_author' => 'Reviewer', 'comment_author_email' => 'private@example.test', 'comment_author_IP' => '192.0.2.1', 'comment_content' => 'Public comment', 'comment_approved' => 1 ) );
 update_comment_meta( $comment, 'other_email', 'private-in-meta@example.test' );
 $warnings = array();
@@ -97,6 +137,17 @@ check( isset( $job['tables']['bridge/raw-posts.json'][ $book ] ), 'REST-hidden C
 check( ! isset( $job['tables']['bridge/raw-posts.json'][ $draft ] ), 'draft excluded in public scope' );
 check( ! isset( $job['models']['wp-post']['fields']['slug'] ), 'document system slug is not declared as a field' );
 check( isset( $job['models']['wp-structured-values'] ), 'nested content becomes editable related records' );
+if ( $has_acf ) {
+	// The point of modelling: a repeater of testimonials is a list of records
+	// with a person and a quote, not an anonymous name/value bag.
+	check( isset( $job['models']['acf-quotes'] ), 'a repeater becomes its own model' );
+	$quotes = $job['models']['acf-quotes'];
+	check( 'collection' === $quotes['kind'] && 'person' === $quotes['title_field'], 'the repeater model is titled by its first text field' );
+	check( array( 'person', 'position', 'quote' ) === array_keys( $quotes['fields'] ), 'sub-fields become fields: ' . implode( ',', array_keys( $quotes['fields'] ) ) );
+	check( 'text' === $quotes['fields']['quote']['type'] && 'integer' === $quotes['fields']['position']['type'], 'ACF types map onto Contentrain types' );
+	check( isset( $job['models']['acf-hero'] ) && array( 'cta', 'heading' ) === array_keys( $job['models']['acf-hero']['fields'] ), 'a group becomes its own model' );
+
+}
 // A real candidate review round, independent of the installed theme's size.
 Jobs::mutate( $id, static function ( &$j ) use ( $scan ) { $j['candidates'] = array_column( $scan['candidates'], null, 'id' ); } );
 rejects( static function () use ( $id ) { Jobs::review( $id, array(), true ); }, 'unreviewed text blocks finalization' );
@@ -165,6 +216,29 @@ check( ! isset( $ghost_entry['file'] ), 'a missing upload is not claimed as tran
 check( $job['counts']['media_kept_remote'] >= 1, 'media kept remote is counted' );
 $manifest_media = json_decode( Files::read( $dir, 'bridge/manifest.json' ), true )['media'];
 check( $manifest_media['transferred_files'] >= 1 && 'media/' === $manifest_media['stored_under'], 'the manifest reports real media counts' );
+
+
+// ACF content, once the tables have been written.
+if ( $has_acf ) {
+	$page_data = json_decode( Files::read( $dir, Models::content_path( $job, 'wp-page', $job['default_locale'] ) ), true );
+	$page_entry = $page_data[ Source::address( get_post( $page ) )['entry_id'] ];
+	check( 'Content you own' === $page_entry['acf_tagline'], 'a scalar ACF field is a scalar field' );
+	check( 3 === $page_entry['acf_rank'] || 3.0 === $page_entry['acf_rank'], 'a number stays a number' );
+	check( true === $page_entry['acf_featured'], 'true_false becomes a boolean' );
+	check( 'relations' === $job['models']['wp-page']['fields']['acf_quotes']['type'], 'the post relates to its repeater rows' );
+	check( 2 === count( $page_entry['acf_quotes'] ), 'every repeater row is exported' );
+	check( 'relation' === $job['models']['wp-page']['fields']['acf_hero']['type'], 'a group is a single relation' );
+
+	$rows = json_decode( Files::read( $dir, Models::content_path( $job, 'acf-quotes', $job['default_locale'] ) ), true );
+	// Only this page's rows: a re-used test database keeps earlier fixtures.
+	$people = array_map( static function ( $ref ) use ( $rows ) { return $rows[ $ref ]['person']; }, $page_entry['acf_quotes'] );
+	sort( $people );
+	check( array( 'Ada', 'Grace' ) === $people, 'repeater rows carry their own named fields' );
+	check( 'It reads like my site.' === $rows[ $page_entry['acf_quotes'][0] ]['quote'], 'each row keeps its own values' );
+	check( 0 === $rows[ $page_entry['acf_quotes'][0] ]['position'], 'row order is preserved as data' );
+	$hero = json_decode( Files::read( $dir, Models::content_path( $job, 'acf-hero', $job['default_locale'] ) ), true );
+	check( 'Own your words' === $hero[ $page_entry['acf_hero'] ]['heading'], 'the group row is reachable through the relation' );
+}
 
 check( Validator::run( $job )['valid'], 'generated relation graph validates' );
 $broken = $job;

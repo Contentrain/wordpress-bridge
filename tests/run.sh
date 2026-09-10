@@ -32,6 +32,14 @@ done
 
 "${cli[@]}" plugin activate contentrain-bridge >/dev/null
 
+# ACF is the field layer most WordPress content actually lives in, so the
+# fixture has to exercise it rather than assume it. Free version, from
+# wordpress.org; skipped with a notice when the run has no network.
+if ! "${cli[@]}" plugin is-installed advanced-custom-fields >/dev/null 2>&1; then
+  "${cli[@]}" plugin install advanced-custom-fields >/dev/null 2>&1 || echo "note: ACF could not be installed; ACF assertions will be skipped"
+fi
+"${cli[@]}" plugin activate advanced-custom-fields >/dev/null 2>&1 || true
+
 log="$(mktemp)"
 "${compose[@]}" exec -T wordpress \
   php /var/www/html/wp-content/plugins/contentrain-bridge/tests/integration.php | tee "$log"

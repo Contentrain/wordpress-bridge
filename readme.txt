@@ -13,6 +13,7 @@ Model and export WordPress content and interface text as Contentrain JSON/Markdo
 
 Contentrain Bridge turns your WordPress content into editable JSON and Markdown under Tools > Contentrain Bridge. You choose the content, review how it is modelled and which interface text travels, then download a ZIP or send the result to a branch in your own GitHub repository. Both are free.
 
+* Advanced Custom Fields groups and repeaters become their own models with their own named fields, not one anonymous bag of values.
 * Free software under GPL-2.0-or-later. No account, subscription or paid service is required for either delivery.
 * Your WordPress site is not modified. The plugin reads content and source files; it never patches a theme or plugin.
 * Every export step is started by a logged-in administrator through a nonce-protected request.
@@ -68,6 +69,7 @@ The plugin stores no settings and sends nothing anywhere on its own. Export file
 
 = 0.2.0 =
 
+* ACF field groups become Contentrain models: a repeater is a collection of records, a group is a related record, and sub-field types map onto Contentrain field types.
 * Media transfer: uploads and their generated sizes are copied into `media/` and content is relinked to them.
 * Contentrain models: JSON collections, Markdown documents, a site singleton and an interface-text dictionary.
 * Interface-text discovery in theme and plugin source, with a mandatory review step before anything is exported.

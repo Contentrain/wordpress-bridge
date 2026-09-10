@@ -43,15 +43,29 @@ execFileSync('git', ['init', '-q'], { cwd: project })
 execFileSync('git', ['add', '-A'], { cwd: project })
 execFileSync('git', ['-c', 'user.email=verify@example.test', '-c', 'user.name=verify', 'commit', '-qm', 'store'], { cwd: project })
 
+// One retry: the first `npx --yes` on a cold cache fetches the CLI, and a
+// failed fetch is not a verdict about the store. A second failure is.
 let output = ''
-try {
-  output = execFileSync('npx', ['--yes', 'contentrain', 'validate'], { cwd: project, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
-} catch (error) {
-  output = (error.stdout ?? '') + (error.stderr ?? '')
-  fail('contentrain validate exited non-zero\n' + output)
+let error = null
+for (let attempt = 0; attempt < 2; attempt++) {
+  try {
+    output = execFileSync('npx', ['--yes', 'contentrain', 'validate'], { cwd: project, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+    error = null
+    break
+  } catch (thrown) {
+    error = thrown
+    output = (thrown.stdout ?? '') + (thrown.stderr ?? '')
+  }
 }
 const plain = output.replace(new RegExp(String.fromCharCode(27) + '\\[[0-9;]*m', 'g'), '')
-if (!/Project is valid/.test(plain)) fail('contentrain validate did not report a valid project\n' + plain)
+if (error) {
+  fail('contentrain validate exited non-zero\n' + plain)
+  process.exit(1)
+}
+if (!/Project is valid/.test(plain)) {
+  fail('contentrain validate did not report a valid project\n' + plain)
+  process.exit(1)
+}
 const counts = /Models checked:\s*(\d+)[\s\S]*?Entries checked:\s*(\d+)/.exec(plain)
 console.log('PASS: contentrain validate -- ' + (counts ? counts[1] + ' models, ' + counts[2] + ' entries' : 'valid'))
 

@@ -89,10 +89,21 @@ final class Source {
 					continue;
 				}
 				$raw['acf'][ $name ] = array( 'value' => Policy::clean( $field['value'], $excluded, 'acf/' . $post->ID . '/' . $name ), 'field_key' => $field['key'] );
-				$schema[ $name ] = array_intersect_key( $field, array_flip( array( 'key', 'name', 'label', 'type', 'required', 'choices', 'multiple', 'return_format', 'sub_fields', 'layouts' ) ) );
+				$schema[ $name ] = self::schema( $field );
 			}
 		}
 		return array( 'raw' => $raw, 'acf_schema' => Policy::clean( $schema, $excluded, 'acf-schema/' . $post->ID ), 'address' => self::address( $post ), 'translations' => self::translations( $post ) );
+	}
+
+	/** The parts of an ACF field definition that describe content, at every depth. */
+	private static function schema( $field ) {
+		$out = array_intersect_key( (array) $field, array_flip( array( 'key', 'name', 'label', 'type', 'required', 'choices', 'multiple', 'return_format', 'sub_fields', 'layouts' ) ) );
+		foreach ( array( 'sub_fields', 'layouts' ) as $nested ) {
+			if ( ! empty( $out[ $nested ] ) && is_array( $out[ $nested ] ) ) {
+				$out[ $nested ] = array_values( array_map( array( self::class, 'schema' ), $out[ $nested ] ) );
+			}
+		}
+		return $out;
 	}
 
 	public static function revision() {

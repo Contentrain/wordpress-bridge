@@ -187,7 +187,18 @@ final class Models {
 		}
 		foreach ( $p['acf'] ?? array() as $key => $acf ) {
 			$name = 'acf_' . str_replace( '-', '_', sanitize_key( $key ) );
-			list( $field, $content ) = self::value( $job, $acf['value'], $a['locale'], $a['model_id'] . '/' . $a['entry_id'] . '/acf/' . $key );
+			$source = $a['model_id'] . '/' . $a['entry_id'] . '/acf/' . $key;
+			// The field group knows what this is; use it before falling back to a
+			// shape-only guess.
+			$modelled = isset( $record['acf_schema'][ $key ] ) ? Acf::field( $job, $record['acf_schema'][ $key ], $acf['value'], $a['locale'], $source ) : null;
+			if ( null === $modelled ) {
+				Jobs::warning( $job, array( 'source' => $source, 'reason' => 'acf-shape-not-modelled: exported as structured values' ) );
+				$modelled = self::value( $job, $acf['value'], $a['locale'], $source );
+			}
+			list( $field, $content ) = $modelled;
+			if ( null === $field ) {
+				continue;
+			}
 			$fields[ $name ] = $field;
 			$data[ $name ] = $content;
 		}

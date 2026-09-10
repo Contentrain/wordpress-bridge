@@ -7,6 +7,7 @@ Free, local-first WordPress bridge: models site content and interface text as Co
 - No telemetry, and no network request until you start a GitHub delivery yourself
 - Explicit, nonce-protected administrator export
 - Comment export off by default and privacy-minimized
+- ACF groups and repeaters modelled as real collections rather than one anonymous value bag
 - Media copied into `media/` and content relinked, so the export does not depend on the source site
 - Output verified against the published Contentrain toolchain, not only the plugin's own validator (`tests/verify-store.mjs`)
 
