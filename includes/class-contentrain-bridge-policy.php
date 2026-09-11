@@ -96,7 +96,20 @@ final class Policy {
 					$lines[] = '  - ' . $id;
 				}
 			} else {
-				$lines[] = $key . ': ' . wp_json_encode( $value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
+				$encoded = wp_json_encode( $value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
+				// The published @contentrain/types reader strips quotes without
+				// unescaping JSON/YAML sequences. Never publish a store it reads lossy.
+				//
+				// Fixed upstream in Contentrain/ai PR #179: the reader now decodes
+				// escapes and both readers share one grammar. Verified against this
+				// writer's exact output — every value this guard rejects today round
+				// trips losslessly, quotes, backslashes, newlines, tabs and all.
+				// Lift this guard, and its two acceptance tests, once the package
+				// carrying that fix is on npm and pinned in package.json.
+				if ( false === $encoded || ( is_string( $value ) && false !== strpos( $encoded, chr( 92 ) ) ) ) {
+					throw new \RuntimeException( 'Document metadata needs escaped characters unsupported by the current Contentrain reader. Export cannot be finalized until reader compatibility is resolved.' );
+				}
+				$lines[] = $key . ': ' . $encoded;
 			}
 		}
 		return implode( "\n", $lines );

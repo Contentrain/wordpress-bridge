@@ -34,11 +34,11 @@ done
 
 # ACF is the field layer most WordPress content actually lives in, so the
 # fixture has to exercise it rather than assume it. Free version, from
-# wordpress.org; skipped with a notice when the run has no network.
+# wordpress.org; required: a failed dependency install is not a passing test.
 if ! "${cli[@]}" plugin is-installed advanced-custom-fields >/dev/null 2>&1; then
-  "${cli[@]}" plugin install advanced-custom-fields >/dev/null 2>&1 || echo "note: ACF could not be installed; ACF assertions will be skipped"
+  "${cli[@]}" plugin install advanced-custom-fields --version=6.8.10 >/dev/null
 fi
-"${cli[@]}" plugin activate advanced-custom-fields >/dev/null 2>&1 || true
+"${cli[@]}" plugin activate advanced-custom-fields >/dev/null
 
 log="$(mktemp)"
 "${compose[@]}" exec -T wordpress \

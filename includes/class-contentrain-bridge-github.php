@@ -23,7 +23,7 @@ final class GitHub {
 		$status = wp_remote_retrieve_response_code( $response );
 		$data = json_decode( wp_remote_retrieve_body( $response ), true );
 		if ( $status < 200 || $status >= 300 || ! is_array( $data ) ) {
-			throw new \RuntimeException( 'GitHub rejected the request (HTTP ' . $status . '). Check repository access, branch protection and rate limits.' );
+			throw new \RuntimeException( 'GitHub rejected the request (HTTP ' . $status . '). Check repository access, branch protection and rate limits.' ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Diagnostic data is escaped at the admin output boundary or JSON encoded.
 		}
 		return $data;
 	}
@@ -88,7 +88,7 @@ final class GitHub {
 				$path = $paths[ $g['cursor'] ];
 				$content = Files::read( Files::dir( $job['id'] ) . '/output', $path );
 				if ( strlen( $content ) > 8 * MB_IN_BYTES ) {
-					throw new \RuntimeException( 'File exceeds GitHub delivery memory limit: ' . $path . '. Download locally and split the model.' );
+					throw new \RuntimeException( 'File exceeds GitHub delivery memory limit: ' . $path . '. Download locally and split the model.' ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Diagnostic data is escaped at the admin output boundary or JSON encoded.
 				}
 				$git_sha = sha1( 'blob ' . strlen( $content ) . "\0" . $content );
 				if ( isset( $g['remote'][ $path ] ) && $g['remote'][ $path ] !== $git_sha ) {
@@ -97,7 +97,7 @@ final class GitHub {
 					$trusted = $g['previous'][ $path ]['sha256'] ?? null;
 					// The manifest identifies the previous snapshot; it is the only self-describing file.
 					if ( 'bridge/manifest.json' !== $path && ( ! $trusted || hash( 'sha256', $old_content ) !== $trusted ) ) {
-						throw new \RuntimeException( 'Git content conflict at ' . $path . '. Keep the repository edit and reconcile before exporting again.' );
+						throw new \RuntimeException( 'Git content conflict at ' . $path . '. Keep the repository edit and reconcile before exporting again.' ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Diagnostic data is escaped at the admin output boundary or JSON encoded.
 					}
 				}
 				$blob = self::request( $token, 'POST', $prefix . '/git/blobs', array( 'content' => base64_encode( $content ), 'encoding' => 'base64' ) );
@@ -107,7 +107,7 @@ final class GitHub {
 				// Never leave stale managed records silently in an updated content store.
 				foreach ( $g['previous'] as $path => $info ) {
 					if ( isset( $g['remote'][ $path ] ) && ! isset( $job['files'][ $path ] ) ) {
-						throw new \RuntimeException( 'Previous export contains ' . $path . ' outside the new scope. Reconcile removals in Git before delivery.' );
+						throw new \RuntimeException( 'Previous export contains ' . $path . ' outside the new scope. Reconcile removals in Git before delivery.' ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Diagnostic data is escaped at the admin output boundary or JSON encoded.
 					}
 				}
 				$tree = self::request( $token, 'POST', $prefix . '/git/trees', array( 'base_tree' => $g['base_tree'], 'tree' => $g['nodes'] ) );

@@ -18,7 +18,7 @@ final class Jobs {
 		}
 		$id = bin2hex( random_bytes( 16 ) );
 		$dir = Files::dir( $id );
-		if ( ! mkdir( $dir, 0700 ) ) {
+		if ( ! Files::mkdir( $dir ) ) {
 			throw new \RuntimeException( 'Cannot create export job.' );
 		}
 		$locale = Source::locale( get_locale() );
@@ -71,13 +71,39 @@ final class Jobs {
 		Files::put( Files::dir( $job['id'] ), 'state.json', Policy::json( $job ) );
 	}
 
+	/** Also permits deleting an expired job, but never races an active writer. */
+	public static function delete( $id ) {
+		$key = 'contentrain_bridge_job_' . get_current_blog_id();
+		if ( get_user_meta( get_current_user_id(), $key, true ) !== $id ) {
+			throw new \RuntimeException( 'Export is not owned by the current user.' );
+		}
+		$dir = Files::dir( $id );
+		if ( is_dir( $dir ) ) {
+			$lock = fopen( $dir . '/lock', 'c' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Native advisory locking has no WP_Filesystem equivalent.
+			if ( ! $lock || ! flock( $lock, LOCK_EX | LOCK_NB ) ) {
+				if ( $lock ) {
+					fclose( $lock ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Native advisory lock handle.
+				}
+				throw new \RuntimeException( 'Export is busy. Stop the running operation and retry deletion.' );
+			}
+			try {
+				Files::remove( $dir );
+			} finally {
+				flock( $lock, LOCK_UN );
+				fclose( $lock ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Native advisory lock handle.
+			}
+		}
+		delete_user_meta( get_current_user_id(), $key );
+		return array( 'deleted' => true );
+	}
+
 	/** Serialize all mutations, including repeated or concurrent browser requests. */
 	public static function mutate( $id, $callback ) {
 		self::read( $id );
-		$lock = fopen( Files::dir( $id ) . '/lock', 'c' );
+		$lock = fopen( Files::dir( $id ) . '/lock', 'c' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Native stream required for bounded output or advisory locking; WP_Filesystem has no equivalent.
 		if ( ! $lock || ! flock( $lock, LOCK_EX | LOCK_NB ) ) {
 			if ( $lock ) {
-				fclose( $lock );
+				fclose( $lock ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Native stream required for bounded output or advisory locking; WP_Filesystem has no equivalent.
 			}
 			throw new \RuntimeException( 'Export is busy. Retry this step.' );
 		}
@@ -88,7 +114,7 @@ final class Jobs {
 			return $result ?? self::summary( $job );
 		} finally {
 			flock( $lock, LOCK_UN );
-			fclose( $lock );
+			fclose( $lock ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Native stream required for bounded output or advisory locking; WP_Filesystem has no equivalent.
 		}
 	}
 
@@ -118,6 +144,9 @@ final class Jobs {
 					self::finish( $job );
 				}
 			}
+			if ( $job['revision'] !== Source::revision() ) {
+				throw new \RuntimeException( 'WordPress content changed during export. Restart to obtain a consistent snapshot.' );
+			}
 			++$job['step'];
 		} );
 	}
@@ -146,6 +175,11 @@ final class Jobs {
 			if ( ! $p ) {
 				throw new \RuntimeException( 'Source attachment disappeared during export.' );
 			}
+			$parent = $p->post_parent ? get_post( $p->post_parent ) : null;
+			if ( 'trash' === $p->post_status || ( ! $job['options']['private'] && ( ! in_array( $p->post_status, array( 'publish', 'inherit' ), true ) || $p->post_password || ( $parent && ( 'publish' !== $parent->post_status || $parent->post_password ) ) ) ) ) {
+				self::warning( $job, array( 'source' => 'attachment/' . $id, 'reason' => 'excluded-by-status-scope' ) );
+				continue;
+			}
 			$a = Exporter::map_attachment( $p );
 			$image_meta = (array) $a['image_meta'];
 			$a['image_meta'] = array_intersect_key( $image_meta, array_flip( array( 'width', 'height', 'sizes', 'file' ) ) );
@@ -163,7 +197,9 @@ final class Jobs {
 				// actually renders; without them a relinked page loads nothing.
 				foreach ( (array) ( $image_meta['sizes'] ?? array() ) as $size ) {
 					if ( ! empty( $size['file'] ) ) {
-						self::transfer( $job, $basedir, dirname( $relative ) . '/' . $size['file'] );
+						if ( ! self::transfer( $job, $basedir, dirname( $relative ) . '/' . $size['file'] ) ) {
+							++$job['counts']['media_kept_remote'];
+						}
 					}
 				}
 			}
@@ -183,7 +219,12 @@ final class Jobs {
 
 	/** Copy one upload into the export; returns its stored path, or null with a reason. */
 	private static function transfer( &$job, $basedir, $relative ) {
+		$relative = preg_replace( '#^\./#', '', $relative );
 		$path = 'media/' . $relative;
+		if ( ! preg_match( '#^[a-zA-Z0-9_.\-/]+$#D', $relative ) ) {
+			$extension = preg_replace( '/[^a-z0-9]/', '', strtolower( pathinfo( $relative, PATHINFO_EXTENSION ) ) );
+			$path = 'media/file-' . substr( hash( 'sha256', $relative ), 0, 24 ) . ( $extension ? '.' . $extension : '' );
+		}
 		if ( isset( $job['files'][ $path ] ) ) {
 			return $path;
 		}
@@ -204,6 +245,7 @@ final class Jobs {
 		}
 		$job['counts']['media_bytes'] += Models::binary( $job, $path, $real );
 		++$job['counts']['media_files'];
+		$job['media_paths'][ $relative ] = $path;
 		return $path;
 	}
 
@@ -367,9 +409,9 @@ final class Jobs {
 
 	private static function finish( &$job ) {
 		Models::file( $job, 'bridge/validation.json', Policy::json( Validator::run( $job ) ) );
+		Models::file( $job, 'CONTENTRAIN-EXPORT.md', "# Contentrain WordPress export\n\nFree, editable JSON and Markdown content. Models live in `.contentrain/models`.\n\nMarkdown bodies preserve the original WordPress HTML; shortcodes and dynamic blocks require a renderer. Source files and the live WordPress theme have not been rewritten. Transferred media lives under `media/` and content links to it; anything too large or unreadable kept its WordPress URL and is listed in the warnings. Review `bridge/warnings.json` and `bridge/string-sources.json` for scope and text decisions.\n\nUse Contentrain Studio or the query SDK to edit/read this store. For an Astro website, choose the optional Migrate handoff from WordPress after delivery.\n" );
 		$manifest = array( 'format' => 'contentrain-bridge@1', 'version' => CONTENTRAIN_BRIDGE_VERSION, 'snapshot' => $job['id'], 'site' => $job['inventory']['site'], 'created_at' => $job['created_at'], 'scope' => $job['options'], 'counts' => $job['counts'], 'files' => $job['files'], 'media' => array( 'transferred_files' => $job['counts']['media_files'], 'transferred_bytes' => $job['counts']['media_bytes'], 'kept_as_source_url' => $job['counts']['media_kept_remote'], 'stored_under' => 'media/', 'note' => $job['counts']['media_kept_remote'] ? 'Some media still points at WordPress; see bridge/warnings.json' : 'All exported media travels with the content' ), 'source_reuse' => 'not-applied', 'complete_source_coverage' => false );
 		Models::file( $job, 'bridge/manifest.json', Policy::json( $manifest ) );
-		Models::file( $job, 'CONTENTRAIN-EXPORT.md', "# Contentrain WordPress export\n\nFree, editable JSON and Markdown content. Models live in `.contentrain/models`.\n\nMarkdown bodies preserve the original WordPress HTML; shortcodes and dynamic blocks require a renderer. Source files and the live WordPress theme have not been rewritten. Transferred media lives under `media/` and content links to it; anything too large or unreadable kept its WordPress URL and is listed in the warnings. Review `bridge/warnings.json` and `bridge/string-sources.json` for scope and text decisions.\n\nUse Contentrain Studio or the query SDK to edit/read this store. For an Astro website, choose the optional Migrate handoff from WordPress after delivery.\n" );
 		$job['phase'] = 'ready';
 		$job['cursor'] = 0;
 	}

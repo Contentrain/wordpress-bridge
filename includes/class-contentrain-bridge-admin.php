@@ -29,7 +29,7 @@ final class Admin {
 		wp_enqueue_style( 'contentrain-bridge', plugins_url( 'assets/admin.css', CONTENTRAIN_BRIDGE_FILE ), array(), CONTENTRAIN_BRIDGE_VERSION );
 		wp_enqueue_script( 'contentrain-bridge', plugins_url( 'assets/admin.js', CONTENTRAIN_BRIDGE_FILE ), array( 'wp-i18n' ), CONTENTRAIN_BRIDGE_VERSION, true );
 		wp_set_script_translations( 'contentrain-bridge', 'contentrain-bridge' );
-		wp_localize_script( 'contentrain-bridge', 'ContentrainBridge', array( 'ajax' => admin_url( 'admin-ajax.php' ), 'nonce' => wp_create_nonce( 'contentrain_bridge' ), 'download' => admin_url( 'admin-post.php' ), 'downloadNonce' => wp_create_nonce( 'contentrain_bridge_download' ) ) );
+		wp_localize_script( 'contentrain-bridge', 'ContentrainBridge', array( 'secure' => is_ssl() || 'local' === wp_get_environment_type(), 'ajax' => admin_url( 'admin-ajax.php' ), 'nonce' => wp_create_nonce( 'contentrain_bridge' ), 'download' => admin_url( 'admin-post.php' ), 'downloadNonce' => wp_create_nonce( 'contentrain_bridge_download' ) ) );
 	}
 
 	public static function page() {
@@ -72,7 +72,7 @@ final class Admin {
 			</section>
 			<section id="cr-delivery" hidden>
 				<h2><?php esc_html_e( '3. Get your content', 'contentrain-bridge' ); ?></h2>
-				<p><?php esc_html_e( 'Review the coverage report: media binaries still need transfer and dynamic WordPress behavior needs a renderer. This export does not claim complete source coverage.', 'contentrain-bridge' ); ?></p>
+				<p><?php esc_html_e( 'Review the coverage report: copied media is included; missing or oversized files may still use WordPress URLs. Dynamic WordPress behavior needs a renderer.', 'contentrain-bridge' ); ?></p>
 				<button type="button" id="cr-zip" class="button"><?php esc_html_e( 'Prepare ZIP download', 'contentrain-bridge' ); ?></button>
 				<a id="cr-download" class="button" hidden><?php esc_html_e( 'Download JSON / Markdown ZIP', 'contentrain-bridge' ); ?></a>
 				<label for="cr-repo"><?php esc_html_e( 'GitHub repository (owner/repository, initialized with a README)', 'contentrain-bridge' ); ?></label>
@@ -119,12 +119,19 @@ final class Admin {
 					break;
 				case 'review': $result = Jobs::review( $id, (array) ( $input['decisions'] ?? array() ), ! empty( $input['finish'] ) ); break;
 				case 'github-start':
+					if ( ! is_ssl() && 'local' !== wp_get_environment_type() ) {
+						throw new \RuntimeException( 'Use HTTPS in WordPress administration before sending a GitHub credential.' );
+					}
 					if ( empty( $input['consent'] ) ) {
 						throw new \RuntimeException( 'Explicit GitHub transfer consent is required.' );
 					}
 					$result = GitHub::start( $id, $input['token'] ?? '', $input['repository'] ?? '' );
 					break;
-				case 'github-step': $result = GitHub::step( $id, $input['token'] ?? '', $input['cursor'] ?? -1 ); break;
+				case 'github-step':
+					if ( ! is_ssl() && 'local' !== wp_get_environment_type() ) {
+						throw new \RuntimeException( 'Use HTTPS in WordPress administration before sending a GitHub credential.' );
+					}
+					$result = GitHub::step( $id, $input['token'] ?? '', $input['cursor'] ?? -1 ); break;
 				case 'zip': $result = self::zip( $id ); break;
 				case 'delete':
 					// Ownership is checked even for an expired job; no caller-controlled directory is removed.
@@ -132,9 +139,7 @@ final class Admin {
 					if ( $stored !== $id ) {
 						throw new \RuntimeException( 'Export is not owned by the current user.' );
 					}
-					Files::remove( Files::dir( $id ) );
-					delete_user_meta( get_current_user_id(), 'contentrain_bridge_job_' . get_current_blog_id() );
-					$result = array( 'deleted' => true );
+					$result = Jobs::delete( $id );
 					break;
 				default: throw new \RuntimeException( 'Unknown operation.' );
 			}
@@ -166,7 +171,7 @@ final class Admin {
 			if ( ! $zip->close() ) {
 				throw new \RuntimeException( 'Cannot finish ZIP archive.' );
 			}
-			chmod( $dir . '/export.zip', 0600 );
+			Files::fs()->chmod( $dir . '/export.zip', 0600 );
 			$job['zip_cursor'] = $cursor;
 			return array( 'cursor' => $cursor, 'done' => $cursor >= count( $paths ) );
 		} );
@@ -189,7 +194,7 @@ final class Admin {
 			header( 'Content-Disposition: attachment; filename="contentrain-' . $id . '.zip"' );
 			header( 'X-Content-Type-Options: nosniff' );
 			header( 'Content-Length: ' . filesize( $file ) );
-			readfile( $file ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Authenticated binary download from an owned private job.
+			readfile( $file ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped, WordPress.WP.AlternativeFunctions.file_system_operations_readfile -- Authenticated binary stream; WP_Filesystem would load the entire archive into memory.
 			exit;
 		} catch ( \Throwable $error ) {
 			wp_die( esc_html( $error->getMessage() ), '', array( 'response' => 400 ) );
@@ -213,7 +218,9 @@ final class Admin {
 			if ( ! is_string( $path ) || ! isset( $job['files'][ $path ] ) || $job['files'][ $path ]['bytes'] > 8 * MB_IN_BYTES ) {
 				throw new \RuntimeException( 'File unavailable through this endpoint.' );
 			}
-			return new \WP_REST_Response( array( 'path' => $path, 'sha256' => $job['files'][ $path ]['sha256'], 'content' => Files::read( Files::dir( $job['id'] ) . '/output', $path ) ), 200, array( 'Cache-Control' => 'private, no-store' ) );
+			$content = Files::read( Files::dir( $job['id'] ) . '/output', $path );
+			$binary = 0 === strpos( $path, 'media/' );
+			return new \WP_REST_Response( array( 'path' => $path, 'sha256' => $job['files'][ $path ]['sha256'], 'encoding' => $binary ? 'base64' : 'utf8', 'content' => $binary ? base64_encode( $content ) : $content ), 200, array( 'Cache-Control' => 'private, no-store' ) );
 		} catch ( \Throwable $error ) {
 			return new \WP_Error( 'bridge_export', $error->getMessage(), array( 'status' => 400 ) );
 		}

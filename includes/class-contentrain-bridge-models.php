@@ -7,7 +7,7 @@ defined( 'ABSPATH' ) || exit;
 final class Models {
 	public static function file( &$job, $path, $content ) {
 		if ( strlen( $content ) > 8 * MB_IN_BYTES ) {
-			throw new \RuntimeException( 'One content file exceeds the 8 MiB export safety limit: ' . $path );
+			throw new \RuntimeException( 'One content file exceeds the 8 MiB export safety limit: ' . $path ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Diagnostic data is escaped at the admin output boundary or JSON encoded.
 		}
 		Files::put( Files::dir( $job['id'] ) . '/output', $path, $content );
 		$job['files'][ $path ] = array( 'sha256' => hash( 'sha256', $content ), 'bytes' => strlen( $content ) );
@@ -26,17 +26,19 @@ final class Models {
 	 * at a path that is not in the export would trade a working WordPress link
 	 * for a broken local one.
 	 */
-	public static function relink( $job, $value ) {
+	public static function relink( $job, $value, $root_relative = false ) {
 		$base = $job['uploads']['baseurl'] ?? '';
 		if ( ! $base || ! is_string( $value ) || false === strpos( $value, $base ) ) {
 			return $value;
 		}
 		$files = $job['files'];
+		$mapping = $job['media_paths'] ?? array();
 		return preg_replace_callback(
-			'#' . preg_quote( $base, '#' ) . '/([A-Za-z0-9_./-]+)#',
-			static function ( $match ) use ( $files ) {
-				$path = 'media/' . $match[1];
-				return isset( $files[ $path ] ) ? $path : $match[0];
+			'#' . preg_quote( $base, '#' ) . '/([^\s"\x27<>?\#),]+)#u',
+			static function ( $match ) use ( $files, $mapping, $root_relative ) {
+				$relative = rawurldecode( $match[1] );
+				$path = $mapping[ $relative ] ?? 'media/' . $relative;
+				return isset( $files[ $path ] ) ? ( $root_relative ? '/' : '' ) . $path : $match[0];
 			},
 			$value
 		);
@@ -81,7 +83,7 @@ final class Models {
 		if ( $existing ) {
 			foreach ( $fields as $key => $definition ) {
 				if ( isset( $existing['fields'][ $key ] ) && $existing['fields'][ $key ] != $definition ) {
-					throw new \RuntimeException( 'Inconsistent field types in ' . $id . '.' . $key . '; choose a consistent model before exporting.' );
+					throw new \RuntimeException( 'Inconsistent field types in ' . $id . '.' . $key . '; choose a consistent model before exporting.' ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Diagnostic data is escaped at the admin output boundary or JSON encoded.
 				}
 			}
 			$fields = array_merge( $existing['fields'] ?? array(), $fields );
@@ -110,13 +112,13 @@ final class Models {
 		// `url` fields are addresses, not content: the media record's own source
 		// URL and a post's original permalink must survive relinking. Everything
 		// else — bodies, excerpts, and image/file fields — points at the copy.
-		foreach ( $data as $key => $value ) {
+		foreach ( is_array( $data ) ? $data : array() as $key => $value ) {
 			if ( 'url' === ( $m['fields'][ $key ]['type'] ?? '' ) ) {
 				continue;
 			}
-			$data[ $key ] = self::relink( $job, $value );
+			$data[ $key ] = self::relink( $job, $value, in_array( $m['fields'][ $key ]['type'] ?? '', array( 'richtext', 'markdown' ), true ) );
 		}
-		$body = self::relink( $job, $body );
+		$body = self::relink( $job, $body, true );
 		$content = self::content_path( $job, $m, $locale, $id );
 		$meta_file = self::meta_path( $job, $m, $locale, $id );
 		$meta = $meta ?: self::meta();
@@ -262,32 +264,46 @@ final class Models {
 		return array( 'model' => $mid, 'id' => $id );
 	}
 
+	/** Check short writes so disk exhaustion cannot produce a successful truncated table. */
+	private static function write_stream( $stream, $bytes ) {
+		while ( '' !== $bytes ) {
+			$written = fwrite( $stream, $bytes ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- Bounded row streaming; WP_Filesystem has no append stream primitive.
+			if ( false === $written || 0 === $written ) {
+				throw new \RuntimeException( 'Cannot finish writing content table.' );
+			}
+			$bytes = substr( $bytes, $written );
+		}
+	}
+
 	/** Materialize one object map; memory use is bounded by one row. */
 	public static function table( &$job, $path ) {
 		$rows = $job['tables'][ $path ];
 		ksort( $rows, SORT_STRING );
 		$dir = Files::dir( $job['id'] );
 		$target = Files::path( $dir . '/output', $path );
-		if ( ! is_dir( dirname( $target ) ) && ! mkdir( dirname( $target ), 0700, true ) ) {
+		if ( ! Files::mkdir( dirname( $target ) ) ) {
 			throw new \RuntimeException( 'Cannot create content directory.' );
 		}
-		$stream = fopen( $target . '.tmp', 'wb' );
+		$stream = fopen( $target . '.tmp', 'wb' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Native stream required for bounded output or advisory locking; WP_Filesystem has no equivalent.
 		if ( ! $stream ) {
 			throw new \RuntimeException( 'Cannot write content table.' );
 		}
-		fwrite( $stream, "{\n" );
-		$first = true;
-		foreach ( $rows as $key => $row ) {
-			$json = trim( Files::read( $dir, 'rows/' . hash( 'sha256', $path ) . '/' . $row . '.json' ) );
-			fwrite( $stream, ( $first ? '' : ",\n" ) . '  ' . wp_json_encode( (string) $key ) . ': ' . str_replace( "\n", "\n  ", $json ) );
-			$first = false;
+		try {
+			self::write_stream( $stream, "{\n" );
+			$first = true;
+			foreach ( $rows as $key => $row ) {
+				$json = trim( Files::read( $dir, 'rows/' . hash( 'sha256', $path ) . '/' . $row . '.json' ) );
+				self::write_stream( $stream, ( $first ? '' : ",\n" ) . '  ' . wp_json_encode( (string) $key ) . ': ' . str_replace( "\n", "\n  ", $json ) );
+				$first = false;
+			}
+			self::write_stream( $stream, "\n}\n" );
+		} finally {
+			fclose( $stream ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Native stream required for bounded output or advisory locking; WP_Filesystem has no equivalent.
 		}
-		fwrite( $stream, "\n}\n" );
-		fclose( $stream );
-		if ( ! rename( $target . '.tmp', $target ) ) {
+		if ( ! Files::fs()->move( $target . '.tmp', $target, true ) ) {
 			throw new \RuntimeException( 'Cannot finalize content table.' );
 		}
-		chmod( $target, 0600 );
+		Files::fs()->chmod( $target, 0600 );
 		$job['files'][ $path ] = array( 'sha256' => hash_file( 'sha256', $target ), 'bytes' => filesize( $target ) );
 	}
 }

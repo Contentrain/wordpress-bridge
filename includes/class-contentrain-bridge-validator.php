@@ -9,7 +9,7 @@ final class Validator {
 		$count = 0;
 		foreach ( $job['models'] as $model ) {
 			if ( ! preg_match( '/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/D', $model['id'] ) ) {
-				throw new \RuntimeException( 'Invalid model identifier: ' . $model['id'] );
+				throw new \RuntimeException( 'Invalid model identifier: ' . $model['id'] ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Diagnostic data is escaped at the admin output boundary or JSON encoded.
 			}
 			if ( 'dictionary' !== $model['kind'] && ! isset( $model['fields'][ $model['title_field'] ] ) ) {
 				throw new \RuntimeException( 'Model has no valid title field.' );
@@ -59,12 +59,15 @@ final class Validator {
 		foreach ( $model['fields'] as $name => $field ) {
 			if ( ! array_key_exists( $name, $data ) ) {
 				if ( ! empty( $field['required'] ) ) {
-					throw new \RuntimeException( 'Missing required field: ' . $model['id'] . '.' . $name );
+					throw new \RuntimeException( 'Missing required field: ' . $model['id'] . '.' . $name ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Diagnostic data is escaped at the admin output boundary or JSON encoded.
 				}
 				continue;
 			}
 			$value = $data[ $name ];
 			$type = $field['type'];
+			if ( ! empty( $field['required'] ) && ( null === $value || '' === $value ) ) {
+				throw new \RuntimeException( 'Required content value is empty.' );
+			}
 			$valid = true;
 			if ( 'integer' === $type ) {
 				$valid = is_int( $value );
@@ -91,11 +94,24 @@ final class Validator {
 					$valid = false !== filter_var( $value, FILTER_VALIDATE_URL );
 				}
 				if ( $valid && 'datetime' === $type ) {
-					$valid = false !== strtotime( $value );
+					$valid = (bool) preg_match( '/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/D', $value ) && false !== strtotime( $value );
+				}
+				if ( $valid && 'date' === $type ) {
+					$date = \DateTimeImmutable::createFromFormat( '!Y-m-d', $value );
+					$valid = $date && $date->format( 'Y-m-d' ) === $value;
+				}
+				if ( $valid && 'select' === $type ) {
+					$valid = in_array( $value, $field['options'] ?? array(), true );
+				}
+				if ( $valid && 'email' === $type ) {
+					$valid = false !== filter_var( $value, FILTER_VALIDATE_EMAIL );
+				}
+				if ( $valid && 'color' === $type ) {
+					$valid = (bool) preg_match( '/^#[a-f0-9]{6}$/iD', $value );
 				}
 			}
 			if ( ! $valid ) {
-				throw new \RuntimeException( 'Invalid value or missing relation: ' . $model['id'] . '.' . $name . ' (' . $locale . ')' );
+				throw new \RuntimeException( 'Invalid value or missing relation: ' . $model['id'] . '.' . $name . ' (' . $locale . ')' ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Diagnostic data is escaped at the admin output boundary or JSON encoded.
 			}
 		}
 	}

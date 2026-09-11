@@ -2,8 +2,9 @@
 Contributors: contentrain
 Tags: export, migration, headless, astro, content
 Requires at least: 6.2
+Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 0.2.0
+Stable tag: 0.2.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -63,9 +64,17 @@ The active theme and child theme, and optionally the source files of active plug
 
 == Privacy ==
 
-The plugin stores no settings and sends nothing anywhere on its own. Export files are written to a private, per-administrator directory, are removed on uninstall, and expire after a day. An export can contain site content, author display names, selected post metadata and, if you chose it, privacy-minimized comments. Treat a downloaded export as you would a WordPress export file. If you deliver to GitHub, the exported content is sent to GitHub under the account whose token you provide; choose a private repository when the export includes draft or private content.
+The plugin stores export ownership and a source revision marker. It sends nothing anywhere on its own. Export files are written to a private, per-administrator directory, are removed on uninstall, and expire after a day. An export can contain site content, author display names, selected post metadata and, if you chose it, privacy-minimized comments. Treat a downloaded export as you would a WordPress export file. If you deliver to GitHub, the exported content is sent to GitHub under the account whose token you provide; choose a private repository when the export includes draft or private content.
 
 == Changelog ==
+
+= 0.2.1 =
+
+* Prevent partial ACF modelling, disambiguate same-name fields and normalize stored dates.
+* Protect nested sensitive ACF values and private attachment scope.
+* Fix nested-page media URLs, binary export reads and repeated GitHub delivery manifests.
+* Clean up expired and uninstalled snapshots; serialize cancellation with active export work.
+* Add a checksum-verified Bridge-to-Migrate intake adapter and reproducible package build.
 
 = 0.2.0 =
 

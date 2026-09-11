@@ -49,20 +49,28 @@ jobs:
           ! grep -qiE 'no external (network )?requests|makes no external requests' readme.txt README.md
 
   acceptance:
-    name: WordPress acceptance
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - name: Run the acceptance script in a throwaway WordPress
-        run: tests/run.sh
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: The published Contentrain toolchain reads the exported store
-        run: node tests/verify-store.mjs
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run test:wordpress
+        env:
+          KEEP: 1
+      - run: npm run test:plugin
+      - run: npm run test:store
+      - run: npm test
+      - name: WordPress uninstall cleanup
+        run: docker compose -f tests/compose.yml run --rm -T cli eval-file /var/www/html/wp-content/plugins/contentrain-bridge/tests/uninstall.php
+      - run: npm run package
       - uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: exported-store
-          path: tests/.out/store
-          if-no-files-found: warn
+          name: contentrain-bridge
+          path: dist/contentrain-bridge.zip
+      - name: Remove acceptance containers
+        if: always()
+        run: docker compose -f tests/compose.yml down -v

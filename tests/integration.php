@@ -140,14 +140,37 @@ check( isset( $job['models']['wp-structured-values'] ), 'nested content becomes 
 if ( $has_acf ) {
 	// The point of modelling: a repeater of testimonials is a list of records
 	// with a person and a quote, not an anonymous name/value bag.
-	check( isset( $job['models']['acf-quotes'] ), 'a repeater becomes its own model' );
-	$quotes = $job['models']['acf-quotes'];
+	check( isset( $job['models'][\Contentrain\Bridge\Acf::model_id( 'quotes', 'field_bridge_quotes' )] ), 'a repeater becomes its own model' );
+	$quotes = $job['models'][\Contentrain\Bridge\Acf::model_id( 'quotes', 'field_bridge_quotes' )];
 	check( 'collection' === $quotes['kind'] && 'person' === $quotes['title_field'], 'the repeater model is titled by its first text field' );
 	check( array( 'person', 'position', 'quote' ) === array_keys( $quotes['fields'] ), 'sub-fields become fields: ' . implode( ',', array_keys( $quotes['fields'] ) ) );
 	check( 'text' === $quotes['fields']['quote']['type'] && 'integer' === $quotes['fields']['position']['type'], 'ACF types map onto Contentrain types' );
-	check( isset( $job['models']['acf-hero'] ) && array( 'cta', 'heading' ) === array_keys( $job['models']['acf-hero']['fields'] ), 'a group becomes its own model' );
+	check( isset( $job['models'][\Contentrain\Bridge\Acf::model_id( 'hero', 'field_bridge_hero' )] ) && array( 'cta', 'heading' ) === array_keys( $job['models'][\Contentrain\Bridge\Acf::model_id( 'hero', 'field_bridge_hero' )]['fields'] ), 'a group becomes its own model' );
 
 }
+// Adversarial ACF shapes must either model losslessly or use the explicit fallback.
+$probe = $job;
+$probe['id'] = bin2hex( random_bytes( 16 ) );
+Files::mkdir( Files::dir( $probe['id'] ) );
+$probe['models'] = array(); $probe['files'] = array(); $probe['tables'] = array();
+$acf_class = '\Contentrain\Bridge\Acf';
+check( $acf_class::model_id( 'hero', 'field_a' ) !== $acf_class::model_id( 'hero', 'field_b' ), 'same-name ACF models have stable distinct identities' );
+check( '2026-09-11' === $acf_class::cast( array( 'type' => 'date' ), '20260911' ), 'ACF stored dates normalize to ISO date' );
+check( null === $acf_class::scalar( array( 'type' => 'select', 'multiple' => true, 'choices' => array( 'a' => 'A', 'b' => 'B' ) ) ), 'multi-select cannot be treated as a scalar select' );
+$result = $acf_class::field( $probe, array( 'type' => 'link' ), array( 'url' => 'https://example.test', 'title' => 'Read more', 'target' => '_blank' ), $job['default_locale'], 'link' );
+check( null === $result, 'link label and target use lossless fallback, not URL-only cast' );
+$nested_schema = array( 'key' => 'field_nested', 'name' => 'nested', 'type' => 'group', 'sub_fields' => array( array( 'key' => 'field_heading', 'name' => 'heading', 'type' => 'text' ), array( 'key' => 'field_children', 'name' => 'children', 'type' => 'repeater' ) ) );
+$result = $acf_class::field( $probe, $nested_schema, array( 'heading' => 'Hello', 'children' => array( array( 'text' => 'Must survive' ) ) ), $job['default_locale'], 'nested' );
+check( null === $result && ! $probe['models'], 'unsupported nested ACF fields cannot be silently dropped from a successful model' );
+$no_title_schema = array( 'key' => 'field_rows', 'name' => 'rows', 'type' => 'repeater', 'sub_fields' => array( array( 'key' => 'field_heading', 'name' => 'heading', 'type' => 'text' ) ) );
+$result = $acf_class::field( $probe, $no_title_schema, array( array( 'heading' => 'One' ), array( 'heading' => '' ) ), $job['default_locale'], 'rows' );
+check( null === $result && ! $probe['models'], 'untitled row keeps the entire value in fallback without orphan partial models' );
+$redactions = array();
+$private_schema = array( 'type' => 'group', 'name' => 'public_group', 'sub_fields' => array( array( 'key' => 'field_opaque', 'name' => 'connection', 'type' => 'password' ), array( 'key' => 'field_heading', 'name' => 'heading', 'type' => 'text' ) ) );
+$clean_acf = Source::acf_value( $private_schema, array( 'field_opaque' => 'hidden-credential', 'field_heading' => 'Safe headline' ), $redactions, 'acf' );
+check( ! isset( $clean_acf['field_opaque'] ) && 'Safe headline' === $clean_acf['field_heading'], 'nested ACF password is removed by its type even behind an opaque field key' );
+Files::remove( Files::dir( $probe['id'] ) );
+
 // A real candidate review round, independent of the installed theme's size.
 Jobs::mutate( $id, static function ( &$j ) use ( $scan ) { $j['candidates'] = array_column( $scan['candidates'], null, 'id' ); } );
 rejects( static function () use ( $id ) { Jobs::review( $id, array(), true ); }, 'unreviewed text blocks finalization' );
@@ -206,7 +229,7 @@ $media_entry = json_decode( Files::read( $dir, Models::content_path( $job, 'wp-m
 check( $stored === $media_entry['file'], 'the media record points at the stored path' );
 check( $image_url === $media_entry['url'], 'the source URL is kept alongside it' );
 $illustrated_body = Files::read( $dir, Models::content_path( $job, 'wp-post', $job['default_locale'], Source::address( get_post( $illustrated ) )['entry_id'] ) );
-check( false !== strpos( $illustrated_body, 'src="' . $stored . '"' ), 'content is relinked to the stored media path' );
+check( false !== strpos( $illustrated_body, 'src="/' . $stored . '"' ), 'content is relinked to the stored media path' );
 check( false === strpos( $illustrated_body, $image_url ), 'no WordPress upload URL is left in the relinked body' );
 // A file that is not in the export must keep its working WordPress URL.
 $ghost_entry = json_decode( Files::read( $dir, Models::content_path( $job, 'wp-media', $job['default_locale'] ) ), true )[ substr( hash( 'sha256', 'media:' . $ghost ), 0, 12 ) ];
@@ -217,6 +240,8 @@ check( $job['counts']['media_kept_remote'] >= 1, 'media kept remote is counted' 
 $manifest_media = json_decode( Files::read( $dir, 'bridge/manifest.json' ), true )['media'];
 check( $manifest_media['transferred_files'] >= 1 && 'media/' === $manifest_media['stored_under'], 'the manifest reports real media counts' );
 
+
+check( isset( json_decode( Files::read( $dir, 'bridge/manifest.json' ), true )['files']['CONTENTRAIN-EXPORT.md'] ), 'README hash is in the manifest for repeat Git delivery' );
 
 // ACF content, once the tables have been written.
 if ( $has_acf ) {
@@ -229,14 +254,14 @@ if ( $has_acf ) {
 	check( 2 === count( $page_entry['acf_quotes'] ), 'every repeater row is exported' );
 	check( 'relation' === $job['models']['wp-page']['fields']['acf_hero']['type'], 'a group is a single relation' );
 
-	$rows = json_decode( Files::read( $dir, Models::content_path( $job, 'acf-quotes', $job['default_locale'] ) ), true );
+	$rows = json_decode( Files::read( $dir, Models::content_path( $job, \Contentrain\Bridge\Acf::model_id( 'quotes', 'field_bridge_quotes' ), $job['default_locale'] ) ), true );
 	// Only this page's rows: a re-used test database keeps earlier fixtures.
 	$people = array_map( static function ( $ref ) use ( $rows ) { return $rows[ $ref ]['person']; }, $page_entry['acf_quotes'] );
 	sort( $people );
 	check( array( 'Ada', 'Grace' ) === $people, 'repeater rows carry their own named fields' );
 	check( 'It reads like my site.' === $rows[ $page_entry['acf_quotes'][0] ]['quote'], 'each row keeps its own values' );
 	check( 0 === $rows[ $page_entry['acf_quotes'][0] ]['position'], 'row order is preserved as data' );
-	$hero = json_decode( Files::read( $dir, Models::content_path( $job, 'acf-hero', $job['default_locale'] ) ), true );
+	$hero = json_decode( Files::read( $dir, Models::content_path( $job, \Contentrain\Bridge\Acf::model_id( 'hero', 'field_bridge_hero' ), $job['default_locale'] ) ), true );
 	check( 'Own your words' === $hero[ $page_entry['acf_hero'] ]['heading'], 'the group row is reachable through the relation' );
 }
 
@@ -280,6 +305,30 @@ $repeat = GitHub::step( $id, 'test-only-token-123456', 0 );
 check( 'done' === $repeat['github']['phase'], 'repeated delivery returns the existing receipt' );
 remove_filter( 'pre_http_request', $github_filter, 10 );
 file_put_contents( '/tmp/bridge-test-output-path', $dir );
+// Authenticated media transfer must survive JSON encoding without corrupting PNG bytes.
+$request = new WP_REST_Request( 'GET', '/contentrain-bridge/v1/exports/' . $id );
+$request->set_param( 'id', $id ); $request->set_param( 'file', $stored );
+$rest_file = Admin::read_export( $request );
+check( ! is_wp_error( $rest_file ) && 'base64' === $rest_file->get_data()['encoding'], 'REST marks binary export content as base64' );
+check( $png === base64_decode( $rest_file->get_data()['content'], true ), 'REST preserves media bytes' );
+check( 'private, no-store' === $rest_file->get_headers()['Cache-Control'], 'export responses cannot be publicly cached' );
+$request->set_param( 'file', '../state.json' );
+check( is_wp_error( Admin::read_export( $request ) ), 'REST cannot read files outside the export manifest' );
+$lock = fopen( Files::dir( $id ) . '/lock', 'c' );
+flock( $lock, LOCK_EX );
+rejects( static function () use ( $id ) { Jobs::delete( $id ); }, 'cancel cannot delete an actively locked export' );
+flock( $lock, LOCK_UN ); fclose( $lock );
+$expired = bin2hex( random_bytes( 16 ) );
+Files::mkdir( Files::dir( $expired ) );
+Files::put( Files::dir( $expired ), 'state.json', Policy::json( array( 'created_at' => gmdate( 'c', time() - 2 * DAY_IN_SECONDS ) ) ) );
+Files::cleanup();
+check( ! is_dir( Files::dir( $expired ) ), 'expiry uses creation time even when state was just written' );
+$mapping_job = array( 'uploads' => array( 'baseurl' => 'https://example.test/uploads' ), 'files' => array( 'media/safe.png' => array() ), 'media_paths' => array( 'ç.png' => 'media/safe.png' ) );
+check( '/media/safe.png' === Models::relink( $mapping_job, 'https://example.test/uploads/%C3%A7.png', true ), 'encoded Unicode upload URLs map to safe exported paths' );
+
+rejects( static function () { Policy::frontmatter( array( 'title' => 'A "quoted" title' ) ); }, 'lossy published-reader quote handling blocks finalization' );
+rejects( static function () { Policy::frontmatter( array( 'excerpt' => "line one\nline two" ) ); }, 'lossy published-reader newline handling blocks finalization' );
+
 // Snapshot consistency check on a separate job, preserving the finished artifact for external validation.
 delete_user_meta( $admin->ID, 'contentrain_bridge_job_1' );
 $other = Jobs::create( array( 'types' => array( 'page' ) ) );

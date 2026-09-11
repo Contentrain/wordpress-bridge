@@ -20,7 +20,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const store = process.argv[2] ?? join(here, '.out', 'store')
 const typesEntry = process.env.CONTENTRAIN_TYPES ?? '@contentrain/types'
 
-const { canonicalStringify, MODEL_FIELD_ORDER } = await import(
+const { canonicalStringify, MODEL_FIELD_ORDER, parseMarkdownFrontmatter } = await import(
   /^[./]/.test(typesEntry) ? pathToFileURL(typesEntry).href : typesEntry
 )
 
@@ -43,19 +43,14 @@ execFileSync('git', ['init', '-q'], { cwd: project })
 execFileSync('git', ['add', '-A'], { cwd: project })
 execFileSync('git', ['-c', 'user.email=verify@example.test', '-c', 'user.name=verify', 'commit', '-qm', 'store'], { cwd: project })
 
-// One retry: the first `npx --yes` on a cold cache fetches the CLI, and a
-// failed fetch is not a verdict about the store. A second failure is.
+// Use the lockfile-pinned local CLI. A validation failure is never retried away.
 let output = ''
 let error = null
-for (let attempt = 0; attempt < 2; attempt++) {
-  try {
-    output = execFileSync('npx', ['--yes', 'contentrain', 'validate'], { cwd: project, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
-    error = null
-    break
-  } catch (thrown) {
-    error = thrown
-    output = (thrown.stdout ?? '') + (thrown.stderr ?? '')
-  }
+try {
+  output = execFileSync(process.execPath, [join(here, '../node_modules/contentrain/dist/index.mjs'), 'validate'], { cwd: project, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+} catch (thrown) {
+  error = thrown
+  output = (thrown.stdout ?? '') + (thrown.stderr ?? '')
 }
 const plain = output.replace(new RegExp(String.fromCharCode(27) + '\\[[0-9;]*m', 'g'), '')
 if (error) {
@@ -89,7 +84,16 @@ if (!process.exitCode) console.log('PASS: canonical byte parity -- ' + checked +
 let documents = 0
 for (const file of walk(join(store, '.contentrain'))) {
   if (!file.endsWith('.md')) continue
-  if (!/^---\n[\s\S]*?\n---\n/.test(readFileSync(file, 'utf8'))) fail('document has no frontmatter: ' + file)
+  const text = readFileSync(file, 'utf8')
+  const match = /^---\n([\s\S]*?)\n---\n/.exec(text)
+  if (!match) { fail('document has no frontmatter: ' + file); continue }
+  const parsed = parseMarkdownFrontmatter(text).frontmatter
+  for (const line of match[1].split('\n')) {
+    const pair = /^([a-z][a-z0-9_]*): (.+)$/.exec(line)
+    if (pair && JSON.stringify(parsed[pair[1]]) !== JSON.stringify(JSON.parse(pair[2]))) {
+      fail('published parser changes field value: ' + file + ' / ' + pair[1])
+    }
+  }
   documents++
 }
 console.log('PASS: ' + documents + ' documents carry frontmatter')

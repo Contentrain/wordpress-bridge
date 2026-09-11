@@ -39,7 +39,7 @@ final class Source {
 	public static function locale( $code ) {
 		$locale = strtolower( str_replace( '_', '-', $code ?: get_locale() ) );
 		if ( ! preg_match( '/^[a-z]{2,3}(-[a-z0-9]{2,8})*$/D', $locale ) ) {
-			throw new \RuntimeException( 'Unsupported locale identifier: ' . $locale );
+			throw new \RuntimeException( 'Unsupported locale identifier: ' . $locale ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Diagnostic data is escaped at the admin output boundary or JSON encoded.
 		}
 		return $locale;
 	}
@@ -88,11 +88,46 @@ final class Source {
 					$excluded[] = array( 'source' => 'acf/' . $post->ID . '/' . $name, 'reason' => 'sensitive-field' );
 					continue;
 				}
-				$raw['acf'][ $name ] = array( 'value' => Policy::clean( $field['value'], $excluded, 'acf/' . $post->ID . '/' . $name ), 'field_key' => $field['key'] );
+				$raw['acf'][ $name ] = array( 'value' => self::acf_value( $field, $field['value'], $excluded, 'acf/' . $post->ID . '/' . $name ), 'field_key' => $field['key'] );
 				$schema[ $name ] = self::schema( $field );
 			}
 		}
 		return array( 'raw' => $raw, 'acf_schema' => Policy::clean( $schema, $excluded, 'acf-schema/' . $post->ID ), 'address' => self::address( $post ), 'translations' => self::translations( $post ) );
+	}
+
+	/** ACF groups can use opaque field keys: inspect types before values reach RawIR. */
+	public static function acf_value( $field, $value, &$excluded, $path ) {
+		if ( in_array( $field['type'] ?? '', Acf::EXCLUDED, true ) || Policy::sensitive( $field['name'] ?? '' ) ) {
+			$excluded[] = array( 'source' => $path, 'reason' => 'sensitive-field' );
+			return null;
+		}
+		if ( is_array( $value ) ) {
+			$rows = in_array( $field['type'] ?? '', array( 'repeater', 'flexible_content' ), true ) ? $value : array( $value );
+			$sub_fields = $field['sub_fields'] ?? array();
+			foreach ( $field['layouts'] ?? array() as $layout ) {
+				$sub_fields = array_merge( $sub_fields, $layout['sub_fields'] ?? array() );
+			}
+			foreach ( $rows as &$row ) {
+				if ( ! is_array( $row ) ) {
+					continue;
+				}
+				foreach ( $sub_fields as $sub ) {
+					foreach ( array_unique( array( $sub['name'] ?? '', $sub['key'] ?? '' ) ) as $key ) {
+						if ( array_key_exists( $key, $row ) ) {
+							$clean = self::acf_value( $sub, $row[ $key ], $excluded, $path . '/' . $key );
+							if ( null === $clean ) {
+								unset( $row[ $key ] );
+							} else {
+								$row[ $key ] = $clean;
+							}
+						}
+					}
+				}
+			}
+			unset( $row );
+			$value = in_array( $field['type'] ?? '', array( 'repeater', 'flexible_content' ), true ) ? $rows : $rows[0];
+		}
+		return Policy::clean( $value, $excluded, $path );
 	}
 
 	/** The parts of an ACF field definition that describe content, at every depth. */

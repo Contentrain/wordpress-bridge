@@ -35,7 +35,7 @@ final class Acf {
 	);
 
 	/** Layout-only field types carry no content. */
-	const LAYOUT = array( 'tab', 'accordion', 'message', 'clone' );
+	const LAYOUT = array( 'tab', 'accordion', 'message' );
 
 	/** Types whose value is a person or a secret; never content. */
 	const EXCLUDED = array( 'password', 'user' );
@@ -45,7 +45,7 @@ final class Acf {
 
 	public static function model_id( $name, $key ) {
 		$base = 'acf-' . trim( str_replace( '_', '-', sanitize_title( $name ) ), '-' );
-		return '' === $base || 'acf-' === $base ? 'acf-' . substr( hash( 'sha256', $key ), 0, 8 ) : $base;
+		return ( 'acf-' === $base ? 'acf-field' : $base ) . '-' . substr( hash( 'sha256', $key ), 0, 8 );
 	}
 
 	/** Field definition for one ACF sub-field, or null when it is not a scalar. */
@@ -55,6 +55,9 @@ final class Acf {
 			return null;
 		}
 		if ( in_array( $type, array( 'select', 'radio', 'button_group' ), true ) ) {
+			if ( ! empty( $field['multiple'] ) ) {
+				return null; // Keep every selected option through the structured fallback.
+			}
 			$options = array_values( array_map( 'strval', array_keys( (array) ( $field['choices'] ?? array() ) ) ) );
 			return $options ? array( 'type' => 'select', 'options' => $options ) : array( 'type' => 'string' );
 		}
@@ -74,6 +77,15 @@ final class Acf {
 			return null;
 		}
 		switch ( $definition['type'] ) {
+			case 'date':
+				$date = \DateTimeImmutable::createFromFormat( '!Ymd', (string) $value );
+				if ( $date && $date->format( 'Ymd' ) === (string) $value ) {
+					return $date->format( 'Y-m-d' );
+				}
+				return is_string( $value ) ? $value : null;
+			case 'datetime':
+				$date = \DateTimeImmutable::createFromFormat( '!Y-m-d H:i:s', (string) $value, wp_timezone() );
+				return $date && $date->format( 'Y-m-d H:i:s' ) === (string) $value ? $date->format( 'c' ) : ( is_string( $value ) ? $value : null );
 			case 'boolean':
 				return (bool) $value;
 			case 'number':
@@ -134,32 +146,33 @@ final class Acf {
 	 */
 	public static function field( &$job, $schema, $value, $locale, $source ) {
 		$type = $schema['type'] ?? '';
+		if ( in_array( $type, self::EXCLUDED, true ) ) {
+			return array( null, null );
+		}
+		if ( 'link' === $type && is_array( $value ) ) {
+			// Link labels and targets are content too, not just the URL.
+			return null;
+		}
 		if ( in_array( $type, self::LAYOUT, true ) ) {
 			return array( null, null );
 		}
 		if ( 'group' === $type || 'repeater' === $type ) {
 			$shape = self::shape( $schema['sub_fields'] ?? array() );
-			if ( ! $shape ) {
+			if ( ! $shape || $shape['skipped'] ) {
 				return null;
 			}
 			$model = self::model_id( $schema['name'] ?? '', $schema['key'] ?? $source );
 			$name = $schema['label'] ?? $schema['name'] ?? $model;
-			$existing = $job['models'][ $model ] ?? null;
-			if ( $existing && array_diff_key( $shape['fields'], (array) $existing['fields'] ) !== array() && array_diff_key( (array) $existing['fields'], $shape['fields'] ) !== array() ) {
-				// Two different groups claiming one name would silently merge into
-				// a model that matches neither.
-				$model .= '-' . substr( hash( 'sha256', $schema['key'] ?? $source ), 0, 8 );
-			}
 			$fields = $shape['fields'];
 			if ( 'repeater' === $type ) {
 				$fields['position'] = array( 'type' => 'integer' );
 			}
-			Models::model( $job, $model, 'collection', 'site', $name, $fields, $shape['title'] );
+			$prepared = array();
 			$rows = 'repeater' === $type ? ( is_array( $value ) ? array_values( $value ) : array() ) : array( $value );
 			$ids = array();
 			foreach ( $rows as $index => $row ) {
 				if ( ! is_array( $row ) ) {
-					continue;
+					return null;
 				}
 				$data = array();
 				foreach ( $shape['fields'] as $key => $definition ) {
@@ -167,20 +180,26 @@ final class Acf {
 					$cast = self::cast( $definition, $raw );
 					if ( null !== $cast ) {
 						$data[ $key ] = $cast;
+					} elseif ( null !== $raw && '' !== $raw ) {
+						return null; // Never silently drop a non-empty value during conversion.
 					}
 				}
 				if ( ! isset( $data[ $shape['title'] ] ) ) {
 					// A required title with no value cannot validate; report the row
 					// rather than invent a label for it.
 					Jobs::warning( $job, array( 'source' => $source . '/' . $index, 'reason' => 'acf-row-has-no-title-value' ) );
-					continue;
+					return null;
 				}
 				if ( 'repeater' === $type ) {
 					$data['position'] = (int) $index;
 				}
 				$id = substr( hash( 'sha256', $source . '/' . $index ), 0, 12 );
-				Models::entry( $job, $model, $locale, $id, $data );
+				$prepared[ $id ] = $data;
 				$ids[] = $id;
+			}
+			Models::model( $job, $model, 'collection', 'site', $name, $fields, $shape['title'] );
+			foreach ( $prepared as $id => $data ) {
+				Models::entry( $job, $model, $locale, $id, $data );
 			}
 			foreach ( $shape['skipped'] as $key ) {
 				Jobs::warning( $job, array( 'source' => $source . '/' . $key, 'reason' => 'acf-subfield-type-not-modelled' ) );
@@ -195,6 +214,6 @@ final class Acf {
 			return null;
 		}
 		$cast = self::cast( $definition, $value );
-		return null === $cast ? array( null, null ) : array( $definition, $cast );
+		return null === $cast ? ( null === $value || '' === $value ? array( null, null ) : null ) : array( $definition, $cast );
 	}
 }

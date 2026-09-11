@@ -114,6 +114,7 @@
   });
   $('download').addEventListener('click', () => { $('migrate').hidden = false; });
   action('github', async () => {
+    if (!ContentrainBridge.secure) throw new Error(__('Open WordPress administration over HTTPS before entering a GitHub token.', 'contentrain-bridge'));
     if (!$('consent').checked) throw new Error(__('Confirm the destination and content before sending.', 'contentrain-bridge'));
     let token = $('token').value;
     $('token').value = '';

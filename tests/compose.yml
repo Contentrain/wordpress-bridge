@@ -28,7 +28,7 @@ services:
       WORDPRESS_DB_PASSWORD: bridge-local-only
       WORDPRESS_CONFIG_EXTRA: |
         define('WP_ENVIRONMENT_TYPE', 'local');
-        define('WP_DEBUG', true);
+        if (!defined('WP_DEBUG')) { define('WP_DEBUG', true); }
         define('WP_DEBUG_DISPLAY', false);
     volumes:
       - wp:/var/www/html
@@ -39,6 +39,7 @@ services:
     depends_on:
       - wordpress
     environment:
+      WP_ENVIRONMENT_TYPE: local
       WORDPRESS_DB_HOST: db
       WORDPRESS_DB_NAME: bridge
       WORDPRESS_DB_USER: bridge
