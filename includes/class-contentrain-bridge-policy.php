@@ -85,12 +85,19 @@ final class Policy {
 	/**
 	 * Flat Contentrain frontmatter: scalar values and ordered relation IDs.
 	 *
-	 * `$strict` is the reader-compatibility guard below. It is always on when
-	 * writing a store; the acceptance suite turns it off to emit a fixture of
-	 * what this writer *would* produce, so a reader can be tested against real
-	 * output instead of a reimplementation of it.
+	 * Scalars are JSON-encoded, so a quote, a backslash, a newline or a tab
+	 * survives as an escape rather than breaking the document. That used to be
+	 * refused outright: the published `@contentrain/types` reader stripped a
+	 * scalar's quotes without decoding its escapes, so a title with a quote in
+	 * it came back changed, and publishing a store the reader alters is worse
+	 * than refusing to publish one.
+	 *
+	 * Fixed in `@contentrain/types@1.14.0`, and proven rather than assumed:
+	 * `tests/reader-compat.mjs` reads this writer's own output back with the
+	 * pinned reader and compares it to the values that went in. That gate runs
+	 * in CI, so the compatibility cannot regress silently.
 	 */
-	public static function frontmatter( $data, $strict = true ) {
+	public static function frontmatter( $data ) {
 		ksort( $data, SORT_STRING );
 		$lines = array();
 		foreach ( $data as $key => $value ) {
@@ -104,17 +111,14 @@ final class Policy {
 				}
 			} else {
 				$encoded = wp_json_encode( $value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
-				// The published @contentrain/types reader strips quotes without
-				// unescaping JSON/YAML sequences. Never publish a store it reads lossy.
-				//
-				// Fixed upstream in Contentrain/ai PR #179: the reader now decodes
-				// escapes and both readers share one grammar. Verified against this
-				// writer's exact output — every value this guard rejects today round
-				// trips losslessly, quotes, backslashes, newlines, tabs and all.
-				// Lift this guard, and its two acceptance tests, once the package
-				// carrying that fix is on npm and pinned in package.json.
-				if ( false === $encoded || ( $strict && is_string( $value ) && false !== strpos( $encoded, chr( 92 ) ) ) ) {
-					throw new \RuntimeException( 'Document metadata needs escaped characters unsupported by the current Contentrain reader. Export cannot be finalized until reader compatibility is resolved.' );
+				// Defensive: a value JSON cannot represent at all stops the export
+				// rather than writing a document whose metadata is unreadable.
+				// Not reachable through the obvious route — `wp_json_encode` runs
+				// `_wp_json_sanity_check`, which repairs invalid UTF-8 instead of
+				// failing — so this is left untested rather than paired with a
+				// test that asserts a case WordPress does not produce.
+				if ( false === $encoded ) {
+					throw new \RuntimeException( 'Document metadata could not be encoded.' );
 				}
 				$lines[] = $key . ': ' . $encoded;
 			}

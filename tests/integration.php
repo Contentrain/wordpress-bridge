@@ -326,13 +326,18 @@ check( ! is_dir( Files::dir( $expired ) ), 'expiry uses creation time even when 
 $mapping_job = array( 'uploads' => array( 'baseurl' => 'https://example.test/uploads' ), 'files' => array( 'media/safe.png' => array() ), 'media_paths' => array( 'ç.png' => 'media/safe.png' ) );
 check( '/media/safe.png' === Models::relink( $mapping_job, 'https://example.test/uploads/%C3%A7.png', true ), 'encoded Unicode upload URLs map to safe exported paths' );
 
-rejects( static function () { Policy::frontmatter( array( 'title' => 'A "quoted" title' ) ); }, 'lossy published-reader quote handling blocks finalization' );
-rejects( static function () { Policy::frontmatter( array( 'excerpt' => "line one\nline two" ) ); }, 'lossy published-reader newline handling blocks finalization' );
+// Escape-bearing metadata is written, not refused. It used to be refused, because
+// the published reader stripped a scalar's quotes without decoding its escapes;
+// `@contentrain/types@1.14.0` fixed that and `tests/reader-compat.mjs` proves it
+// against this writer's own output on every CI run.
+$quoted = Policy::frontmatter( array( 'title' => 'A "quoted" title' ) );
+check( 'title: "A ' . chr( 92 ) . '"quoted' . chr( 92 ) . '" title"' === $quoted, 'a quote in metadata is written as an escaped quote' );
+$multiline = Policy::frontmatter( array( 'excerpt' => "line one\nline two" ) );
+check( 'excerpt: "line one' . chr( 92 ) . 'nline two"' === $multiline, 'a newline in metadata is written as an escape' );
+check( 1 === count( explode( "\n", $multiline ) ), 'a multi-line value occupies exactly one frontmatter line' );
 
-// Emit what this writer WOULD produce for values the guard rejects, so a reader
-// can be tested against real output rather than a reimplementation of it. The
-// values and their expected readings travel together; `tests/reader-compat.mjs`
-// reads the document with a chosen @contentrain/types build and compares.
+// The fixture the reader gate reads: this writer's real output for
+// escape-bearing values, with the values that went in beside it.
 $compat = array(
 	'title'    => 'A "quoted" title',
 	'excerpt'  => "line one\nline two",
@@ -348,7 +353,7 @@ $compat = array(
 	'count'    => 42,
 	'flag'     => true,
 );
-Files::put( $dir, 'reader-compat.md', "---\n" . Policy::frontmatter( $compat, false ) . "\n---\nBody text." );
+Files::put( $dir, 'reader-compat.md', "---\n" . Policy::frontmatter( $compat ) . "\n---\nBody text." );
 Files::put( $dir, 'reader-compat.json', Policy::json( $compat ) );
 check( is_file( $dir . '/reader-compat.md' ), 'reader compatibility fixture written for escape-bearing metadata' );
 

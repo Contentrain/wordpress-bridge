@@ -63,6 +63,10 @@ jobs:
           KEEP: 1
       - run: npm run test:plugin
       - run: npm run test:store
+      # The reader gate: this writer's own output, read back with the pinned
+      # @contentrain/types. It decides whether escape-bearing metadata survives,
+      # so a reader regression fails here rather than in a customer's store.
+      - run: npm run test:reader
       - run: npm test
       - name: WordPress uninstall cleanup
         run: docker compose -f tests/compose.yml run --rm -T cli eval-file /var/www/html/wp-content/plugins/contentrain-bridge/tests/uninstall.php

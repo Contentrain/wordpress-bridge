@@ -47,30 +47,25 @@ npm run test:reader                                   # the pinned published rea
 CONTENTRAIN_TYPES=../ai/packages/types/dist/index.mjs npm run test:reader
 ```
 
-`Policy::frontmatter` refuses to finalize an export whose metadata needs escaped
-characters, because the published reader strips a scalar's quotes without
-decoding its escapes. This gate decides whether that refusal is still right, and
-it decides it on *real output*: the acceptance suite writes `reader-compat.md`
-with the plugin's own writer and the guard off, plus `reader-compat.json` with
-the values that went in, and the script reads the document back and compares.
+This gate decides, on *real output*, whether the reader this plugin is pinned to
+can read what this plugin writes. The acceptance suite writes `reader-compat.md`
+with the plugin's own frontmatter writer, plus `reader-compat.json` holding the
+values that went in; the script reads the document back and compares.
 
-Measured today, against the same PHP-produced document:
+It exists because the answer was once no. Until `@contentrain/types@1.14.0` the
+published reader stripped a scalar's quotes without decoding its escapes — 4 of
+14 values came back changed — and `Policy::frontmatter` refused to finalize an
+export whose metadata needed escapes rather than publish content the reader
+would alter. With 1.14.0 pinned, 14 of 14 survive, the guard is gone, and this
+gate runs in CI so the compatibility cannot regress silently.
 
-| Reader | Result |
-|---|---|
-| `@contentrain/types@1.13.1` (published) | 4 of 14 values corrupted — the quote, backslash, newline and tab cases. **Guard stays** |
-| Contentrain/ai PR #179 build | 14 of 14 survive. **Guard can be lifted** |
+Run it against a candidate build before bumping the pin:
 
-When the package carrying that fix is on npm:
+```bash
+CONTENTRAIN_TYPES=../ai/packages/types/dist/index.mjs npm run test:reader
+```
 
-1. Bump the `@contentrain/types` pin in `package.json`.
-2. Run `npm run test:reader`; it must pass without `CONTENTRAIN_TYPES`.
-3. Drop the `$strict` guard from `Policy::frontmatter` and the two
-   `lossy published-reader ... blocks finalization` checks in
-   `tests/integration.php`; replace them with the positive case.
-4. Add `npm run test:reader` to the acceptance job in CI, so the compatibility
-   cannot silently regress.
-5. Remove the release-blocker note from `README.md`.
+A failure means that reader would alter this plugin's output. Do not bump to it.
 
 ## Version
 
@@ -129,7 +124,7 @@ another green CI run.
 
 | Gate | What is actually missing |
 |---|---|
-| **Reader compatibility** | The published `@contentrain/types` reads escaped frontmatter lossily, so Bridge refuses to finalize an export whose metadata needs escapes — which is any site with a double quote in a title or a newline in an excerpt. Fixed in Contentrain/ai PR #179 and **proven against this writer's own PHP output** by `npm run test:reader`. Follow *The reader gate* above once the package is on npm |
+| ~~**Reader compatibility**~~ | **Closed.** `@contentrain/types@1.14.0` decodes escaped frontmatter; the pin is bumped, the guard is gone, and `npm run test:reader` proves it against this writer's own PHP output on every CI run |
 | ~~**B-10 real delivery**~~ | **Closed.** `npm run test:delivery` runs first delivery, pause and resume, repeat delivery, and the conflict after a user edit against a real private repository — see *The delivery gate*. What it does not yet cover: a repository whose tree GitHub truncates, branch protection on the default branch, and the private-content/public-repository refusal |
 | **B-11 real consumption** | Studio reading and editing the delivered models and content, and a Git change reaching the generated Astro page, has not been demonstrated end to end |
 | **B-01 directory review** | Plugin Check reporting zero errors is not directory approval. The manual policy and readme review has not happened. CI lints PHP 7.4 syntax but runs acceptance on one WordPress and one ACF version; large-site and multisite behaviour is untested |
