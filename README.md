@@ -73,8 +73,15 @@ source-code reuse are not yet complete. The manifest explicitly reports incomple
 source coverage. A successful content-store validation is not a claim that every
 WordPress behavior has been migrated.
 
-Release blocker: `@contentrain/types@1.13.0` does not unescape quoted document
-frontmatter values. Bridge fails explicitly on metadata needing escaped quotes,
-backslashes or control characters instead of publishing content the reader changes.
-This must be resolved in the shared reader and validated in Studio/SDK before a
-full-coverage release; the current simple-document fixture does not close it.
+Release blocker, now fixed upstream and awaiting publication: the published
+`@contentrain/types` reader does not unescape quoted document frontmatter values.
+Bridge fails explicitly on metadata needing escaped quotes, backslashes or control
+characters instead of publishing content the reader changes.
+
+Contentrain/ai PR #179 fixes the reader and gives the content engine and the
+`@contentrain/query` generator/loader a single shared grammar, with a parity suite
+asserting both return the same values. This writer's exact output was run through
+the fixed reader: every value the guard rejects today — quotes, backslashes,
+newlines, tabs, Unicode — round trips losslessly. The guard and its two acceptance
+tests stay until that package is on npm and pinned in `package.json`, because the
+rule is what the *published* reader can read, not what a branch can.
