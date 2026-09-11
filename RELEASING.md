@@ -94,6 +94,34 @@ runs against, so the pins are the claim "this plugin's output is readable by the
 published chain". Bump them deliberately and re-run `npm run test:store`; a pin
 ahead of npm, or behind a fix the plugin depends on, makes that claim false.
 
+## The delivery gate
+
+```bash
+KEEP=1 npm run test:wordpress
+BRIDGE_TEST_REPO=owner/repo BRIDGE_TEST_TOKEN=... npm run test:delivery
+```
+
+Everything else proves delivery through a mocked HTTP API, which says a great
+deal about this plugin's state machine and nothing about GitHub. This runs the
+real thing against a real repository: first delivery with a pause and resume
+mid-run, the branch on GitHub matching the commit the plugin reported, every
+exported file present, the manifest self-identifying, the token absent from the
+job state and from user meta, a repeat delivery returning the existing receipt
+without a second commit or a second branch, and — after the delivery is merged
+and a person edits a managed file — the next delivery refusing rather than
+silently winning.
+
+It is not in CI: it needs a repository it may write to and a credential. Use a
+repository that exists only for this, because the run merges into the default
+branch and edits a file there. Give the token Contents read/write on that one
+repository and nothing else; a broadly scoped token has no business in a test
+container.
+
+Last run: **13 checks against `Contentrain/bridge-delivery-test`**, including the
+conflict refusal with the real message — *Git content conflict at
+bridge/site.json. Keep the repository edit and reconcile before exporting
+again.*
+
 ## Open gates
 
 These are the reason this plugin is not on WordPress.org yet. None is closed by
@@ -102,7 +130,7 @@ another green CI run.
 | Gate | What is actually missing |
 |---|---|
 | **Reader compatibility** | The published `@contentrain/types` reads escaped frontmatter lossily, so Bridge refuses to finalize an export whose metadata needs escapes — which is any site with a double quote in a title or a newline in an excerpt. Fixed in Contentrain/ai PR #179 and **proven against this writer's own PHP output** by `npm run test:reader`. Follow *The reader gate* above once the package is on npm |
-| **B-10 real delivery** | The GitHub delivery test is a mock. No real repository has received a delivery: first delivery, repeat delivery, a user edit in between, a conflict, an interruption, and a private-repo restriction are all unproven, and delivery is the plugin's headline feature |
+| ~~**B-10 real delivery**~~ | **Closed.** `npm run test:delivery` runs first delivery, pause and resume, repeat delivery, and the conflict after a user edit against a real private repository — see *The delivery gate*. What it does not yet cover: a repository whose tree GitHub truncates, branch protection on the default branch, and the private-content/public-repository refusal |
 | **B-11 real consumption** | Studio reading and editing the delivered models and content, and a Git change reaching the generated Astro page, has not been demonstrated end to end |
 | **B-01 directory review** | Plugin Check reporting zero errors is not directory approval. The manual policy and readme review has not happened. CI lints PHP 7.4 syntax but runs acceptance on one WordPress and one ACF version; large-site and multisite behaviour is untested |
 | **Source coverage** | `complete_source_coverage: false` is correct and must not be presented otherwise. ACF Pro flexible/relationship/gallery/options and term fields, widget and theme_mods extraction, a real Polylang/WPML fixture, and gettext/JS/HTML scanning accuracy are incomplete |
