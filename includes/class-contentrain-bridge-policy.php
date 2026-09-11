@@ -82,8 +82,15 @@ final class Policy {
 		return preg_replace_callback( '/^( +)/m', static function ( $match ) { return str_repeat( ' ', (int) ( strlen( $match[1] ) / 2 ) ); }, $json ) . "\n";
 	}
 
-	/** Flat Contentrain frontmatter: scalar values and ordered relation IDs. */
-	public static function frontmatter( $data ) {
+	/**
+	 * Flat Contentrain frontmatter: scalar values and ordered relation IDs.
+	 *
+	 * `$strict` is the reader-compatibility guard below. It is always on when
+	 * writing a store; the acceptance suite turns it off to emit a fixture of
+	 * what this writer *would* produce, so a reader can be tested against real
+	 * output instead of a reimplementation of it.
+	 */
+	public static function frontmatter( $data, $strict = true ) {
 		ksort( $data, SORT_STRING );
 		$lines = array();
 		foreach ( $data as $key => $value ) {
@@ -106,7 +113,7 @@ final class Policy {
 				// trips losslessly, quotes, backslashes, newlines, tabs and all.
 				// Lift this guard, and its two acceptance tests, once the package
 				// carrying that fix is on npm and pinned in package.json.
-				if ( false === $encoded || ( is_string( $value ) && false !== strpos( $encoded, chr( 92 ) ) ) ) {
+				if ( false === $encoded || ( $strict && is_string( $value ) && false !== strpos( $encoded, chr( 92 ) ) ) ) {
 					throw new \RuntimeException( 'Document metadata needs escaped characters unsupported by the current Contentrain reader. Export cannot be finalized until reader compatibility is resolved.' );
 				}
 				$lines[] = $key . ': ' . $encoded;

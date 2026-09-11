@@ -7,7 +7,8 @@
     "test:wordpress": "tests/run.sh",
     "test:store": "node tests/verify-store.mjs",
     "package": "python3 tools/package.py",
-    "test:plugin": "tests/check-plugin.sh"
+    "test:plugin": "tests/check-plugin.sh",
+    "test:reader": "node tests/reader-compat.mjs"
   },
   "devDependencies": {
     "@contentrain/types": "1.13.1",

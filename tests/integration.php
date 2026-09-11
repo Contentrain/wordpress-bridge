@@ -329,6 +329,29 @@ check( '/media/safe.png' === Models::relink( $mapping_job, 'https://example.test
 rejects( static function () { Policy::frontmatter( array( 'title' => 'A "quoted" title' ) ); }, 'lossy published-reader quote handling blocks finalization' );
 rejects( static function () { Policy::frontmatter( array( 'excerpt' => "line one\nline two" ) ); }, 'lossy published-reader newline handling blocks finalization' );
 
+// Emit what this writer WOULD produce for values the guard rejects, so a reader
+// can be tested against real output rather than a reimplementation of it. The
+// values and their expected readings travel together; `tests/reader-compat.mjs`
+// reads the document with a chosen @contentrain/types build and compares.
+$compat = array(
+	'title'    => 'A "quoted" title',
+	'excerpt'  => "line one\nline two",
+	'path'     => 'C:' . chr( 92 ) . 'Users' . chr( 92 ) . 'ada',
+	'tabbed'   => "col1\tcol2",
+	'slash'    => 'a/b/c',
+	'unicode'  => 'İstanbul — café ✅ 日本語',
+	'colon'    => 'Title: subtitle',
+	'padded'   => '  padded  ',
+	'blank'    => '',
+	'sku'      => '007',
+	'flagish'  => 'true',
+	'count'    => 42,
+	'flag'     => true,
+);
+Files::put( $dir, 'reader-compat.md', "---\n" . Policy::frontmatter( $compat, false ) . "\n---\nBody text." );
+Files::put( $dir, 'reader-compat.json', Policy::json( $compat ) );
+check( is_file( $dir . '/reader-compat.md' ), 'reader compatibility fixture written for escape-bearing metadata' );
+
 // Snapshot consistency check on a separate job, preserving the finished artifact for external validation.
 delete_user_meta( $admin->ID, 'contentrain_bridge_job_1' );
 $other = Jobs::create( array( 'types' => array( 'page' ) ) );

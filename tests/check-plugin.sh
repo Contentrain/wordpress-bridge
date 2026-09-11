@@ -8,7 +8,7 @@ mkdir -p "$here/.out"
 status=0
 "${cli[@]}" plugin check contentrain-bridge \
   --exclude-directories=tests,tools,dist,.github \
-  --exclude-files=.gitignore,package.json,package-lock.json \
+  --exclude-files=.gitignore,package.json,package-lock.json,RELEASING.md \
   --format=strict-json > "$here/.out/plugin-check.json" || status=$?
 node --input-type=module - "$here/.out/plugin-check.json" "$status" <<'JS'
 import {readFileSync} from 'node:fs';
