@@ -52,5 +52,11 @@ if [ -n "$store" ]; then
   rm -rf "$out"
   mkdir -p "$out"
   docker cp "$("${compose[@]}" ps -q wordpress):$store" "$out/store"
+  # `docker cp` writes with the host user's ownership and the container's modes.
+  # The plugin directory is mounted into the wp-cli container, which runs as
+  # uid 33, so a store it cannot traverse makes Plugin Check die on a directory
+  # it was never meant to look at. Invisible locally, where the same user owns
+  # everything; the first real CI run failed on it.
+  chmod -R a+rX "$out"
   echo "Store copied to $out/store"
 fi

@@ -6,6 +6,9 @@ cli=(docker compose -f "$here/compose.yml" run --rm -T cli)
 "${cli[@]}" plugin install plugin-check --version=2.1.0 --force --activate >/dev/null
 mkdir -p "$here/.out"
 status=0
+# Plugin Check walks the directory before it applies --exclude-directories, so a
+# path it cannot read is a hard failure rather than a skipped exclusion. The
+# acceptance run leaves its store under tests/.out; run.sh makes it traversable.
 "${cli[@]}" plugin check contentrain-bridge \
   --exclude-directories=tests,tools,dist,.github \
   --exclude-files=.gitignore,package.json,package-lock.json,RELEASING.md \
