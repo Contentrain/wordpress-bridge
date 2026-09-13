@@ -11,6 +11,14 @@ Free, local-first WordPress bridge: models site content and interface text as Co
 - Supported local media copied into `media/` and content relinked; missing or oversized files remain source URLs with warnings
 - Output verified against the published Contentrain toolchain, not only the plugin's own validator (`tests/verify-store.mjs`)
 
+> **Source coverage is incomplete, and the export says so.** Every manifest
+> carries `complete_source_coverage: false`. This exports the content layer and
+> the interface text it can model; it does not reproduce a WordPress site.
+> Advanced page-builder runtime, widget and theme settings, rendered-state
+> output and source-code reuse are outside what it reads today — see
+> [Current coverage boundaries](#current-coverage-boundaries). A store that
+> validates is not a claim that a site has been migrated.
+
 The JSON contract is defined by the MIT-licensed `@contentrain/types` package in `Contentrain/ai`; the plugin does not import or embed private Migrate or proprietary Studio code.
 
 ## Development
@@ -69,9 +77,13 @@ ACF shapes that cannot be fully represented use a reported structured fallback;
 partial named models are not accepted. Same-name groups use a stable field-key
 suffix. Nested sensitive ACF values are removed before RawIR is written. Advanced
 builder runtime, widget/theme settings extraction, rendered-state coverage and
-source-code reuse are not yet complete. The manifest explicitly reports incomplete
-source coverage. A successful content-store validation is not a claim that every
-WordPress behavior has been migrated.
+source-code reuse are not yet complete.
+
+Every manifest carries `complete_source_coverage: false`. That flag is the
+honest answer to "is this everything?", and it is set on every export rather
+than only on the ones that noticed a gap. A successful content-store validation
+means the store is well-formed and the published toolchain reads it — not that
+every WordPress behaviour came across.
 
 Document metadata carrying quotes, backslashes, newlines or tabs is written as
 JSON escapes and read back unchanged. That was a release blocker until
