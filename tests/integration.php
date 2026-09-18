@@ -1,5 +1,9 @@
 <?php
 /** Executed inside the dedicated WordPress test container, never a production site. */
+// Polylang only builds its language model (PLL()) in an admin, REST, or
+// already-has-languages context; a plain CLI script is none of those until a
+// language exists. This never runs a real request, so it is safe to force.
+define( 'WP_ADMIN', true );
 require '/var/www/html/wp-load.php';
 if ( 'local' !== wp_get_environment_type() || 'Bridge Acceptance' !== get_option( 'blogname' ) ) {
 	throw new RuntimeException( 'Refusing to run fixtures on a non-test site.' );
@@ -131,6 +135,101 @@ if ( $has_acf ) {
 	), $page );
 }
 
+// Polylang (free): 2 languages, 3 translation groups. Real plugin, not a
+// simulated filter — the language taxonomies it registers, and the mismatch
+// between WordPress's install locale and Polylang's own default language,
+// only ever show up against the real thing.
+$has_polylang = function_exists( 'pll_languages_list' );
+if ( $has_polylang ) {
+	if ( ! in_array( 'en', pll_languages_list(), true ) ) {
+		PLL()->model->languages->add( array( 'locale' => 'en_US' ) );
+	}
+	if ( ! in_array( 'da', pll_languages_list(), true ) ) {
+		PLL()->model->languages->add( array( 'locale' => 'da_DK' ) );
+	}
+	pll_set_post_language( $post, 'en' );
+	pll_set_post_language( $page, 'en' );
+	$post_da = wp_insert_post( array( 'post_type' => 'post', 'post_title' => 'Bridge artikel', 'post_content' => '<p>Dansk indhold.</p>', 'post_status' => 'publish', 'post_author' => $admin->ID ) );
+	pll_set_post_language( $post_da, 'da' );
+	pll_save_post_translations( array( 'en' => $post, 'da' => $post_da ) );
+	$page_da = wp_insert_post( array( 'post_type' => 'page', 'post_title' => 'Om Bridge', 'post_content' => '<p>Redigerbar side.</p>', 'post_status' => 'publish', 'post_author' => $admin->ID ) );
+	pll_set_post_language( $page_da, 'da' );
+	pll_save_post_translations( array( 'en' => $page, 'da' => $page_da ) );
+	$team_en = wp_insert_post( array( 'post_type' => 'page', 'post_title' => 'Team', 'post_content' => '<p>Our team.</p>', 'post_status' => 'publish', 'post_author' => $admin->ID ) );
+	pll_set_post_language( $team_en, 'en' );
+	$team_da = wp_insert_post( array( 'post_type' => 'page', 'post_title' => 'Team', 'post_content' => '<p>Vores team.</p>', 'post_status' => 'publish', 'post_author' => $admin->ID ) );
+	pll_set_post_language( $team_da, 'da' );
+	pll_save_post_translations( array( 'en' => $team_en, 'da' => $team_da ) );
+
+	// A custom post type Polylang does not manage by default still accepts an
+	// explicit language and translation group through the same API.
+	pll_set_post_language( $book, 'en' );
+	$book_da = wp_insert_post( array( 'post_type' => 'bridge_book', 'post_title' => 'Skjult REST-bog', 'post_content' => '<p>Bogindhold.</p>', 'post_status' => 'publish', 'post_author' => $admin->ID ) );
+	pll_set_post_language( $book_da, 'da' );
+	pll_save_post_translations( array( 'en' => $book, 'da' => $book_da ) );
+
+	// A translated page has its own field values, not a copy of the source
+	// language's; mirroring them here (rather than leaving $page_da's ACF
+	// fields unset) is what a real translated page looks like.
+	if ( $has_acf ) {
+		update_field( 'tagline', 'Ejer dit indhold', $page_da );
+		update_field( 'rank', 3, $page_da );
+		update_field( 'featured', true, $page_da );
+		update_field( 'hero', array( 'heading' => 'Ejer dine ord', 'cta' => 'Start nu' ), $page_da );
+		update_field( 'quotes', array(
+			array( 'person' => 'Ada', 'quote' => 'Det ligner min side.' ),
+			array( 'person' => 'Grace', 'quote' => 'Diffen er indholdet.' ),
+		), $page_da );
+		update_field( 'rel', array( $post_da ), $page_da );
+		update_field( 'rel_mixed', array( $post_da, $book_da ), $page_da );
+		update_field( 'rel_out_of_scope', array( $draft, 999999 ), $page_da );
+		update_field( 'po', $post_da, $page_da );
+		update_field( 'cat', (int) $category['term_id'], $page_da );
+		update_field( 'gallery', array( $attachment, $ghost ), $page_da );
+		update_field( 'person', $admin->ID, $page_da );
+		update_field( 'cta_link', array( 'title' => 'Læs mere', 'url' => 'https://example.test/read-more', 'target' => '_blank' ), $page_da );
+		update_field( 'sections', array(
+			array( 'acf_fc_layout' => 'text_block', 'heading' => 'Intro', 'body' => 'Velkomst' ),
+			array( 'acf_fc_layout' => 'quote_block', 'heading' => 'Ros', 'quote' => 'Det virker bare.' ),
+		), $page_da );
+	}
+
+	// Custom post meta is per-post, not per-translation-group; the Danish
+	// member needs its own value or its own structured-value rows have no
+	// same-language counterpart.
+	update_post_meta( $post_da, 'structured', array( 'title' => 'Helt titel', 'items' => array( array( 'label' => 'Første', 'enabled' => true ) ) ) );
+
+	// WordPress's own default page is never tagged with a language; on a real
+	// Polylang site an admin either translates or removes it; removing it
+	// here keeps this fixture's own untranslated-content warnings limited to
+	// the ones this test deliberately creates ($draft, $illustrated).
+	$sample_pages = get_posts( array( 'post_type' => 'page', 'name' => 'sample-page', 'post_status' => 'any', 'numberposts' => 1 ) );
+	foreach ( $sample_pages as $sample_page ) {
+		wp_delete_post( $sample_page->ID, true );
+	}
+}
+
+// Menus: 2 registered theme locations, a post link, a term link, a custom
+// URL, a nested item, an item whose parent id names no sibling, and an item
+// whose target was deleted out from under it.
+register_nav_menus( array( 'bridge-primary' => 'Primary', 'bridge-footer' => 'Footer' ) );
+$existing_primary = wp_get_nav_menu_object( 'Bridge Primary' );
+$primary_menu = $existing_primary ? $existing_primary->term_id : wp_update_nav_menu_object( 0, array( 'menu-name' => 'Bridge Primary' ) );
+$existing_footer = wp_get_nav_menu_object( 'Bridge Footer' );
+$footer_menu = $existing_footer ? $existing_footer->term_id : wp_update_nav_menu_object( 0, array( 'menu-name' => 'Bridge Footer' ) );
+set_theme_mod( 'nav_menu_locations', array( 'bridge-primary' => $primary_menu, 'bridge-footer' => $footer_menu ) );
+$menu_post_item = wp_update_nav_menu_item( $primary_menu, 0, array( 'menu-item-title' => 'Article', 'menu-item-object' => 'post', 'menu-item-object-id' => $post, 'menu-item-type' => 'post_type', 'menu-item-status' => 'publish' ) );
+$menu_child_item = wp_update_nav_menu_item( $primary_menu, 0, array( 'menu-item-title' => 'About (child)', 'menu-item-object' => 'page', 'menu-item-object-id' => $page, 'menu-item-parent-id' => $menu_post_item, 'menu-item-type' => 'post_type', 'menu-item-status' => 'publish', 'menu-item-target' => '_blank', 'menu-item-classes' => 'nav-child featured' ) );
+$menu_orphan_item = wp_update_nav_menu_item( $primary_menu, 0, array( 'menu-item-title' => 'Orphaned child', 'menu-item-object' => 'page', 'menu-item-object-id' => $page, 'menu-item-parent-id' => 999999, 'menu-item-type' => 'post_type', 'menu-item-status' => 'publish' ) );
+$menu_term_item = wp_update_nav_menu_item( $footer_menu, 0, array( 'menu-item-title' => 'Category', 'menu-item-object' => 'category', 'menu-item-object-id' => (int) $category['term_id'], 'menu-item-type' => 'taxonomy', 'menu-item-status' => 'publish' ) );
+$menu_url_item = wp_update_nav_menu_item( $footer_menu, 0, array( 'menu-item-title' => 'External', 'menu-item-url' => 'https://example.test/about', 'menu-item-type' => 'custom', 'menu-item-status' => 'publish' ) );
+// A menu item whose target post was later deleted cannot be fixtured by
+// deleting it: WordPress itself removes the menu item when its target post
+// is deleted (`_wp_delete_post_menu_item`), so the only way a menu item
+// actually carries an unresolvable post-type target is one that never
+// resolved in the first place.
+$menu_broken_item = wp_update_nav_menu_item( $footer_menu, 0, array( 'menu-item-title' => 'Gone', 'menu-item-object' => 'page', 'menu-item-object-id' => 987654321, 'menu-item-type' => 'post_type', 'menu-item-status' => 'publish' ) );
+
 $comment = wp_insert_comment( array( 'comment_post_ID' => $post, 'comment_author' => 'Reviewer', 'comment_author_email' => 'private@example.test', 'comment_author_IP' => '192.0.2.1', 'comment_content' => 'Public comment', 'comment_approved' => 1 ) );
 update_comment_meta( $comment, 'other_email', 'private-in-meta@example.test' );
 $warnings = array();
@@ -143,7 +242,12 @@ rejects( static function () { Files::dir( '../../' ); }, 'invalid job id is reje
 
 $fixture = sys_get_temp_dir() . '/bridge-scan-fixture.php';
 file_put_contents( $fixture, '<h1>Visible heading</h1><input placeholder="Your name" aria-label="Full name"><script>var secret="Do not export this script"</script><?php __("Save changes", "fixture"); _n("One item", "%d items", 3, "fixture"); ?>' );
-$scan = Scanner::scan( $fixture, Source::locale( get_locale() ) );
+// The job itself scans with `$job['default_locale']` (`Jobs::sources()`); this
+// unit-level probe of the Scanner class predates the job, so it must use the
+// same `Source::default_locale()` computation directly, not WordPress's raw
+// install locale — the two are no longer the same string once Polylang's own
+// default language is active, and a mismatch here seeds a phantom locale.
+$scan = Scanner::scan( $fixture, Source::default_locale() );
 $values = array_column( $scan['candidates'], 'value' );
 check( in_array( 'Save changes', $values, true ), 'PHP gettext literal is captured' );
 check( in_array( '%d items', $values, true ), 'plural placeholder is preserved' );
@@ -237,14 +341,83 @@ check( false !== strpos( $doc, 'selected_copy' ), 'custom content is modelled in
 $raw_comments = json_decode( Files::read( $dir, 'bridge/raw-comments.json' ), true );
 check( ! isset( $raw_comments[ $comment ]['email'] ), 'comment email field excluded' );
 check( false === strpos( Policy::json( $raw_comments ), 'private-in-meta' ), 'comment metadata cannot leak personal information' );
-// A single-language site must produce the store the rest of the toolchain
-// writes for it: no locale in content file names, and no i18n models.
-check( false === $job['i18n'], 'single-language site is not modelled as i18n' );
-check( false === $job['models']['wp-post']['i18n'], 'models declare i18n false' );
-check( isset( $job['files'][ '.contentrain/content/blog/wp-post/' . $address['entry_id'] . '.md' ] ), 'monolingual document is {slug}.md' );
-check( isset( $job['tables']['.contentrain/content/site/wp-page/data.json'] ), 'monolingual collection is data.json' );
-check( isset( $job['files'][ '.contentrain/meta/wp-post/' . $address['entry_id'] . '/' . $address['locale'] . '.json' ] ), 'meta keeps the locale even when content does not' );
-check( ! isset( $job['files'][ '.contentrain/content/blog/wp-post/' . $address['entry_id'] . '/' . $address['locale'] . '.md' ] ), 'no locale directory is written for one language' );
+if ( $has_polylang ) {
+	// A real Polylang site with more than one language must produce the
+	// locale-per-file store the rest of the toolchain expects for it.
+	check( true === $job['i18n'], 'a Polylang site with more than one language is modelled as i18n' );
+	check( true === $job['models']['wp-post']['i18n'], 'models declare i18n true' );
+	check( isset( $job['files'][ '.contentrain/content/blog/wp-post/' . $address['entry_id'] . '/' . $address['locale'] . '.md' ] ), 'i18n document is {id}/{locale}.md' );
+	check( isset( $job['tables'][ '.contentrain/content/site/wp-page/' . $address['locale'] . '.json' ] ), 'i18n collection is {locale}.json' );
+	check( isset( $job['files'][ '.contentrain/meta/wp-post/' . $address['entry_id'] . '/' . $address['locale'] . '.json' ] ), 'meta keeps its own locale' );
+	check( ! isset( $job['files'][ '.contentrain/content/blog/wp-post/' . $address['entry_id'] . '.md' ] ), 'an i18n document is not also written flat' );
+} else {
+	// A single-language site must produce the store the rest of the toolchain
+	// writes for it: no locale in content file names, and no i18n models.
+	check( false === $job['i18n'], 'single-language site is not modelled as i18n' );
+	check( false === $job['models']['wp-post']['i18n'], 'models declare i18n false' );
+	check( isset( $job['files'][ '.contentrain/content/blog/wp-post/' . $address['entry_id'] . '.md' ] ), 'monolingual document is {slug}.md' );
+	check( isset( $job['tables']['.contentrain/content/site/wp-page/data.json'] ), 'monolingual collection is data.json' );
+	check( isset( $job['files'][ '.contentrain/meta/wp-post/' . $address['entry_id'] . '/' . $address['locale'] . '.json' ] ), 'meta keeps the locale even when content does not' );
+	check( ! isset( $job['files'][ '.contentrain/content/blog/wp-post/' . $address['entry_id'] . '/' . $address['locale'] . '.md' ] ), 'no locale directory is written for one language' );
+}
+// The monolingual path shape is real code (`Models::content_path`'s `i18n`
+// branch), just not exercised end to end while Polylang makes this fixture
+// i18n; check it directly against a synthetic non-i18n model so it cannot
+// regress silently.
+check( '.contentrain/content/blog/wp-post/entry-9.md' === Models::content_path( $job, array( 'domain' => 'blog', 'id' => 'wp-post', 'kind' => 'document', 'i18n' => false ), 'en', 'entry-9' ), 'a monolingual document path has no locale segment' );
+check( '.contentrain/content/site/wp-page/data.json' === Models::content_path( $job, array( 'domain' => 'site', 'id' => 'wp-page', 'kind' => 'collection', 'i18n' => false ), 'en' ), 'a monolingual collection path is data.json' );
+
+if ( $has_polylang ) {
+	// One pair per translation group (`RawLanguagePair`'s contract), keyed by
+	// its canonical (default-locale) member — not one row per post.
+	// `translations` is a locale => id map (`RawLanguagePair`'s `Record<string, number>`),
+	// with no defined key order; Polylang itself returns it ordered by which
+	// post you queried, not by locale, so compare as a map, not by identity.
+	$same_map = static function ( $expected, $actual ) { ksort( $expected ); ksort( $actual ); return $expected === $actual; };
+	$pairs = json_decode( Files::read( $dir, 'bridge/language-pairs.json' ), true );
+	check( isset( $pairs[ $post ] ) && $same_map( array( 'en' => $post, 'da' => $post_da ), $pairs[ $post ]['translations'] ), 'the post/post_da group has exactly one pair, keyed by the English member' );
+	check( isset( $pairs[ $page ] ) && $same_map( array( 'en' => $page, 'da' => $page_da ), $pairs[ $page ]['translations'] ), 'the page/page_da group has exactly one pair' );
+	check( isset( $pairs[ $team_en ] ) && $same_map( array( 'en' => $team_en, 'da' => $team_da ), $pairs[ $team_en ]['translations'] ), 'a third, unrelated translation group is also a single pair' );
+	check( ! isset( $pairs[ $post_da ] ) && ! isset( $pairs[ $page_da ] ) && ! isset( $pairs[ $team_da ] ), 'the non-canonical member of each group writes no pair of its own' );
+	// A re-used test database accumulates earlier runs' groups (RELEASING.md's
+	// own caveat), so this counts at least this run's three rather than an
+	// exact total; each da-tagged member above already proves no duplicate
+	// per-post row exists for this run's own groups.
+	check( count( $pairs ) >= 3, 'at least this run\'s three translation groups produced a pair' );
+
+	// Polylang's own bookkeeping taxonomies must never surface as content models.
+	foreach ( array( 'wp-tax-language', 'wp-tax-post-translations', 'wp-tax-term-language', 'wp-tax-term-translations' ) as $bookkeeping_model ) {
+		check( ! isset( $job['models'][ $bookkeeping_model ] ), "Polylang's own $bookkeeping_model taxonomy never becomes a model" );
+	}
+
+	// Menus: two locations, a post link, a term link, a custom URL, a resolved
+	// parent, an unresolved parent, and a target deleted out from under it.
+	$menu_items = json_decode( Files::read( $dir, Models::content_path( $job, 'wp-menu-items', $job['default_locale'] ) ), true );
+	$menu_id = static function ( $wp_item_id ) { return substr( hash( 'sha256', 'menu:' . $wp_item_id ), 0, 12 ); };
+	$post_row = $menu_items[ $menu_id( $menu_post_item ) ];
+	check( 'post' === $post_row['target_kind'] && true === $post_row['target_resolved'] && 'post' === $post_row['target_post_type'] && get_post( $post )->post_name === $post_row['target_slug'], 'a post-type menu item resolves kind/post_type/slug' );
+	check( 'bridge-primary' === $post_row['location'], 'a menu assigned to a theme location carries it' );
+	check( ! isset( $post_row['parent'] ), 'a top-level item has no parent field' );
+	$child_row = $menu_items[ $menu_id( $menu_child_item ) ];
+	check( $menu_id( $menu_post_item ) === $child_row['parent'], 'a nested item is a relation to its own parent row, not a raw WordPress id' );
+	check( '_blank' === $child_row['window_target'] && 'nav-child featured' === $child_row['classes'], 'window target and classes survive' );
+	$orphan_row = $menu_items[ $menu_id( $menu_orphan_item ) ];
+	check( ! isset( $orphan_row['parent'] ), 'a parent id naming no sibling in this menu is not written as a relation' );
+	$term_row = $menu_items[ $menu_id( $menu_term_item ) ];
+	check( 'term' === $term_row['target_kind'] && true === $term_row['target_resolved'] && 'category' === $term_row['target_taxonomy'] && 'bridge-fixture-category' === $term_row['target_slug'], 'a taxonomy menu item resolves kind/taxonomy/slug' );
+	check( 'bridge-footer' === $term_row['location'], 'the second menu carries the second location' );
+	$url_row = $menu_items[ $menu_id( $menu_url_item ) ];
+	check( 'url' === $url_row['target_kind'] && true === $url_row['target_resolved'] && ! isset( $url_row['target_post_type'] ) && ! isset( $url_row['target_taxonomy'] ), 'a custom URL item carries no post/term target fields' );
+	$broken_row = $menu_items[ $menu_id( $menu_broken_item ) ];
+	// WordPress itself never resolves a link for a post/term target that never
+	// existed, so there is no URL to fall back to; the honest outcome is a
+	// reported, unresolved target with no `url` field, not an invented link.
+	check( false === $broken_row['target_resolved'] && ! isset( $broken_row['url'] ), 'a target that never resolves is reported, not given a fabricated URL' );
+	$warnings = json_decode( Files::read( $dir, 'bridge/warnings.json' ), true );
+	$warning_reasons = implode( '|', array_column( $warnings, 'reason' ) );
+	check( false !== strpos( $warning_reasons, 'menu-parent-not-in-document' ), 'an unresolved menu parent is reported, not silently dropped' );
+	check( false !== strpos( $warning_reasons, 'menu-target-not-in-document' ), 'an unresolved menu target is reported, not silently dropped' );
+}
 
 // Model files must carry Contentrain's canonical key order, or the first write
 // from Studio/MCP reorders every model and shows a whole-file diff.

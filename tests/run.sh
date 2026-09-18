@@ -40,6 +40,14 @@ if ! "${cli[@]}" plugin is-installed advanced-custom-fields >/dev/null 2>&1; the
 fi
 "${cli[@]}" plugin activate advanced-custom-fields >/dev/null
 
+# Menus and language pairs are only real once a real multilingual plugin
+# tags real content; Polylang is free, from wordpress.org, and required for
+# the same reason ACF is: a failed dependency install is not a passing test.
+if ! "${cli[@]}" plugin is-installed polylang >/dev/null 2>&1; then
+  "${cli[@]}" plugin install polylang >/dev/null
+fi
+"${cli[@]}" plugin activate polylang >/dev/null
+
 log="$(mktemp)"
 "${compose[@]}" exec -T wordpress \
   php /var/www/html/wp-content/plugins/contentrain-bridge/tests/integration.php | tee "$log"
@@ -60,3 +68,11 @@ if [ -n "$store" ]; then
   chmod -R a+rX "$out"
   echo "Store copied to $out/store"
 fi
+
+# Polylang filters WordPress's own term queries by "current language" once
+# active — a global behaviour change, not just new fields the way ACF adds
+# them. The store this run produced is already captured on disk; later CI
+# steps (test:seo, test:delta, test:e2e, ...) reuse this same KEEP=1 site and
+# know nothing about Polylang, so leaving it active would break their own
+# taxonomy lookups for terms nothing here ever tags with a language.
+"${cli[@]}" plugin deactivate polylang >/dev/null

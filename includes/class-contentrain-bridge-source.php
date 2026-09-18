@@ -71,13 +71,41 @@ final class Source {
 		return $locale;
 	}
 
+	/**
+	 * The project's own default locale. `get_locale()` is WordPress's install
+	 * locale, a site-level setting a multilingual plugin's own language list
+	 * need not even contain (a WP site installed as `en_US` can run Polylang
+	 * with only `da`/`sv` configured); once a multilingual plugin manages its
+	 * own default language, that is the one every other locale is judged
+	 * against, or `default_locale`/`canonical` would use a locale string no
+	 * post ever actually carries.
+	 */
+	public static function default_locale() {
+		if ( function_exists( 'pll_default_language' ) && pll_default_language() ) {
+			return self::locale( pll_default_language() );
+		}
+		if ( has_filter( 'wpml_default_language' ) ) {
+			$default = apply_filters( 'wpml_default_language', null );
+			if ( $default ) {
+				return self::locale( $default );
+			}
+		}
+		return self::locale( get_locale() );
+	}
+
 	public static function language( $post ) {
 		$code = function_exists( 'pll_get_post_language' ) ? pll_get_post_language( $post->ID ) : null;
 		if ( ! $code && has_filter( 'wpml_post_language_details' ) ) {
 			$details = apply_filters( 'wpml_post_language_details', null, $post->ID );
 			$code = is_array( $details ) ? ( $details['language_code'] ?? null ) : null;
 		}
-		return self::locale( $code ?: get_locale() );
+		// An untagged post (Polylang does not manage every post type, e.g.
+		// attachments by default) falls back to the project's own default
+		// locale, not WordPress's install locale — the two diverge as soon as a
+		// multilingual plugin's default language is not the site's install
+		// locale, which would otherwise scatter untagged content into a locale
+		// nothing else in the export uses.
+		return self::locale( $code ?: self::default_locale() );
 	}
 
 	public static function translations( $post ) {
@@ -96,8 +124,36 @@ final class Source {
 	}
 
 	public static function address( $post ) {
-		$canonical = min( array_values( self::translations( $post ) ) );
+		$canonical = self::canonical( self::translations( $post ) );
 		return array( 'model_id' => 'wp-' . sanitize_title( str_replace( '_', '-', $post->post_type ) ), 'entry_id' => 'post' === $post->post_type ? 'entry-' . $canonical : substr( hash( 'sha256', 'wp:' . $canonical ), 0, 12 ), 'locale' => self::language( $post ) );
+	}
+
+	/**
+	 * Which translation is the group's canonical member: the default-locale
+	 * post, else the lowest id. Matches `@contentrain/wp-import`'s documented
+	 * rule so a WXR/REST import and a Bridge export of the same site agree on
+	 * one entry id per translation group instead of picking differently.
+	 */
+	public static function canonical( $translations ) {
+		return $translations[ self::default_locale() ] ?? min( array_values( $translations ) );
+	}
+
+	/**
+	 * A post reference is only as good as this export's own scope: a target
+	 * outside the selected types, or excluded by status/private, would point
+	 * at an entry that never gets written. Shared by ACF post_object/
+	 * relationship fields and by menu items linking to a post.
+	 */
+	public static function reference( $job, $post_id ) {
+		$target = get_post( (int) $post_id );
+		if ( ! $target || ! in_array( $target->post_type, $job['options']['types'], true ) || in_array( $target->post_status, array( 'auto-draft', 'trash' ), true ) ) {
+			return null;
+		}
+		if ( ! $job['options']['private'] && ( $target->post_password || ! in_array( $target->post_status, array( 'publish', 'inherit' ), true ) ) ) {
+			return null;
+		}
+		$address = self::address( $target );
+		return array( $address['model_id'], $address['entry_id'] );
 	}
 
 	/** Capture source without executing shortcodes or arbitrary theme code. */

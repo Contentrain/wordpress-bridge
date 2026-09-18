@@ -75,7 +75,7 @@ final class Models {
 		return 'document' === $m['kind'] ? $root . $id . '/' . $effective . '.json' : $root . $effective . '.json';
 	}
 
-	public static function model( &$job, $id, $kind, $domain, $name, $fields, $title = 'title' ) {
+	public static function model( &$job, $id, $kind, $domain, $name, $fields, $title = 'title', $i18n = null ) {
 		if ( 'dictionary' !== $kind && isset( $fields[ $title ] ) ) {
 			$fields[ $title ]['required'] = true;
 		}
@@ -88,7 +88,12 @@ final class Models {
 			}
 			$fields = array_merge( $existing['fields'] ?? array(), $fields );
 		}
-		$job['models'][ $id ] = array( 'id' => $id, 'kind' => $kind, 'domain' => $domain, 'name' => $name, 'i18n' => $job['i18n'], 'title_field' => $title );
+		// A model whose rows are not per-language content — shared reference data
+		// like authors, terms, media and menu items, none of which this plugin
+		// sources a translation for — declares `i18n` false on its own rather
+		// than inheriting the job's, or an i18n site's own validator demands a
+		// same-language copy of every one of them that does not exist.
+		$job['models'][ $id ] = array( 'id' => $id, 'kind' => $kind, 'domain' => $domain, 'name' => $name, 'i18n' => $i18n ?? $job['i18n'], 'title_field' => $title );
 		if ( 'dictionary' !== $kind ) {
 			$job['models'][ $id ]['fields'] = $fields ?: (object) array();
 		}
@@ -214,7 +219,12 @@ final class Models {
 		self::row( $job, 'bridge/entry-source-map.json', $p['id'], $a );
 		self::row( $job, 'bridge/raw-posts.json', $p['id'], $p );
 		self::row( $job, 'bridge/routes.json', $p['id'], array( 'source_url' => $p['link'], 'entry' => $a, 'body_format' => 'wordpress-html', 'source_hash' => hash( 'sha256', Policy::json( $p ) ) ) );
-		self::row( $job, 'bridge/language-pairs.json', $p['id'], array( 'post' => $p['id'], 'translations' => $record['translations'] ) );
+		// One pair per translation group (`RawLanguagePair`'s own contract), not
+		// one per post: every member of the group carries the identical map, so
+		// only the canonical member writes it.
+		if ( Source::canonical( $record['translations'] ) === $p['id'] ) {
+			self::row( $job, 'bridge/language-pairs.json', $p['id'], array( 'post' => $p['id'], 'translations' => $record['translations'] ) );
+		}
 		if ( $record['acf_schema'] ) {
 			self::row( $job, 'bridge/acf-schema.json', $p['id'], $record['acf_schema'] );
 		}
@@ -257,17 +267,20 @@ final class Models {
 			return null;
 		}
 		$ref = substr( hash( 'sha256', 'author:' . $author->ID ), 0, 12 );
-		self::model( $job, 'wp-authors', 'collection', 'blog', 'Authors', array( 'name' => array( 'type' => 'string' ), 'wp_id' => array( 'type' => 'integer' ) ), 'name' );
+		self::model( $job, 'wp-authors', 'collection', 'blog', 'Authors', array( 'name' => array( 'type' => 'string' ), 'wp_id' => array( 'type' => 'integer' ) ), 'name', false );
 		self::entry( $job, 'wp-authors', $locale, $ref, array( 'name' => $author->display_name, 'wp_id' => (int) $author->ID ) );
 		self::row( $job, 'bridge/raw-authors.json', $author->ID, array( 'id' => (int) $author->ID, 'login' => $author->user_login, 'display_name' => $author->display_name ) );
 		return array( 'model' => 'wp-authors', 'id' => $ref );
 	}
 
-	public static function term( &$job, $term, $locale ) {
-		$mid = 'wp-tax-' . str_replace( '_', '-', sanitize_title( $term->taxonomy ) );
-		$id = substr( hash( 'sha256', 'term:' . $term->term_id ), 0, 12 );
-		self::model( $job, $mid, 'collection', 'site', $term->taxonomy, array( 'name' => array( 'type' => 'string' ), 'description' => array( 'type' => 'richtext' ), 'wp_id' => array( 'type' => 'integer' ), 'source_slug' => array( 'type' => 'string' ) ), 'name' );
-		self::entry( $job, $mid, $locale, $id, array( 'name' => $term->name, 'description' => $term->description, 'wp_id' => (int) $term->term_id, 'source_slug' => $term->slug ) );
+	/**
+	 * Raw evidence for one term, independent of whether it becomes a model.
+	 * `RawTerm`'s own contract has no "public taxonomy only" carve-out — a
+	 * WXR export of the same site includes every taxonomy, bookkeeping ones
+	 * included, and Bridge's raw completeness claim has to match it. Content
+	 * modelling is a separate, narrower decision made by the caller.
+	 */
+	public static function term_raw( &$job, $term ) {
 		$parent = $term->parent ? get_term( $term->parent, $term->taxonomy ) : null;
 		// Term meta travels with the raw term; secret-like keys and values never do.
 		$meta = array();
@@ -280,7 +293,95 @@ final class Models {
 		}
 		ksort( $meta );
 		self::row( $job, 'bridge/raw-terms.json', $term->term_id, array( 'id' => (int) $term->term_id, 'taxonomy' => $term->taxonomy, 'slug' => $term->slug, 'name' => $term->name, 'description' => $term->description, 'parent' => $parent && ! is_wp_error( $parent ) ? $parent->slug : null, 'parent_resolved' => ! $term->parent || ( $parent && ! is_wp_error( $parent ) ), 'meta' => $meta ?: (object) array() ) );
+	}
+
+	public static function term( &$job, $term, $locale ) {
+		$mid = 'wp-tax-' . str_replace( '_', '-', sanitize_title( $term->taxonomy ) );
+		$id = substr( hash( 'sha256', 'term:' . $term->term_id ), 0, 12 );
+		self::model( $job, $mid, 'collection', 'site', $term->taxonomy, array( 'name' => array( 'type' => 'string' ), 'description' => array( 'type' => 'richtext' ), 'wp_id' => array( 'type' => 'integer' ), 'source_slug' => array( 'type' => 'string' ) ), 'name', false );
+		self::entry( $job, $mid, $locale, $id, array( 'name' => $term->name, 'description' => $term->description, 'wp_id' => (int) $term->term_id, 'source_slug' => $term->slug ) );
+		self::term_raw( $job, $term );
 		return array( 'model' => $mid, 'id' => $id );
+	}
+
+	/**
+	 * Menu items become one collection. A target can be a post, a term, an
+	 * archive or a plain URL — heterogeneous across items of the very same
+	 * field — so it is carried as descriptive columns (kind/post_type/
+	 * taxonomy/slug/resolved) rather than forced into a single fixed relation
+	 * a Contentrain field cannot represent across more than one target model.
+	 * `parent` is the one relation here: every parent is another row of this
+	 * same collection, never a different model.
+	 */
+	public static function menus( &$job, $menus, $locations ) {
+		self::model( $job, 'wp-menu-items', 'collection', 'site', 'Navigation links', array(
+			'title' => array( 'type' => 'string' ),
+			'url' => array( 'type' => 'url' ),
+			'position' => array( 'type' => 'integer' ),
+			'menu' => array( 'type' => 'string' ),
+			'location' => array( 'type' => 'string' ),
+			'target_kind' => array( 'type' => 'string' ),
+			'target_post_type' => array( 'type' => 'string' ),
+			'target_taxonomy' => array( 'type' => 'string' ),
+			'target_slug' => array( 'type' => 'string' ),
+			'target_resolved' => array( 'type' => 'boolean' ),
+			'window_target' => array( 'type' => 'string' ),
+			'classes' => array( 'type' => 'text' ),
+			'parent' => array( 'type' => 'relation', 'model' => 'wp-menu-items' ),
+		), 'title', false );
+		foreach ( $menus as $menu ) {
+			$menu_locations = array();
+			foreach ( (array) $locations as $slug => $assigned ) {
+				if ( (int) $assigned === (int) $menu['id'] ) {
+					$menu_locations[] = $slug;
+				}
+			}
+			foreach ( $menu['items'] as $item ) {
+				$target = $item['target'];
+				$data = array(
+					'title' => $item['title'],
+					'position' => (int) $item['order'],
+					'menu' => $menu['name'],
+					'target_kind' => $target['kind'],
+					'target_resolved' => (bool) $target['resolved'],
+				);
+				// WordPress itself only ever resolves a link for a post/term whose
+				// target still exists; one that never resolved carries no URL to
+				// fall back to, not an empty string a `url` field would reject.
+				if ( ! empty( $item['url'] ) ) {
+					$data['url'] = $item['url'];
+				}
+				if ( $menu_locations ) {
+					$data['location'] = implode( ',', $menu_locations );
+				}
+				if ( ! empty( $target['post_type'] ) ) {
+					$data['target_post_type'] = $target['post_type'];
+				}
+				if ( ! empty( $target['taxonomy'] ) ) {
+					$data['target_taxonomy'] = $target['taxonomy'];
+				}
+				if ( ! empty( $target['slug'] ) ) {
+					$data['target_slug'] = $target['slug'];
+				}
+				if ( ! empty( $item['target_attr'] ) ) {
+					$data['window_target'] = $item['target_attr'];
+				}
+				if ( ! empty( $item['classes'] ) ) {
+					$data['classes'] = implode( ' ', $item['classes'] );
+				}
+				if ( ! $target['resolved'] ) {
+					Jobs::warning( $job, array( 'source' => 'menu-item/' . $item['id'], 'reason' => 'menu-target-not-in-document: url fallback used' ) );
+				}
+				if ( $item['parent'] ) {
+					if ( $item['parent_unresolved'] ) {
+						Jobs::warning( $job, array( 'source' => 'menu-item/' . $item['id'], 'reason' => 'menu-parent-not-in-document' ) );
+					} else {
+						$data['parent'] = substr( hash( 'sha256', 'menu:' . $item['parent'] ), 0, 12 );
+					}
+				}
+				self::entry( $job, 'wp-menu-items', $job['default_locale'], substr( hash( 'sha256', 'menu:' . $item['id'] ), 0, 12 ), $data );
+			}
+		}
 	}
 
 	/** Check short writes so disk exhaustion cannot produce a successful truncated table. */
