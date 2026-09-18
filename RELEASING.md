@@ -126,10 +126,12 @@ another green CI run.
 |---|---|
 | ~~**Reader compatibility**~~ | **Closed.** `@contentrain/types@1.14.0` decodes escaped frontmatter; the pin is bumped, the guard is gone, and `npm run test:reader` proves it against this writer's own PHP output on every CI run |
 | ~~**B-10 real delivery**~~ | **Closed.** `npm run test:delivery` runs first delivery, pause and resume, repeat delivery, and the conflict after a user edit against a real private repository — see *The delivery gate*. What it does not yet cover: a repository whose tree GitHub truncates, branch protection on the default branch, and the private-content/public-repository refusal |
+| ~~**Remote**~~ | **Closed.** `git ls-remote origin` and `git branch -vv` confirm `main` is pushed and in sync with `github.com/Contentrain/wordpress-bridge` |
 | **B-11 real consumption** | Studio reading and editing the delivered models and content, and a Git change reaching the generated Astro page, has not been demonstrated end to end |
 | **B-01 directory review** | Plugin Check reporting zero errors is not directory approval. The manual policy and readme review has not happened. CI lints PHP 7.4 syntax but runs acceptance on one WordPress and one ACF version; large-site and multisite behaviour is untested |
 | **Source coverage** | `complete_source_coverage: false` is correct and must not be presented otherwise. ACF Pro flexible/relationship/gallery/options and term fields, widget and theme_mods extraction, a real Polylang/WPML fixture, and gettext/JS/HTML scanning accuracy are incomplete |
-| **Remote** | The repository is local-only. `github.com/Contentrain/wordpress-bridge` does not exist yet |
+
+Three gates remain open: **B-11 real consumption**, **B-01 directory review**, and **Source coverage** — see above.
 
 ## Plugin Check warnings
 
