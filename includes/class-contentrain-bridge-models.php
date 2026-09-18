@@ -269,7 +269,17 @@ final class Models {
 		self::model( $job, $mid, 'collection', 'site', $term->taxonomy, array( 'name' => array( 'type' => 'string' ), 'description' => array( 'type' => 'richtext' ), 'wp_id' => array( 'type' => 'integer' ), 'source_slug' => array( 'type' => 'string' ) ), 'name' );
 		self::entry( $job, $mid, $locale, $id, array( 'name' => $term->name, 'description' => $term->description, 'wp_id' => (int) $term->term_id, 'source_slug' => $term->slug ) );
 		$parent = $term->parent ? get_term( $term->parent, $term->taxonomy ) : null;
-		self::row( $job, 'bridge/raw-terms.json', $term->term_id, array( 'id' => (int) $term->term_id, 'taxonomy' => $term->taxonomy, 'slug' => $term->slug, 'name' => $term->name, 'description' => $term->description, 'parent' => $parent && ! is_wp_error( $parent ) ? $parent->slug : null, 'parent_resolved' => ! $term->parent || ( $parent && ! is_wp_error( $parent ) ) ) );
+		// Term meta travels with the raw term; secret-like keys and values never do.
+		$meta = array();
+		$excluded = array();
+		foreach ( get_term_meta( $term->term_id ) as $key => $values ) {
+			if ( ! Policy::sensitive( $key ) ) {
+				$value = 1 === count( (array) $values ) ? reset( $values ) : array_values( (array) $values );
+				$meta[ $key ] = Policy::clean( is_string( $value ) && is_serialized( $value ) ? unserialize( $value, array( 'allowed_classes' => false, 'max_depth' => 32 ) ) : $value, $excluded, 'term/' . $term->term_id . '/' . $key ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_unserialize -- Class instantiation is explicitly disabled.
+			}
+		}
+		ksort( $meta );
+		self::row( $job, 'bridge/raw-terms.json', $term->term_id, array( 'id' => (int) $term->term_id, 'taxonomy' => $term->taxonomy, 'slug' => $term->slug, 'name' => $term->name, 'description' => $term->description, 'parent' => $parent && ! is_wp_error( $parent ) ? $parent->slug : null, 'parent_resolved' => ! $term->parent || ( $parent && ! is_wp_error( $parent ) ), 'meta' => $meta ?: (object) array() ) );
 		return array( 'model' => $mid, 'id' => $id );
 	}
 
