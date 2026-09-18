@@ -37,6 +37,10 @@ final class Jobs {
 		$site = array( 'url' => home_url( '/' ), 'title' => get_bloginfo( 'name' ), 'description' => get_bloginfo( 'description' ), 'language' => $locale, 'base_site_url' => site_url( '/' ), 'base_blog_url' => home_url( '/' ), 'generator' => 'WordPress/' . get_bloginfo( 'version' ), 'export_date' => $job['created_at'] );
 		Models::file( $job, 'bridge/site.json', Policy::json( $site ) );
 		Models::file( $job, 'bridge/options.json', Policy::json( Exporter::options() ) );
+		// Site-wide SEO, redirect and address rules: small, and read once, inside the snapshot.
+		Models::file( $job, 'bridge/seo.json', Policy::json( Seo::document() ) );
+		Models::file( $job, 'bridge/redirects.json', Policy::json( Redirects::document() ) );
+		Models::file( $job, 'bridge/routing.json', Policy::json( Routing::document() ) );
 		Models::model( $job, 'site', 'singleton', 'site', 'Site', array( 'title' => array( 'type' => 'string' ), 'description' => array( 'type' => 'text' ), 'source_url' => array( 'type' => 'url' ) ) );
 		Models::entry( $job, 'site', $locale, '', array( 'title' => $site['title'], 'description' => $site['description'], 'source_url' => $site['url'] ) );
 		$menus = Exporter::menus();
@@ -280,6 +284,10 @@ final class Jobs {
 				self::warning( $job, $warning );
 			}
 			Models::post( $job, $record );
+			$seo = Seo::post( $p );
+			if ( $seo ) {
+				Models::row( $job, 'bridge/seo-entries.json', 'post:' . $id, $seo );
+			}
 			++$job['counts']['posts'];
 		}
 		if ( count( $ids ) < 25 ) {
@@ -300,6 +308,10 @@ final class Jobs {
 				throw new \RuntimeException( 'Cannot read taxonomy term.' );
 			}
 			Models::term( $job, $t, $job['default_locale'] );
+			$seo = Seo::term( $t );
+			if ( $seo ) {
+				Models::row( $job, 'bridge/seo-entries.json', 'term:' . $t->taxonomy . ':' . $t->term_id, $seo );
+			}
 			$job['cursor'] = (int) $id;
 		}
 		if ( count( $ids ) < 50 ) {

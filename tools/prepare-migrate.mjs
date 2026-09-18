@@ -39,7 +39,14 @@ export function prepareMigrate(source, destination) {
     terms: values('bridge/raw-terms.json'), attachments: values('bridge/raw-attachments.json'),
     comments: values('bridge/raw-comments.json'), menus: json('bridge/raw-menus.json', []),
     language_pairs: values('bridge/language-pairs.json'), options: json('bridge/options.json', {}),
+    // RawIR.redirects is RawRedirect[]: what the site serves. Excluded rules stay in bridge/redirects.json.
+    redirects: json('bridge/redirects.json', { redirects: [] }).redirects,
   }
+  // Not yet RawIR fields (proposed in the B-04 contract); carried beside it rather than dropped.
+  const seo = json('bridge/seo.json', null)
+  if (seo) raw.seo = { ...seo, entries: json('bridge/seo-entries.json', {}) }
+  const routing = json('bridge/routing.json', null)
+  if (routing) raw.routing = routing
   for (const post of raw.posts) {
     const entry = entries[String(post.id)]
     if (!entry || !verified.has(`.contentrain/models/${entry.model_id}.json`)) throw new Error('Post has no exported model address: ' + post.id)

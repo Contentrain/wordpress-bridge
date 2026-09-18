@@ -11,10 +11,12 @@
     "test:reader": "node tests/reader-compat.mjs",
     "test:delivery": "tests/delivery-live.sh",
     "test:delta": "tests/delta.sh",
-    "test:secrets": "node tests/secret-scan.mjs"
+    "test:secrets": "node tests/secret-scan.mjs",
+    "test:seo": "tests/seo.sh"
   },
   "devDependencies": {
     "@contentrain/types": "1.14.0",
+    "@contentrain/verify": "0.2.0",
     "@contentrain/wp-import": "0.4.2",
     "contentrain": "0.13.1"
   }

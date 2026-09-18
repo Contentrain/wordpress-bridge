@@ -94,6 +94,29 @@ which reads the store.
 KEEP=1 npm run test:wordpress && npm run test:delta && npm run test:secrets
 ```
 
+## SEO, redirects and routing
+
+Every export writes what the site tells search engines and how it builds addresses:
+
+- `bridge/seo.json` / `bridge/seo-entries.json`: Yoast SEO, Rank Math and AIOSEO.
+  Per post and term: title, description, canonical, robots, Open Graph, Twitter,
+  focus keyword and the JSON-LD graph. Site-wide: separator, title and description
+  templates, social defaults, verification codes. With Yoast active, the values
+  are the ones the page renders (`resolved: true`), and the robots directives are
+  the ones `wp_robots()` prints. A deactivated plugin's stored data is still
+  exported, marked unresolved. With no SEO plugin the file says `status: "none"`.
+  Integration tokens (SEMrush, Wincher, MyYoast) never leave.
+- `bridge/redirects.json`: Redirection, Yoast Premium, Rank Math, Safe Redirect
+  Manager and WordPress's own old-slug redirects, as one `RawRedirect` list. Every
+  stored rule is either listed as served or in `excluded` with its reason
+  (disabled, conditional, 410, plugin inactive).
+- `bridge/routing.json`: permalink structure, category/tag bases, trailing slash,
+  static front and posts page, and each post type's and taxonomy's rewrite rules.
+
+`tests/seo.sh` checks every exported head value against the page WordPress serves,
+requests every exported redirect, and runs `@contentrain/verify` with the served
+pages as its baseline.
+
 ## Current coverage boundaries
 
 ACF shapes that cannot be fully represented use a reported structured fallback;

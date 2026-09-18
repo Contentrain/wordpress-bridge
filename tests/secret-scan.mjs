@@ -10,12 +10,15 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const roots = process.argv.slice(2).length ? process.argv.slice(2) : [join(here, '.out', 'store'), join(here, '.out', 'delta')]
+import { existsSync } from 'node:fs'
+const roots = process.argv.slice(2).length ? process.argv.slice(2) : ['store', 'delta', 'seo'].map((d) => join(here, '.out', d)).filter((d) => existsSync(d))
 
 // Planted by tests/integration.php and tests/delta.php, or configured in compose.yml.
 const CANARIES = [
   'never-export-me', 'never-export-nested', 'hidden-credential', 'private@example.test', 'private-in-meta@example.test',
   '192.0.2.1', 'test-only-token', 'bridge-local-only', 'bridge-admin@example.test', 'delta-unreleased-launch',
+  // Planted by tests/seo-fixture.php in Yoast's general option.
+  'never-export-semrush', 'never-export-wincher', 'never-export-myyoast',
 ]
 const PATTERNS = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
