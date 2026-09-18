@@ -253,6 +253,35 @@ final class Source {
 		return array_values( (array) ( acf_get_options_pages() ?: array() ) );
 	}
 
+	/**
+	 * A term already identified by slug+taxonomy or by term_taxonomy_id, read
+	 * regardless of Polylang's current admin-bar language filter (`curlang`).
+	 * `get_term_by()` routes both fields through `get_terms()`, which Polylang
+	 * filters to the current language whenever the caller does not set `lang`
+	 * — a term in any other language then reads back as "not found", even
+	 * though the reference itself (a post's own term relationship, a raw
+	 * term_taxonomy row) has nothing to do with which language an admin
+	 * happens to be browsing in. `lang => ''` is Polylang's own documented way
+	 * to disable that filter for a single query.
+	 */
+	public static function term_by( $field, $value, $taxonomy = '' ) {
+		$args = array( 'lang' => '', 'get' => 'all', 'hide_empty' => false, 'number' => 1, 'update_term_meta_cache' => false );
+		if ( 'term_taxonomy_id' === $field ) {
+			$args['term_taxonomy_id'] = $value;
+		} elseif ( 'slug' === $field ) {
+			$value = (string) $value;
+			if ( '' === $value || ! taxonomy_exists( $taxonomy ) ) {
+				return false;
+			}
+			$args['taxonomy'] = $taxonomy;
+			$args['slug'] = $value;
+		} else {
+			return false;
+		}
+		$terms = get_terms( $args );
+		return is_wp_error( $terms ) || empty( $terms ) ? false : reset( $terms );
+	}
+
 	/** ACF groups can use opaque field keys: inspect types before values reach RawIR. */
 	public static function acf_value( $field, $value, &$excluded, $path ) {
 		if ( in_array( $field['type'] ?? '', Acf::EXCLUDED, true ) || Policy::sensitive( $field['name'] ?? '' ) ) {

@@ -262,6 +262,12 @@ if ( $has_polylang ) {
 	if ( ! in_array( 'da', pll_languages_list(), true ) ) {
 		PLL()->model->languages->add( array( 'locale' => 'da_DK' ) );
 	}
+	// A real Polylang site assigns every translated-taxonomy term a language;
+	// this fixture's category should not stay "untagged" indefinitely. Explicit
+	// "en" so a later read under curlang=da genuinely exercises the mismatch
+	// BO-10 found in the real plugin, not merely a language Polylang never
+	// bothers to filter because nothing was ever assigned.
+	pll_set_term_language( (int) $category['term_id'], 'en' );
 	pll_set_post_language( $post, 'en' );
 	pll_set_post_language( $page, 'en' );
 	$post_da = wp_insert_post( array( 'post_type' => 'post', 'post_title' => 'Bridge artikel', 'post_content' => '<p>Dansk indhold.</p>', 'post_status' => 'publish', 'post_author' => $admin->ID ) );
@@ -415,11 +421,32 @@ check( ! Admin::permitted(), 'anonymous user is denied' );
 rejects( static function () use ( $id ) { Jobs::read( $id ); }, 'another user cannot read private export' );
 wp_set_current_user( $admin->ID );
 $before = $summary['step'];
+// BO-10: with an admin's language filter (`curlang`) set, the posts step used
+// to blow up resolving the `en`-tagged fixture category — Polylang's own
+// `get_term_by()`/`get_terms()` filtering hides a term in any language other
+// than curlang unless a query explicitly disables it. Held across the whole
+// run (posts, terms, inventory), not just the posts phase, so any other
+// language-filtered lookup on the same path would have failed the same way.
+// Only the phases that read terms back by slug/term_taxonomy_id (posts,
+// terms, inventory) need curlang forced; leaving it on through the later
+// text-scanning phase would filter `get_posts()`/`get_terms()` there too and
+// is not what BO-10 reported.
+$danish_phases = array( 'posts', 'terms', 'inventory' );
+$set_curlang = static function ( $phase ) use ( $has_polylang, $danish_phases ) {
+	if ( $has_polylang ) {
+		PLL()->curlang = in_array( $phase, $danish_phases, true ) ? PLL()->model->get_language( 'da' ) : false;
+	}
+};
+$set_curlang( $summary['phase'] );
 $summary = Jobs::step( $id, $before );
 $duplicate = Jobs::step( $id, $before );
 check( $duplicate['step'] === $summary['step'], 'retried step is idempotent' );
-for ( $i = 0; $i < 200 && 'review' !== $summary['phase']; ++$i ) { $summary = Jobs::step( $id, $summary['step'] ); }
-check( 'review' === $summary['phase'], 'resumable export reaches review' );
+for ( $i = 0; $i < 200 && 'review' !== $summary['phase']; ++$i ) {
+	$set_curlang( $summary['phase'] );
+	$summary = Jobs::step( $id, $summary['step'] );
+}
+$set_curlang( 'done' );
+check( 'review' === $summary['phase'], 'resumable export reaches review while an admin\'s language filter is set to Danish' );
 $job = Jobs::read( $id );
 check( isset( $job['tables']['bridge/raw-posts.json'][ $book ] ), 'REST-hidden CPT is exported' );
 check( ! isset( $job['tables']['bridge/raw-posts.json'][ $draft ] ), 'draft excluded in public scope' );
@@ -722,6 +749,24 @@ if ( $has_scf_pro ) {
 		list( $curlang_raw, ) = Source::acf_fields_for_options_page( 'options', 'bridge-header', 'acf-options/bridge-header', $curlang_excluded );
 		PLL()->curlang = false;
 		check( 'Welcome banner' === ( $curlang_raw['header_text']['value'] ?? null ), 'an Options Page read while an admin\'s language filter is set to Danish still returns the untranslated default, not the Danish redirect' );
+
+		// BO-10: a term reference is resolved once, from a post's own term
+		// relationship or a raw term_taxonomy row; re-reading it later must
+		// find the same term regardless of whichever language an admin's
+		// filter happens to be set to. Proven against the real `en`-tagged
+		// fixture category under all three states the export can run in.
+		$default_term = Source::term_by( 'slug', 'bridge-fixture-category', 'category' );
+		PLL()->curlang = PLL()->model->get_language( 'da' );
+		$da_term = Source::term_by( 'slug', 'bridge-fixture-category', 'category' );
+		PLL()->curlang = PLL()->model->get_language( 'en' );
+		$en_term = Source::term_by( 'slug', 'bridge-fixture-category', 'category' );
+		PLL()->curlang = false;
+		check(
+			$default_term && $da_term && $en_term
+			&& $default_term->term_id === $da_term->term_id
+			&& $default_term->term_id === $en_term->term_id,
+			'a term reference resolves to the same term whether curlang is unset, Danish or English'
+		);
 	}
 
 	// A third-party plugin can give an Options Page a per-language copy this
