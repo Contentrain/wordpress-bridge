@@ -798,6 +798,18 @@ if ( $has_scf_pro ) {
 	check( 'Default language value' === $locale_entry['acf_locale_note'], 'an Options Page with a detected per-language copy still exports only its default-language value' );
 }
 
+if ( $has_polylang ) {
+	// BO-12: `Source::inventory()`'s site-wide comment count comes from
+	// `wp_count_comments()`, which Polylang filters to whichever language an
+	// admin's own filter happens to be set to, the same way it filters terms
+	// — a count that should describe the whole site, not one language of it.
+	$default_comments = Source::inventory()['comments'];
+	PLL()->curlang = PLL()->model->get_language( 'da' );
+	$da_comments = Source::inventory()['comments'];
+	PLL()->curlang = false;
+	check( $default_comments === $da_comments, 'the site-wide comment count does not depend on an admin\'s language filter' );
+}
+
 check( Validator::run( $job )['valid'], 'generated relation graph validates' );
 $broken = $job;
 $broken['tables'][ Models::content_path( $job, 'wp-authors', $address['locale'] ) ] = array();
