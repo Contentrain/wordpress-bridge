@@ -1,0 +1,12 @@
+{
+  "name": "bridge-e2e-astro",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "astro build"
+  },
+  "dependencies": {
+    "@contentrain/query": "7.3.4",
+    "astro": "5.18.2"
+  }
+}

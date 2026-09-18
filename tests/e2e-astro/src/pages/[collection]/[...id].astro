@@ -1,0 +1,58 @@
+---
+// One page per delivered entry. Relations are resolved at build time and an
+// unresolvable one fails the build: a store whose references point nowhere is
+// not a site.
+import { getCollection, getEntry, render } from 'astro:content'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
+
+export async function getStaticPaths() {
+  const root = process.env.CONTENTRAIN_STORE as string
+  const paths = []
+  for (const file of readdirSync(join(root, '.contentrain/models')).filter((f) => f.endsWith('.json'))) {
+    const model = JSON.parse(readFileSync(join(root, '.contentrain/models', file), 'utf8'))
+    for (const entry of await getCollection(model.id)) paths.push({ params: { collection: model.id, id: entry.id }, props: { model, entry } })
+  }
+  return paths
+}
+
+const { model, entry } = Astro.props
+const root = process.env.CONTENTRAIN_STORE as string
+const config = JSON.parse(readFileSync(join(root, '.contentrain/config.json'), 'utf8'))
+const resolved: Record<string, string[]> = {}
+const media: string[] = []
+for (const [key, field] of Object.entries(model.fields ?? {}) as [string, any][]) {
+  const value = entry.data[key]
+  if (value == null) continue
+  if (field.type === 'relation' || field.type === 'relations') {
+    resolved[key] = []
+    for (const id of [].concat(value)) {
+      const target = await getEntry(field.model, id)
+      if (!target) throw new Error(`Unresolved relation ${model.id}/${entry.id}.${key} -> ${field.model}/${id}`)
+      resolved[key].push(String(target.data[target.data.title ? 'title' : 'name'] ?? target.id))
+    }
+  }
+  // String checks, not a regex: Astro's frontmatter scanner reads a slash-heavy regex as a comment.
+  const local = typeof value === 'string' ? (value.startsWith('/') ? value.slice(1) : value) : ''
+  if ((field.type === 'image' || field.type === 'file') && local.startsWith('media/')) {
+    if (!existsSync(join(root, local))) throw new Error(`Missing media ${value} in ${model.id}/${entry.id}`)
+    media.push(value)
+  }
+}
+const title = String(entry.data.title ?? entry.data.name ?? entry.id)
+const { Content } = model.kind === 'document' ? await render(entry) : { Content: null }
+---
+<!doctype html>
+<html lang={config.locales.default}>
+  <head><meta charset="utf-8" /><title>{title}</title></head>
+  <body data-model={model.id} data-entry={entry.id}>
+    <h1>{title}</h1>
+    <dl>
+      {Object.entries(resolved).map(([key, names]) => <Fragment><dt>{key}</dt><dd data-relation={key}>{names.join(', ')}</dd></Fragment>)}
+      {media.map((path) => <Fragment><dt>media</dt><dd data-media>{path}</dd></Fragment>)}
+      {entry.data.url && <Fragment><dt>url</dt><dd data-url>{String(entry.data.url)}</dd></Fragment>}
+      {entry.data.source_slug && <Fragment><dt>slug</dt><dd data-slug>{String(entry.data.source_slug)}</dd></Fragment>}
+    </dl>
+    {Content ? <article><Content /></article> : entry.data.body ? <article set:html={String(entry.data.body)} /> : null}
+  </body>
+</html>

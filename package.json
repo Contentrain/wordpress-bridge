@@ -12,7 +12,9 @@
     "test:delivery": "tests/delivery-live.sh",
     "test:delta": "tests/delta.sh",
     "test:secrets": "node tests/secret-scan.mjs",
-    "test:seo": "tests/seo.sh"
+    "test:seo": "tests/seo.sh",
+    "test:e2e": "tests/e2e.sh",
+    "test:delivery-git": "tests/delivery-git.sh"
   },
   "devDependencies": {
     "@contentrain/types": "1.14.0",
