@@ -87,6 +87,10 @@ jobs:
           BRIDGE_TEST_REPO: ${{ secrets.BRIDGE_TEST_REPO }}
           BRIDGE_TEST_TOKEN: ${{ secrets.BRIDGE_TEST_TOKEN }}
           BRIDGE_TEST_RESET: ${{ secrets.BRIDGE_TEST_RESET }}
+      # B-02: every source WordPress keeps content in, counted in the database
+      # and split into exported / excluded / unsupported, in both scopes; then
+      # Bridge's RawIR against a WXR export read by A-03's own parser.
+      - run: npm run test:coverage
       - run: npm run test:store
       # The reader gate: this writer's own output, read back with the pinned
       # @contentrain/types. It decides whether escape-bearing metadata survives,

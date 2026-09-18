@@ -14,7 +14,7 @@ final class Source {
 			if ( ! $type->public && ! $type->show_ui && ! in_array( $type->name, array( 'wp_block', 'wp_navigation', 'wp_template', 'wp_template_part' ), true ) ) {
 				continue;
 			}
-			$types[ $type->name ] = array( 'label' => $type->label, 'rest' => (bool) $type->show_in_rest, 'counts' => (array) wp_count_posts( $type->name ) );
+			$types[ $type->name ] = array( 'label' => $type->label, 'rest' => (bool) $type->show_in_rest, 'public' => (bool) $type->public, 'counts' => (array) wp_count_posts( $type->name ) );
 		}
 		$plugins = array();
 		foreach ( get_plugins() as $path => $plugin ) {
@@ -23,6 +23,23 @@ final class Source {
 			}
 		}
 		$theme = wp_get_theme();
+		global $wpdb;
+		// Media: how many files and how much space, from the attachment metadata WordPress keeps.
+		$media = array( 'count' => (int) wp_count_posts( 'attachment' )->inherit, 'bytes' => 0 );
+		foreach ( $wpdb->get_col( "SELECT meta_value FROM {$wpdb->postmeta} WHERE meta_key = '_wp_attachment_metadata'" ) as $value ) { // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- One pass over attachment metadata.
+			$data = is_serialized( $value ) ? unserialize( $value, array( 'allowed_classes' => false, 'max_depth' => 8 ) ) : null; // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_unserialize -- Class instantiation is explicitly disabled.
+			$media['bytes'] += is_array( $data ) ? (int) ( $data['filesize'] ?? 0 ) : 0;
+		}
+		// ACF field groups: which exist, whether they are active, and where they show.
+		$groups = array();
+		if ( function_exists( 'acf_get_field_groups' ) ) {
+			foreach ( acf_get_field_groups() as $group ) {
+				$groups[] = array( 'key' => $group['key'], 'title' => $group['title'], 'active' => (bool) $group['active'], 'show_in_rest' => ! empty( $group['show_in_rest'] ), 'location' => $group['location'], 'local' => ! empty( $group['local'] ) );
+			}
+		}
+		// Plugins by what they do, for the things a migration has to answer for.
+		$slugs = array_map( static function ( $path ) { return dirname( $path ); }, array_keys( $plugins ) );
+		$detect = static function ( $known ) use ( $slugs ) { return array_values( array_intersect( $known, $slugs ) ); };
 		return array(
 			'format' => 'contentrain-bridge-inventory@1',
 			'site' => home_url( '/' ),
@@ -33,6 +50,16 @@ final class Source {
 			'acf' => function_exists( 'get_field_objects' ),
 			'languages' => function_exists( 'pll_languages_list' ) ? pll_languages_list() : array( get_locale() ),
 			'menu_locations' => get_nav_menu_locations(),
+			'media' => $media,
+			'comments' => array_map( 'intval', (array) wp_count_comments() ),
+			'acf_groups' => $groups,
+			'capabilities' => array(
+				'forms' => $detect( array( 'contact-form-7', 'wpforms-lite', 'wpforms', 'gravityforms', 'ninja-forms', 'formidable', 'fluentform', 'forminator' ) ),
+				'seo' => $detect( array( 'wordpress-seo', 'wordpress-seo-premium', 'seo-by-rank-math', 'all-in-one-seo-pack', 'autodescription', 'wp-seopress' ) ),
+				'languages' => $detect( array( 'polylang', 'polylang-pro', 'sitepress-multilingual-cms', 'translatepress-multilingual', 'weglot' ) ),
+				'redirects' => $detect( array( 'redirection', 'safe-redirect-manager', 'simple-301-redirects' ) ),
+			),
+			'multisite' => is_multisite(),
 		);
 	}
 
@@ -147,8 +174,33 @@ final class Source {
 		return (string) $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", 'contentrain_bridge_revision' ) );
 	}
 
-	public static function changed() {
-		update_option( 'contentrain_bridge_revision', wp_generate_uuid4(), false );
+	/**
+	 * A new revision, labelled with the hook that caused it, so a refused export
+	 * can say what changed.
+	 *
+	 * Caches and bookkeeping are not content changes. Reading a post can write
+	 * both: an excerpt filter (Yoast builds one) runs autoembed, which stores an
+	 * `oembed_cache` post or an `_oembed_*` meta row. Counting those made an
+	 * export refuse its own snapshot on any site with an embed.
+	 */
+	public static function changed( ...$args ) {
+		$hook = (string) current_filter();
+		if ( in_array( $hook, array( 'save_post', 'deleted_post' ), true ) && isset( $args[0] ) ) {
+			$type = get_post_type( (int) $args[0] ) ?: ( isset( $args[1] ) && is_object( $args[1] ) ? $args[1]->post_type : '' );
+			if ( in_array( $type, array( 'oembed_cache', 'revision', 'customize_changeset', 'user_request' ), true ) ) {
+				return;
+			}
+		}
+		if ( preg_match( '/_post_meta$/', $hook ) && isset( $args[2] ) && preg_match( '/^(_oembed_|_edit_lock$|_edit_last$)/', (string) $args[2] ) ) {
+			return;
+		}
+		update_option( 'contentrain_bridge_revision', wp_generate_uuid4() . '|' . sanitize_key( $hook ), false );
+	}
+
+	/** The hook behind the current revision, when it was recorded. */
+	public static function changed_by() {
+		$parts = explode( '|', self::revision(), 2 );
+		return $parts[1] ?? '';
 	}
 
 	public static function option_changed( $option ) {

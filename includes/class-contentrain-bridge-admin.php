@@ -74,6 +74,9 @@ final class Admin {
 			<section id="cr-delivery" hidden>
 				<h2><?php esc_html_e( '3. Get your content', 'contentrain-bridge' ); ?></h2>
 				<p><?php esc_html_e( 'Review the coverage report: copied media is included; missing or oversized files may still use WordPress URLs. Dynamic WordPress behavior needs a renderer.', 'contentrain-bridge' ); ?></p>
+				<h3><?php esc_html_e( 'Source coverage', 'contentrain-bridge' ); ?></h3>
+				<p><?php esc_html_e( 'Every place WordPress keeps content, counted in the database and split into what was exported, what was left out and why, and what this export cannot read. The same report is in the export as bridge/coverage.json.', 'contentrain-bridge' ); ?></p>
+				<div id="cr-coverage"></div>
 				<button type="button" id="cr-zip" class="button"><?php esc_html_e( 'Prepare ZIP download', 'contentrain-bridge' ); ?></button>
 				<a id="cr-download" class="button" hidden><?php esc_html_e( 'Download JSON / Markdown ZIP', 'contentrain-bridge' ); ?></a>
 				<label for="cr-repo"><?php esc_html_e( 'GitHub repository (owner/repository, initialized with a README)', 'contentrain-bridge' ); ?></label>
@@ -139,6 +142,13 @@ final class Admin {
 						throw new \RuntimeException( 'Use HTTPS in WordPress administration before sending a GitHub credential.' );
 					}
 					$result = GitHub::step( $id, $input['token'] ?? '', $input['cursor'] ?? -1 ); break;
+				case 'coverage':
+					$job = Jobs::read( $id );
+					if ( 'ready' !== $job['phase'] || ! isset( $job['files']['bridge/coverage.json'] ) ) {
+						throw new \RuntimeException( 'Coverage is reported when the export is ready.' );
+					}
+					$result = json_decode( Files::read( Files::dir( $id ) . '/output', 'bridge/coverage.json' ), true );
+					break;
 				case 'zip': $result = self::zip( $id ); break;
 				case 'delete':
 					// Ownership is checked even for an expired job; no caller-controlled directory is removed.

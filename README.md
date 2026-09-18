@@ -152,6 +152,18 @@ large or unreadable, a page that could not be fetched). Occurrences merge only
 when text, locale and context are all the same. Keys depend on the text and its
 context only, so moving a string to another file does not change its key.
 
+## Source coverage report
+
+Every export writes `bridge/coverage.json`, also shown on the Contentrain Bridge
+screen when the export is ready. Each place WordPress keeps content — every post
+type and status (REST-hidden types included), taxonomies, term and post meta,
+attachments, comments, users, options, widgets, Customizer, sticky posts, page
+templates, shortcodes, embeds, reusable blocks, patterns, network sites and every
+database table — is counted in the database and split into `exported`,
+`excluded:<reason>` or `unsupported:<reason>`. A source whose outcomes do not add
+up to its count is marked `balanced: false`; a table the export does not read is
+listed with its row count.
+
 ## Current coverage boundaries
 
 ACF shapes that cannot be fully represented use a reported structured fallback;

@@ -49,6 +49,7 @@
       }
     } finally { running = false; render(); }
     if (job.phase === 'review') await loadCandidates();
+    if (job.phase === 'ready') await loadCoverage();
   }
   async function loadCandidates() {
     candidates = await api({ op: 'candidates', id: job.id, offset });
@@ -76,6 +77,26 @@
     }
     $('prev').disabled = offset === 0;
     $('next').disabled = offset + candidates.length >= job.candidates;
+  }
+  async function loadCoverage() {
+    const report = await api({ op: 'coverage', id: job.id });
+    const table = document.createElement('table');
+    table.className = 'widefat striped';
+    const head = table.createTHead().insertRow();
+    for (const label of [__('Source', 'contentrain-bridge'), __('Count', 'contentrain-bridge'), __('Outcome', 'contentrain-bridge'), __('Adds up', 'contentrain-bridge')]) {
+      const th = document.createElement('th'); th.textContent = label; head.append(th);
+    }
+    const body = table.createTBody();
+    for (const source of report.sources) {
+      const row = body.insertRow();
+      row.insertCell().textContent = source.source;
+      row.insertCell().textContent = String(source.count);
+      row.insertCell().textContent = Object.entries(source.outcomes).map(([outcome, n]) => `${outcome} ${n}`).join(', ') || '—';
+      row.insertCell().textContent = source.balanced ? '✓' : '✗';
+    }
+    const summary = document.createElement('p');
+    summary.textContent = sprintf(__('%1$d sources; %2$d do not add up; %3$d records cannot be read by this export.', 'contentrain-bridge'), report.totals.sources, report.totals.unbalanced, report.totals.unsupported);
+    $('coverage').replaceChildren(summary, table);
   }
   async function saveReview(finish = false) {
     const decisions = Object.fromEntries(candidates.filter(c => c.decision !== 'review').map(c => [c.id, { key: c.key, decision: c.decision }]));
@@ -143,6 +164,7 @@
         job = { id: inventory.active_job, phase: 'expired', counts: { posts: 0, warnings: 0 }, files: 0, unreviewed: 0, models: [] };
         job = await api({ op: 'status', id: inventory.active_job });
         if (job.phase === 'review') await loadCandidates();
+    if (job.phase === 'ready') await loadCoverage();
       }
       render();
     } catch (err) { error(err); render(); }

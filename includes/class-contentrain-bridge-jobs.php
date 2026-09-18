@@ -47,6 +47,7 @@ final class Jobs {
 		Models::file( $job, 'bridge/raw-menus.json', Policy::json( $menus ) );
 		Models::model( $job, 'wp-menu-items', 'collection', 'site', 'Navigation links', array( 'title' => array( 'type' => 'string' ), 'url' => array( 'type' => 'url' ), 'position' => array( 'type' => 'integer' ), 'menu' => array( 'type' => 'string' ), 'wp_parent' => array( 'type' => 'integer' ) ) );
 		foreach ( $menus as $menu ) {
+			Coverage::tally( $job, array( 'menu_items' ), 'exported', count( $menu['items'] ) );
 			foreach ( $menu['items'] as $item ) {
 				Models::entry( $job, 'wp-menu-items', $locale, substr( hash( 'sha256', 'menu:' . $item['id'] ), 0, 12 ), array( 'title' => $item['title'], 'url' => $item['url'], 'position' => $item['order'], 'menu' => $menu['name'], 'wp_parent' => (int) $item['parent'] ) );
 			}
@@ -128,7 +129,7 @@ final class Jobs {
 				return self::summary( $job );
 			}
 			if ( $job['revision'] !== Source::revision() ) {
-				throw new \RuntimeException( 'WordPress content changed during export. Restart to obtain a consistent snapshot.' );
+				throw new \RuntimeException( 'WordPress content changed during export' . ( Source::changed_by() ? ' (' . Source::changed_by() . ')' : '' ) . '. Restart to obtain a consistent snapshot.' ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Diagnostic data is escaped at the admin output boundary or JSON encoded.
 			}
 			if ( 'media' === $job['phase'] ) {
 				self::media( $job );
@@ -151,7 +152,7 @@ final class Jobs {
 				}
 			}
 			if ( $job['revision'] !== Source::revision() ) {
-				throw new \RuntimeException( 'WordPress content changed during export. Restart to obtain a consistent snapshot.' );
+				throw new \RuntimeException( 'WordPress content changed during export' . ( Source::changed_by() ? ' (' . Source::changed_by() . ')' : '' ) . '. Restart to obtain a consistent snapshot.' ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Diagnostic data is escaped at the admin output boundary or JSON encoded.
 			}
 			++$job['step'];
 		} );
@@ -182,9 +183,18 @@ final class Jobs {
 				throw new \RuntimeException( 'Source attachment disappeared during export.' );
 			}
 			$parent = $p->post_parent ? get_post( $p->post_parent ) : null;
-			if ( 'trash' === $p->post_status || ( ! $job['options']['private'] && ( ! in_array( $p->post_status, array( 'publish', 'inherit' ), true ) || $p->post_password || ( $parent && ( 'publish' !== $parent->post_status || $parent->post_password ) ) ) ) ) {
+			$reason = 'trash' === $p->post_status ? 'trash' : null;
+			if ( ! $reason && ! $job['options']['private'] ) {
+				$reason = ! in_array( $p->post_status, array( 'publish', 'inherit' ), true ) ? 'status-scope' : ( $p->post_password ? 'password-protected' : ( $parent && ( 'publish' !== $parent->post_status || $parent->post_password ) ? 'parent-not-public' : null ) );
+			}
+			if ( $reason ) {
+				Coverage::tally( $job, array( 'posts', 'attachment', $p->post_status ), 'excluded:' . $reason );
 				self::warning( $job, array( 'source' => 'attachment/' . $id, 'reason' => 'excluded-by-status-scope' ) );
 				continue;
+			}
+			Coverage::tally( $job, array( 'posts', 'attachment', $p->post_status ), 'exported' );
+			foreach ( array_keys( get_post_meta( $id ) ) as $key ) {
+				Coverage::tally( $job, array( 'attachment_meta' ), in_array( $key, array( '_wp_attached_file', '_wp_attachment_metadata', '_wp_attachment_image_alt' ), true ) ? 'exported' : ( preg_match( Coverage::INTERNAL_META, $key ) ? 'excluded:wordpress-internal' : 'excluded:attachment-meta-not-read' ) );
 			}
 			$a = Exporter::map_attachment( $p );
 			$image_meta = (array) $a['image_meta'];
@@ -277,15 +287,22 @@ final class Jobs {
 			if ( ! $p ) {
 				throw new \RuntimeException( 'Source post disappeared during export.' );
 			}
-			if ( in_array( $p->post_status, array( 'auto-draft', 'trash' ), true ) || ( ! $job['options']['private'] && ( $p->post_password || ! in_array( $p->post_status, array( 'publish', 'inherit' ), true ) ) ) ) {
+			if ( 'attachment' === $p->post_type ) {
+				continue; // Handled, and counted, in the media phase, before any content can link to it.
+			}
+			$reason = in_array( $p->post_status, array( 'auto-draft', 'trash' ), true ) ? $p->post_status : null;
+			if ( ! $reason && ! $job['options']['private'] ) {
+				$reason = $p->post_password ? 'password-protected' : ( in_array( $p->post_status, array( 'publish', 'inherit' ), true ) ? null : 'status-scope' );
+			}
+			if ( $reason ) {
+				Coverage::tally( $job, array( 'posts', $p->post_type, $p->post_status ), 'excluded:' . $reason );
 				self::warning( $job, array( 'source' => 'post/' . $id, 'reason' => 'excluded-by-status-scope' ) );
 				continue;
 			}
-			if ( 'attachment' === $p->post_type ) {
-				continue; // Handled in the media phase, before any content can link to it.
-			}
 			$excluded = array();
 			$record = Source::post( $p, $job['options']['selected_meta'], $excluded );
+			Coverage::tally( $job, array( 'posts', $p->post_type, $p->post_status ), 'exported' );
+			Coverage::post_meta( $job, $id, $record, $excluded );
 			foreach ( $excluded as $warning ) {
 				self::warning( $job, $warning );
 			}
@@ -314,6 +331,10 @@ final class Jobs {
 				throw new \RuntimeException( 'Cannot read taxonomy term.' );
 			}
 			Models::term( $job, $t, $job['default_locale'] );
+			Coverage::tally( $job, array( 'terms', $t->taxonomy ), 'exported' );
+			foreach ( get_term_meta( $t->term_id ) as $key => $values ) {
+				Coverage::tally( $job, array( 'term_meta' ), Policy::sensitive( $key ) ? 'excluded:sensitive-key' : 'exported', count( (array) $values ) );
+			}
 			$seo = Seo::term( $t );
 			if ( $seo ) {
 				Models::row( $job, 'bridge/seo-entries.json', 'term:' . $t->taxonomy . ':' . $t->term_id, $seo );
@@ -353,9 +374,11 @@ final class Jobs {
 			$c = get_comment( $id );
 			$job['cursor'] = (int) $id;
 			if ( ! isset( $job['tables']['bridge/entry-source-map.json'][ $c->comment_post_ID ] ) ) {
+				Coverage::tally( $job, array( 'comments', (string) $c->comment_approved ), 'excluded:post-not-in-scope' );
 				self::warning( $job, array( 'source' => 'comment/' . $id, 'reason' => 'post-not-in-scope' ) );
 				continue;
 			}
+			Coverage::tally( $job, array( 'comments', (string) $c->comment_approved ), 'exported' );
 			$data = array( 'id' => (int) $id, 'post' => (int) $c->comment_post_ID, 'post_type' => get_post_type( $c->comment_post_ID ), 'parent' => (int) $c->comment_parent ?: null, 'parent_resolved' => ! $c->comment_parent || null !== get_comment( $c->comment_parent ), 'author' => $c->comment_author, 'url' => $c->comment_author_url ?: null, 'date' => Exporter::utc_date( $c->comment_date_gmt ), 'content' => $c->comment_content, 'approved' => $c->comment_approved, 'type' => $c->comment_type, 'user_id' => null, 'meta' => (object) array() );
 			Models::row( $job, 'bridge/raw-comments.json', $id, $data );
 			++$job['counts']['comments'];
@@ -499,6 +522,9 @@ final class Jobs {
 		Models::file( $job, 'bridge/validation.json', Policy::json( Validator::run( $job ) ) );
 		Models::file( $job, 'CONTENTRAIN-EXPORT.md', "# Contentrain WordPress export\n\nFree, editable JSON and Markdown content. Models live in `.contentrain/models`.\n\nMarkdown bodies preserve the original WordPress HTML; shortcodes and dynamic blocks require a renderer. Source files and the live WordPress theme have not been rewritten. Transferred media lives under `media/` and content links to it; anything too large or unreadable kept its WordPress URL and is listed in the warnings. Review `bridge/warnings.json` and `bridge/string-sources.json` for scope and text decisions.\n\nUse Contentrain Studio or the query SDK to edit/read this store. For an Astro website, choose the optional Migrate handoff from WordPress after delivery.\n" );
 		Models::file( $job, 'bridge/inventory.json', Policy::json( Inventory::document( $job['record_scope'], $job['records'], $job['created_at'], true, $job['inventory'] ) ) );
+		$coverage = Coverage::report( $job );
+		Models::file( $job, 'bridge/coverage.json', Policy::json( $coverage ) );
+		$job['coverage_summary'] = $coverage['totals'] + array( 'complete' => $coverage['complete'] );
 		self::manifest( $job );
 		$job['phase'] = 'ready';
 		$job['cursor'] = 0;
@@ -507,7 +533,7 @@ final class Jobs {
 	/** The manifest lists every other file; rewritten when delivery adds one. */
 	public static function manifest( &$job ) {
 		unset( $job['files']['bridge/manifest.json'] );
-		$manifest = array( 'format' => 'contentrain-bridge@1', 'version' => CONTENTRAIN_BRIDGE_VERSION, 'snapshot' => $job['id'], 'site' => $job['inventory']['site'], 'created_at' => $job['created_at'], 'scope' => $job['options'], 'counts' => $job['counts'], 'files' => $job['files'], 'media' => array( 'transferred_files' => $job['counts']['media_files'], 'transferred_bytes' => $job['counts']['media_bytes'], 'kept_as_source_url' => $job['counts']['media_kept_remote'], 'stored_under' => 'media/', 'note' => $job['counts']['media_kept_remote'] ? 'Some media still points at WordPress; see bridge/warnings.json' : 'All exported media travels with the content' ), 'source_reuse' => 'not-applied', 'complete_source_coverage' => false );
+		$manifest = array( 'format' => 'contentrain-bridge@1', 'version' => CONTENTRAIN_BRIDGE_VERSION, 'snapshot' => $job['id'], 'site' => $job['inventory']['site'], 'created_at' => $job['created_at'], 'scope' => $job['options'], 'counts' => $job['counts'], 'files' => $job['files'], 'media' => array( 'transferred_files' => $job['counts']['media_files'], 'transferred_bytes' => $job['counts']['media_bytes'], 'kept_as_source_url' => $job['counts']['media_kept_remote'], 'stored_under' => 'media/', 'note' => $job['counts']['media_kept_remote'] ? 'Some media still points at WordPress; see bridge/warnings.json' : 'All exported media travels with the content' ), 'source_reuse' => 'not-applied', 'complete_source_coverage' => false, 'coverage' => $job['coverage_summary'] ?? null );
 		Models::file( $job, 'bridge/manifest.json', Policy::json( $manifest ) );
 	}
 
@@ -518,6 +544,9 @@ final class Jobs {
 
 	public static function summary( $job ) {
 		$result = array_intersect_key( $job, array_flip( array( 'id', 'phase', 'cursor', 'step', 'counts', 'created_at' ) ) ) + array( 'files' => count( $job['files'] ), 'models' => array_values( $job['models'] ), 'candidates' => count( $job['candidates'] ), 'unreviewed' => count( array_filter( $job['candidates'], static function ( $candidate ) { return 'review' === $candidate['decision']; } ) ) );
+		if ( isset( $job['coverage_summary'] ) ) {
+			$result['coverage'] = $job['coverage_summary'];
+		}
 		if ( isset( $job['github'] ) ) {
 			$result['github'] = array_intersect_key( $job['github'], array_flip( array( 'repository', 'branch', 'phase', 'cursor', 'commit', 'url', 'removed', 'conflicts', 'on_conflict' ) ) );
 		}
