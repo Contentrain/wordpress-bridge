@@ -8,10 +8,17 @@
  *   php e2e.php export <label> a real export to `ready`, copied to /tmp/bridge-e2e/<label>
  *   php e2e.php mutate         three edits after T0: body, slug, trash
  *
+ *   php e2e.php github-prepare  (GitHub leg only) this run's own base branch
+ *   php e2e.php github-cleanup  (GitHub leg only) delete every branch the run made
+ *
  * With BRIDGE_TEST_REPO and BRIDGE_TEST_TOKEN set, `export` also delivers to
- * that repository (the B-10 path) and merges the branch, so the next export's
- * delta is measured against what GitHub holds. The token is read from the
- * environment only and never written or printed.
+ * that repository (the B-10 path) against this run's own base branch,
+ * `e2e/<run>`, cut from the repository's first commit, and merges the delivery
+ * into it, so the next export's delta is measured against what GitHub holds.
+ * The default branch is never written after its first commit (made here only
+ * when the repository is still empty), so every run starts from the same clean
+ * state and no reset is needed. The token is read from the environment only
+ * and never written or printed.
  */
 require '/var/www/html/wp-load.php';
 if ( 'local' !== wp_get_environment_type() || 'Bridge Acceptance' !== get_option( 'blogname' ) ) {
@@ -86,6 +93,56 @@ if ( 'fixture' === $stage ) {
 	exit;
 }
 
+$github_state = $dir . '/github.json';
+if ( 'github-prepare' === $stage ) {
+	$repository = (string) getenv( 'BRIDGE_TEST_REPO' );
+	$token = (string) getenv( 'BRIDGE_TEST_TOKEN' );
+	$prefix = '/repos/' . $repository;
+	$info = GitHub::request( $token, 'GET', $prefix );
+	try {
+		$head = GitHub::request( $token, 'GET', $prefix . '/git/ref/heads/' . $info['default_branch'] );
+	} catch ( RuntimeException $error ) {
+		if ( 409 !== $error->getCode() ) { throw $error; }
+		// Still empty: its first commit is the one thing a test may put on the
+		// default branch, exactly as a person would when creating it with a README.
+		// Delivery itself refuses an empty repository (see tests/integration.php).
+		GitHub::request( $token, 'PUT', $prefix . '/contents/README.md', array( 'message' => 'Initialize the Bridge e2e test repository', 'content' => base64_encode( "# Bridge e2e\n\nTarget of wordpress-bridge's tests/e2e.sh. Each run delivers to its own `e2e/<run>` branch and deletes it afterwards.\n" ) ) );
+		$head = GitHub::request( $token, 'GET', $prefix . '/git/ref/heads/' . $info['default_branch'] );
+		echo "GitHub: {$repository} was empty; created its first commit on {$info['default_branch']}\n";
+	}
+	// The run's base is the repository's first commit, not whatever the default
+	// branch holds now: a run never inherits another run's content.
+	$root = $head['object']['sha'];
+	for ( $i = 0; $i < 100; ++$i ) {
+		$commit = GitHub::request( $token, 'GET', $prefix . '/git/commits/' . $root );
+		if ( ! $commit['parents'] ) { break; }
+		$root = $commit['parents'][0]['sha'];
+	}
+	if ( $commit['parents'] ) { throw new RuntimeException( 'FAIL: the test repository has more than 100 commits on its default branch; use a dedicated repository.' ); }
+	$run = 'e2e/' . preg_replace( '/[^A-Za-z0-9._-]/', '-', (string) ( getenv( 'BRIDGE_E2E_RUN' ) ?: gmdate( 'Ymd-His' ) . '-' . bin2hex( random_bytes( 3 ) ) ) );
+	GitHub::request( $token, 'POST', $prefix . '/git/refs', array( 'ref' => 'refs/heads/' . $run, 'sha' => $root ) );
+	file_put_contents( $github_state, wp_json_encode( array( 'repository' => $repository, 'base_branch' => $run, 'root' => $root, 'branches' => array( $run ) ), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ) );
+	echo "GitHub: this run delivers against {$run} (from first commit " . substr( $root, 0, 7 ) . ")\n";
+	exit;
+}
+if ( 'github-cleanup' === $stage ) {
+	if ( ! is_file( $github_state ) ) { exit; }
+	$state = json_decode( file_get_contents( $github_state ), true );
+	$token = (string) getenv( 'BRIDGE_TEST_TOKEN' );
+	$left = array();
+	foreach ( $state['branches'] as $branch ) {
+		try {
+			GitHub::request( $token, 'DELETE', '/repos/' . $state['repository'] . '/git/refs/heads/' . $branch );
+		} catch ( RuntimeException $error ) {
+			if ( ! in_array( $error->getCode(), array( 404, 422 ), true ) ) { $left[] = $branch; }
+		}
+	}
+	unlink( $github_state );
+	if ( $left ) { throw new RuntimeException( 'FAIL: could not delete ' . implode( ', ', $left ) . ' in ' . $state['repository'] ); }
+	echo 'GitHub: deleted ' . count( $state['branches'] ) . " branch(es) this run made; the default branch is untouched\n";
+	exit;
+}
+
 if ( 'export' === $stage ) {
 	$label = preg_replace( '/[^a-z0-9]/', '', $argv[2] ?? 't0' );
 	$previous = get_user_meta( $admin->ID, 'contentrain_bridge_job_1', true );
@@ -100,27 +157,17 @@ if ( 'export' === $stage ) {
 	$repository = getenv( 'BRIDGE_TEST_REPO' );
 	$token = getenv( 'BRIDGE_TEST_TOKEN' );
 	if ( $repository && $token ) {
-		$prefix = '/repos/' . $repository;
-		$info = GitHub::request( $token, 'GET', $prefix );
-		// A run needs a default branch without an earlier run's content. Resetting it
-		// discards that branch's history, so it happens only when asked for, and only
-		// on a repository whose name says it is for tests.
-		if ( 't0' === $label && getenv( 'BRIDGE_TEST_RESET' ) ) {
-			if ( ! preg_match( '#/[^/]*(test|e2e)[^/]*$#i', $repository ) ) {
-				throw new RuntimeException( 'FAIL: BRIDGE_TEST_RESET is only honoured for a repository named *test* or *e2e*.' );
-			}
-			$blob = GitHub::request( $token, 'POST', $prefix . '/git/blobs', array( 'content' => base64_encode( "# Bridge e2e\n\nReset by tests/e2e.php at the start of a run.\n" ), 'encoding' => 'base64' ) );
-			$tree = GitHub::request( $token, 'POST', $prefix . '/git/trees', array( 'tree' => array( array( 'path' => 'README.md', 'mode' => '100644', 'type' => 'blob', 'sha' => $blob['sha'] ) ) ) );
-			$root = GitHub::request( $token, 'POST', $prefix . '/git/commits', array( 'message' => 'Reset for a Bridge e2e run', 'tree' => $tree['sha'], 'parents' => array() ) );
-			GitHub::request( $token, 'PATCH', $prefix . '/git/refs/heads/' . rawurlencode( $info['default_branch'] ), array( 'sha' => $root['sha'], 'force' => true ) );
-		}
-		$step = GitHub::start( $id, $token, $repository );
+		$state = json_decode( (string) file_get_contents( $github_state ), true );
+		if ( ! $state || $state['repository'] !== $repository ) { throw new RuntimeException( 'FAIL: run `e2e.php github-prepare` before a GitHub export.' ); }
+		$step = GitHub::start( $id, $token, $repository, 'refuse', $state['base_branch'] );
+		// Recorded before delivery finishes, so cleanup removes it even if a step fails.
+		$state['branches'][] = $step['github']['branch'];
+		file_put_contents( $github_state, wp_json_encode( $state, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ) );
 		for ( $i = 0; $i < 5000 && 'done' !== $step['github']['phase']; ++$i ) { $step = GitHub::step( $id, $token, $step['github']['cursor'] ); }
 		if ( 'done' !== $step['github']['phase'] ) { throw new RuntimeException( 'FAIL: GitHub delivery did not finish' ); }
-		// Accept the delivery, as a person would, so the next export's delta is measured against it.
-		$info = GitHub::request( $token, 'GET', '/repos/' . $repository );
-		GitHub::request( $token, 'POST', '/repos/' . $repository . '/merges', array( 'base' => $info['default_branch'], 'head' => $step['github']['branch'], 'commit_message' => 'Accept Bridge export ' . $label ) );
-		$receipt['github'] = array( 'repository' => $repository, 'branch' => $step['github']['branch'], 'commit' => $step['github']['commit'], 'default_branch' => $info['default_branch'] );
+		// Accept the delivery into this run's base branch, as a person would, so the next export's delta is measured against it.
+		GitHub::request( $token, 'POST', '/repos/' . $repository . '/merges', array( 'base' => $state['base_branch'], 'head' => $step['github']['branch'], 'commit_message' => 'Accept Bridge export ' . $label ) );
+		$receipt['github'] = array( 'repository' => $repository, 'branch' => $step['github']['branch'], 'commit' => $step['github']['commit'], 'base_branch' => $state['base_branch'] );
 	}
 	// What the repository holds after this export: downloaded from GitHub when
 	// the leg ran, so Astro builds what GitHub has, and checked file by file
@@ -132,7 +179,7 @@ if ( 'export' === $stage ) {
 	$files = Jobs::read( $id )['files'];
 	if ( $receipt['github'] ) {
 		$prefix = '/repos/' . $repository;
-		$head = GitHub::request( $token, 'GET', $prefix . '/git/ref/heads/' . rawurlencode( $receipt['github']['default_branch'] ) );
+		$head = GitHub::request( $token, 'GET', $prefix . '/git/ref/heads/' . $receipt['github']['base_branch'] );
 		$commit = GitHub::request( $token, 'GET', $prefix . '/git/commits/' . $head['object']['sha'] );
 		$tree = GitHub::request( $token, 'GET', $prefix . '/git/trees/' . $commit['tree']['sha'] . '?recursive=1' );
 		$fetched = 0;
@@ -149,7 +196,7 @@ if ( 'export' === $stage ) {
 		}
 		$managed = array_filter( array_keys( $files ), static function ( $p ) { return (bool) preg_match( '#^(\.contentrain|bridge|media)/#', $p ); } );
 		if ( $fetched !== count( $managed ) ) {
-			throw new RuntimeException( "FAIL: GitHub's default branch holds $fetched managed files, the export " . count( $managed ) );
+			throw new RuntimeException( "FAIL: the run's base branch on GitHub holds $fetched managed files, the export " . count( $managed ) );
 		}
 		$receipt['github']['fetched'] = $fetched;
 		$receipt['github']['removed'] = array_keys( (array) ( $step['github']['removed'] ?? array() ) );

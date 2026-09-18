@@ -6,6 +6,36 @@ defined( 'ABSPATH' ) || exit;
 
 final class GitHub {
 	public static function request( $token, $method, $path, $body = null ) {
+		return self::without_trace_arguments( static function () use ( $token, $method, $path, $body ) {
+			return self::send( $token, $method, $path, $body );
+		} );
+	}
+
+	/**
+	 * Runs GitHub work with `zend.exception_ignore_args` on, so an exception
+	 * raised inside it records no function arguments in its stack trace: the
+	 * token is an argument of every call on the way down, and a trace that
+	 * reaches a log (an uncaught exception, an error handler) would otherwise
+	 * print its first characters. Restored afterwards; a trace is captured when
+	 * the exception is created, so the setting holds for it after that.
+	 */
+	private static function without_trace_arguments( callable $work ) {
+		$previous = ini_set( 'zend.exception_ignore_args', '1' ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Scoped to this call and restored below; keeps the token out of exception traces.
+		try {
+			return $work();
+		} finally {
+			if ( false !== $previous ) {
+				ini_set( 'zend.exception_ignore_args', $previous ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Restores the value saved above.
+			}
+		}
+	}
+
+	/** A branch name as a path: each segment encoded, the slashes kept, the way GitHub's refs API addresses `heads/feature/a`. */
+	private static function ref_path( $branch ) {
+		return implode( '/', array_map( 'rawurlencode', explode( '/', $branch ) ) );
+	}
+
+	private static function send( $token, $method, $path, $body ) {
 		if ( ! is_string( $token ) || strlen( $token ) < 10 || strlen( $token ) > 512 || preg_match( '/\s/', $token ) ) {
 			throw new \RuntimeException( 'Provide a GitHub token with Contents read/write permission for the selected repository.' );
 		}
@@ -21,9 +51,18 @@ final class GitHub {
 			throw new \RuntimeException( 'GitHub could not be reached. Retry without starting a new export.' );
 		}
 		$status = wp_remote_retrieve_response_code( $response );
+		if ( 204 === (int) $status ) {
+			return array();
+		}
 		$data = json_decode( wp_remote_retrieve_body( $response ), true );
+		// GitHub answers every Git data request on a repository with no commit
+		// at all with 409 "Git Repository is empty.". Its first commit would
+		// create the default branch, which delivery never writes.
+		if ( 409 === (int) $status && is_array( $data ) && 'Git Repository is empty.' === ( $data['message'] ?? '' ) ) {
+			throw new \RuntimeException( 'The GitHub repository is empty. Create its first commit on the default branch (for example by adding a README on GitHub), then deliver again. Bridge never writes the default branch, so it does not create that commit itself.', 409 );
+		}
 		if ( $status < 200 || $status >= 300 || ! is_array( $data ) ) {
-			throw new \RuntimeException( 'GitHub rejected the request (HTTP ' . $status . '). Check repository access, branch protection and rate limits.' ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Diagnostic data is escaped at the admin output boundary or JSON encoded.
+			throw new \RuntimeException( 'GitHub rejected the request (HTTP ' . $status . '). Check repository access, branch protection and rate limits.', (int) $status ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Diagnostic data is escaped at the admin output boundary or JSON encoded.
 		}
 		return $data;
 	}
@@ -36,19 +75,35 @@ final class GitHub {
 	 */
 	const CONFLICT_CHOICES = array( 'refuse', 'keep-repository', 'use-wordpress' );
 
-	public static function start( $id, $token, $repository, $on_conflict = 'refuse' ) {
+	/**
+	 * `$base_branch` is the branch delivery starts from and compares against —
+	 * the previous export, the delta cursor, edits made since. Empty means the
+	 * repository's default branch. It is only ever read: delivery still writes
+	 * one new branch and nothing else.
+	 */
+	public static function start( $id, $token, $repository, $on_conflict = 'refuse', $base_branch = '' ) {
+		return self::without_trace_arguments( static function () use ( $id, $token, $repository, $on_conflict, $base_branch ) {
+			return self::begin( $id, $token, $repository, $on_conflict, $base_branch );
+		} );
+	}
+
+	private static function begin( $id, $token, $repository, $on_conflict, $base_branch ) {
 		if ( ! preg_match( '#^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$#D', $repository ) ) {
 			throw new \RuntimeException( 'Use owner/repository, not a URL.' );
 		}
 		if ( ! in_array( $on_conflict, self::CONFLICT_CHOICES, true ) ) {
 			throw new \RuntimeException( 'Unknown conflict choice.' );
 		}
-		return Jobs::mutate( $id, static function ( &$job ) use ( $token, $repository, $on_conflict ) {
+		$base_branch = is_string( $base_branch ) ? trim( $base_branch ) : '';
+		if ( '' !== $base_branch && ( strlen( $base_branch ) > 200 || ! preg_match( '#^[A-Za-z0-9_][A-Za-z0-9_./-]*$#D', $base_branch ) || preg_match( '#\.\.|//|/$|\.lock$|/\.#', $base_branch ) ) ) {
+			throw new \RuntimeException( 'Use a plain branch name for the base branch, for example main.' );
+		}
+		return Jobs::mutate( $id, static function ( &$job ) use ( $token, $repository, $on_conflict, $base_branch ) {
 			if ( 'ready' !== $job['phase'] ) {
 				throw new \RuntimeException( 'Finalize the export before GitHub delivery.' );
 			}
 			if ( isset( $job['github'] ) ) {
-				if ( $job['github']['repository'] !== $repository ) {
+				if ( $job['github']['repository'] !== $repository || ( '' !== $base_branch && ( $job['github']['base_branch'] ?? '' ) !== $base_branch ) ) {
 					throw new \RuntimeException( 'This export already has a delivery destination.' );
 				}
 				// A refused conflict is answered by choosing again; nothing has been committed yet.
@@ -63,7 +118,15 @@ final class GitHub {
 				throw new \RuntimeException( 'An export including private/draft content requires a private GitHub repository.' );
 			}
 			// Empty repositories must first have an initial commit; we never write to the default branch.
-			$base = self::request( $token, 'GET', $prefix . '/git/ref/heads/' . rawurlencode( $repo['default_branch'] ) );
+			$branch = '' !== $base_branch ? $base_branch : (string) $repo['default_branch'];
+			try {
+				$base = self::request( $token, 'GET', $prefix . '/git/ref/heads/' . self::ref_path( $branch ) );
+			} catch ( \RuntimeException $error ) {
+				if ( 404 === $error->getCode() && '' !== $base_branch ) {
+					throw new \RuntimeException( 'The base branch ' . $base_branch . ' does not exist in ' . $repository . '.' ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Diagnostic data is escaped at the admin output boundary or JSON encoded.
+				}
+				throw $error;
+			}
 			$commit = self::request( $token, 'GET', $prefix . '/git/commits/' . $base['object']['sha'] );
 			$tree = self::request( $token, 'GET', $prefix . '/git/trees/' . $commit['tree']['sha'] . '?recursive=1' );
 			if ( ! empty( $tree['truncated'] ) ) {
@@ -99,7 +162,7 @@ final class GitHub {
 				Jobs::manifest( $job );
 				$removable = self::removable( $plan, $token, $prefix, $remote );
 			}
-			$job['github'] = array( 'repository' => $repository, 'base' => $base['object']['sha'], 'base_tree' => $commit['tree']['sha'], 'branch' => 'contentrain/bridge-' . $job['id'], 'phase' => 'files', 'cursor' => 0, 'nodes' => array(), 'remote' => $remote, 'previous' => $previous, 'on_conflict' => $on_conflict, 'removable' => $removable ?? array(), 'removed' => array(), 'conflicts' => array() );
+			$job['github'] = array( 'repository' => $repository, 'base_branch' => $branch, 'base' => $base['object']['sha'], 'base_tree' => $commit['tree']['sha'], 'branch' => 'contentrain/bridge-' . $job['id'], 'phase' => 'files', 'cursor' => 0, 'nodes' => array(), 'remote' => $remote, 'previous' => $previous, 'on_conflict' => $on_conflict, 'removable' => $removable ?? array(), 'removed' => array(), 'conflicts' => array() );
 		} );
 	}
 
@@ -174,6 +237,12 @@ final class GitHub {
 	}
 
 	public static function step( $id, $token, $expected ) {
+		return self::without_trace_arguments( static function () use ( $id, $token, $expected ) {
+			return self::advance( $id, $token, $expected );
+		} );
+	}
+
+	private static function advance( $id, $token, $expected ) {
 		return Jobs::mutate( $id, static function ( &$job ) use ( $token, $expected ) {
 			if ( ! isset( $job['github'] ) ) {
 				throw new \RuntimeException( 'Choose a GitHub destination first.' );
@@ -204,7 +273,7 @@ final class GitHub {
 						}
 						$g['conflicts'][] = array( 'path' => $path, 'resolution' => $choice ) + ( $edit ? $edit : array() );
 						if ( 'keep-repository' === $choice ) {
-							// The branch starts from the default branch, so leaving the path out keeps the edit.
+							// The branch starts from the base branch, so leaving the path out keeps the edit.
 							++$g['cursor'];
 							return;
 						}
@@ -258,7 +327,7 @@ final class GitHub {
 				try {
 					self::request( $token, 'POST', $prefix . '/git/refs', array( 'ref' => 'refs/heads/' . $g['branch'], 'sha' => $g['commit'] ) );
 				} catch ( \RuntimeException $error ) {
-					$ref = self::request( $token, 'GET', $prefix . '/git/ref/heads/' . rawurlencode( $g['branch'] ) );
+					$ref = self::request( $token, 'GET', $prefix . '/git/ref/heads/' . self::ref_path( $g['branch'] ) );
 					if ( $ref['object']['sha'] !== $g['commit'] ) {
 						throw new \RuntimeException( 'Delivery branch already exists with different content; it was not overwritten.' );
 					}
