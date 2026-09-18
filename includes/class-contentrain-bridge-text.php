@@ -226,7 +226,9 @@ final class Text {
 		}
 		$group = preg_match( '/^(gettext|widget|option|menu)/', $context, $m ) ? $m[1] : 'ui';
 		$area = trim( preg_replace( '/[^a-z0-9]+/', '-', strtolower( preg_replace( '/^(gettext|widget|option|menu):?/', '', $context ) ) ), '-' );
-		$words = array_slice( array_filter( explode( '-', sanitize_title( remove_accents( wp_strip_all_tags( $candidate['value'] ) ) ) ) ), 0, 5 );
+		// sanitize_title keeps non-Latin letters percent-encoded ("%e2%86%92"); a key may hold only [a-z0-9-].
+		$ascii = preg_replace( '/%[0-9a-f]{2}/', '', sanitize_title( remove_accents( wp_strip_all_tags( $candidate['value'] ) ) ) );
+		$words = array_slice( array_filter( explode( '-', preg_replace( '/[^a-z0-9-]/', '', $ascii ) ) ), 0, 5 );
 		$slug = implode( '-', $words ) ?: 'text';
 		$key = $group . '.' . ( '' !== $area ? substr( $area, 0, 40 ) . '.' : '' ) . substr( $slug, 0, 50 );
 		return $key . '-' . substr( hash( 'sha256', $candidate['value'] . "\0" . $context ), 0, 6 );

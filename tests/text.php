@@ -180,6 +180,8 @@ check( array_column( $again, 'key', 'id' ) === array_column( $candidates, 'key',
 $moved = array_map( static function ( $o ) { $o['source'] = 'elsewhere.php'; $o['line'] = 999; return $o; }, $job['text']['occurrences'] );
 check( array_column( Text::merge( $moved, Text::content_texts() ), 'key', 'id' ) === array_column( $candidates, 'key', 'id' ), 'moving every string to another file and line changes no key' );
 check( count( array_unique( array_column( $candidates, 'key' ) ) ) === count( $candidates ), 'every key is unique' );
+$invalid = array_filter( array_column( $candidates, 'key' ), static function ( $k ) { return ! preg_match( '/^[a-z][a-z0-9_.-]{1,120}$/D', $k ); } );
+check( ! $invalid && (bool) preg_match( '/^ui\.p\.guncel-icerik-[0-9a-f]{6}$/', $find( 'Güncel içerik → Истории', 'p' )[0]['key'] ?? '' ), 'every key is a valid dictionary key, non-Latin text included: ' . ( $find( 'Güncel içerik → Истории', 'p' )[0]['key'] ?? 'missing' ) . ( $invalid ? ' — invalid: ' . implode( ', ', $invalid ) : '' ) );
 check( (bool) preg_match( '/^ui\.button\.menu-[0-9a-f]{6}$/', $find( 'Menu', 'button' )[0]['key'] ), 'keys read as group.context.words-digest: ' . $find( 'Menu', 'button' )[0]['key'] );
 
 // ---- Finish: dictionary, Customizer singleton, the inventory file; no secret anywhere. ----
