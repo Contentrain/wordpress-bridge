@@ -62,6 +62,12 @@ jobs:
         env:
           KEEP: 1
       - run: npm run test:plugin
+      # B-06: T0 inventory through a real export, twelve mutations, an exact
+      # delta, idempotency and the refusals. Mutates the throwaway site, so it
+      # runs after the store the other gates read has been copied out.
+      - run: npm run test:delta
+      # Everything handed over — store and delta — scanned for planted secrets.
+      - run: npm run test:secrets
       - run: npm run test:store
       # The reader gate: this writer's own output, read back with the pinned
       # @contentrain/types. It decides whether escape-bearing metadata survives,

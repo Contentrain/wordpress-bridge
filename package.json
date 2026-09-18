@@ -9,7 +9,9 @@
     "package": "python3 tools/package.py",
     "test:plugin": "tests/check-plugin.sh",
     "test:reader": "node tests/reader-compat.mjs",
-    "test:delivery": "tests/delivery-live.sh"
+    "test:delivery": "tests/delivery-live.sh",
+    "test:delta": "tests/delta.sh",
+    "test:secrets": "node tests/secret-scan.mjs"
   },
   "devDependencies": {
     "@contentrain/types": "1.14.0",
