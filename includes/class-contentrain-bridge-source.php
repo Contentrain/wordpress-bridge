@@ -84,7 +84,7 @@ final class Source {
 		if ( function_exists( 'get_field_objects' ) ) {
 			$fields = get_field_objects( $post->ID, false, true ) ?: array();
 			foreach ( $fields as $name => $field ) {
-				if ( Policy::sensitive( $name ) || in_array( $field['type'], array( 'password', 'user' ), true ) ) {
+				if ( Policy::sensitive( $name ) || in_array( $field['type'], Acf::EXCLUDED, true ) ) {
 					$excluded[] = array( 'source' => 'acf/' . $post->ID . '/' . $name, 'reason' => 'sensitive-field' );
 					continue;
 				}
@@ -132,7 +132,7 @@ final class Source {
 
 	/** The parts of an ACF field definition that describe content, at every depth. */
 	private static function schema( $field ) {
-		$out = array_intersect_key( (array) $field, array_flip( array( 'key', 'name', 'label', 'type', 'required', 'choices', 'multiple', 'return_format', 'sub_fields', 'layouts' ) ) );
+		$out = array_intersect_key( (array) $field, array_flip( array( 'key', 'name', 'label', 'type', 'required', 'choices', 'multiple', 'return_format', 'sub_fields', 'layouts', 'taxonomy', 'field_type' ) ) );
 		foreach ( array( 'sub_fields', 'layouts' ) as $nested ) {
 			if ( ! empty( $out[ $nested ] ) && is_array( $out[ $nested ] ) ) {
 				$out[ $nested ] = array_values( array_map( array( self::class, 'schema' ), $out[ $nested ] ) );

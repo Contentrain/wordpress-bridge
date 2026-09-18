@@ -159,14 +159,10 @@ final class Models {
 				$data[ $key ] = $p[ $key ];
 			}
 		}
-		$author = get_userdata( get_post( $p['id'] )->post_author );
+		$author = self::author( $job, get_post( $p['id'] )->post_author, $a['locale'] );
 		if ( $author ) {
-			$ref = substr( hash( 'sha256', 'author:' . $author->ID ), 0, 12 );
-			self::model( $job, 'wp-authors', 'collection', 'blog', 'Authors', array( 'name' => array( 'type' => 'string' ), 'wp_id' => array( 'type' => 'integer' ) ), 'name' );
-			self::entry( $job, 'wp-authors', $a['locale'], $ref, array( 'name' => $author->display_name, 'wp_id' => (int) $author->ID ) );
-			$fields['author'] = array( 'type' => 'relation', 'model' => 'wp-authors' );
-			$data['author'] = $ref;
-			self::row( $job, 'bridge/raw-authors.json', $author->ID, array( 'id' => (int) $author->ID, 'login' => $author->user_login, 'display_name' => $author->display_name ) );
+			$fields['author'] = array( 'type' => 'relation', 'model' => $author['model'] );
+			$data['author'] = $author['id'];
 		}
 		foreach ( $p['terms'] as $term ) {
 			$t = get_term_by( 'slug', $term['slug'], $term['taxonomy'] );
@@ -252,6 +248,19 @@ final class Models {
 			return array( array( 'type' => 'number' ), $value );
 		}
 		return array( array( 'type' => 'text' ), null === $value ? '' : (string) $value );
+	}
+
+	/** The wp-authors collection is shared by post authorship and ACF user fields alike. */
+	public static function author( &$job, $user_id, $locale ) {
+		$author = get_userdata( $user_id );
+		if ( ! $author ) {
+			return null;
+		}
+		$ref = substr( hash( 'sha256', 'author:' . $author->ID ), 0, 12 );
+		self::model( $job, 'wp-authors', 'collection', 'blog', 'Authors', array( 'name' => array( 'type' => 'string' ), 'wp_id' => array( 'type' => 'integer' ) ), 'name' );
+		self::entry( $job, 'wp-authors', $locale, $ref, array( 'name' => $author->display_name, 'wp_id' => (int) $author->ID ) );
+		self::row( $job, 'bridge/raw-authors.json', $author->ID, array( 'id' => (int) $author->ID, 'login' => $author->user_login, 'display_name' => $author->display_name ) );
+		return array( 'model' => 'wp-authors', 'id' => $ref );
 	}
 
 	public static function term( &$job, $term, $locale ) {

@@ -37,8 +37,13 @@ final class Acf {
 	/** Layout-only field types carry no content. */
 	const LAYOUT = array( 'tab', 'accordion', 'message' );
 
-	/** Types whose value is a person or a secret; never content. */
-	const EXCLUDED = array( 'password', 'user' );
+	/**
+	 * Types whose value is a secret; never content. A `user` field's raw value
+	 * is just an ID (format_value=false never resolves it to an email or other
+	 * profile data), so it is modelled as an author relation instead — the same
+	 * name/wp_id a post's own author already gets, not a new disclosure.
+	 */
+	const EXCLUDED = array( 'password' );
 
 	/** Contentrain types that may name a model's title_field. */
 	const TITLE_TYPES = array( 'string', 'text', 'slug', 'email', 'url', 'code', 'markdown', 'richtext' );
@@ -139,6 +144,9 @@ final class Acf {
 		return $title ? array( 'fields' => $fields, 'keys' => $keys, 'title' => $title, 'skipped' => $skipped ) : null;
 	}
 
+	/** Reference types resolved against content that lives in its own model. */
+	const REFERENCES = array( 'relationship', 'post_object', 'taxonomy', 'user', 'gallery' );
+
 	/**
 	 * One ACF field → a Contentrain field definition plus its value, creating a
 	 * model for a group or repeater. Returns null when the shape has no honest
@@ -150,11 +158,36 @@ final class Acf {
 			return array( null, null );
 		}
 		if ( 'link' === $type && is_array( $value ) ) {
-			// Link labels and targets are content too, not just the URL.
-			return null;
+			// A link's label and target are content too, not just the URL; model
+			// it exactly like a two-or-three-field group instead of discarding them.
+			$key = $schema['key'] ?? $source;
+			$schema = array(
+				'type' => 'group',
+				'key' => $key,
+				'name' => $schema['name'] ?? 'link',
+				'label' => $schema['label'] ?? 'Link',
+				'sub_fields' => array(
+					array( 'key' => $key . '_url', 'name' => 'url', 'type' => 'url' ),
+					array( 'key' => $key . '_title', 'name' => 'title', 'type' => 'text' ),
+					array( 'key' => $key . '_target', 'name' => 'target', 'type' => 'text' ),
+				),
+			);
+			$type = 'group';
 		}
 		if ( in_array( $type, self::LAYOUT, true ) ) {
 			return array( null, null );
+		}
+		if ( in_array( $type, self::REFERENCES, true ) ) {
+			if ( null === $value || '' === $value || array() === $value ) {
+				return array( null, null );
+			}
+			return self::reference( $job, $schema, $type, $value, $locale, $source );
+		}
+		if ( 'flexible_content' === $type ) {
+			if ( ! is_array( $value ) || ! $value ) {
+				return array( null, null );
+			}
+			return self::flexible( $job, $schema, $value, $locale, $source );
 		}
 		if ( 'group' === $type || 'repeater' === $type ) {
 			$shape = self::shape( $schema['sub_fields'] ?? array() );
@@ -215,5 +248,172 @@ final class Acf {
 		}
 		$cast = self::cast( $definition, $value );
 		return null === $cast ? ( null === $value || '' === $value ? array( null, null ) : null ) : array( $definition, $cast );
+	}
+
+	/**
+	 * relationship/post_object/taxonomy/user/gallery all point at content that
+	 * already has, or will have, its own model — a post, a term, an author, a
+	 * media record — so each one becomes a relation instead of an opaque id.
+	 * A target outside the export's own scope is reported and skipped rather
+	 * than guessed at; a field whose picks span more than one target model has
+	 * no single honest shape and falls back whole, not partially.
+	 */
+	private static function reference( &$job, $schema, $type, $value, $locale, $source ) {
+		$multiple = true;
+		if ( 'post_object' === $type || 'user' === $type ) {
+			$multiple = ! empty( $schema['multiple'] );
+		} elseif ( 'taxonomy' === $type ) {
+			$multiple = in_array( $schema['field_type'] ?? '', array( 'checkbox', 'multi_select' ), true );
+		}
+		$ids = $multiple && is_array( $value ) ? array_values( $value ) : array( $value );
+		$models = array();
+		$refs = array();
+		foreach ( $ids as $raw ) {
+			$target = null;
+			if ( 'relationship' === $type || 'post_object' === $type ) {
+				$target = self::resolve_post( $job, $raw );
+			} elseif ( 'taxonomy' === $type ) {
+				$target = self::resolve_term( $job, $raw, $schema['taxonomy'] ?? '', $locale );
+			} elseif ( 'user' === $type ) {
+				$author = Models::author( $job, (int) $raw, $locale );
+				$target = $author ? array( $author['model'], $author['id'] ) : null;
+			} elseif ( 'gallery' === $type ) {
+				$target = self::resolve_media( $job, $raw );
+			}
+			if ( ! $target ) {
+				Jobs::warning( $job, array( 'source' => $source . '/' . $raw, 'reason' => 'acf-relation-target-not-in-scope' ) );
+				continue;
+			}
+			$models[ $target[0] ] = true;
+			$refs[] = $target[1];
+		}
+		if ( ! $refs ) {
+			return null; // A non-empty value with nothing resolvable is reported above, not silently dropped.
+		}
+		if ( count( $models ) > 1 ) {
+			Jobs::warning( $job, array( 'source' => $source, 'reason' => 'acf-relation-spans-multiple-models: exported as structured values' ) );
+			return null;
+		}
+		$model = array_key_first( $models );
+		return $multiple ? array( array( 'type' => 'relations', 'model' => $model ), $refs ) : array( array( 'type' => 'relation', 'model' => $model ), $refs[0] );
+	}
+
+	/** A relationship/post_object target must be resolvable from this same export, not merely exist in WordPress. */
+	private static function resolve_post( $job, $raw_id ) {
+		$target = get_post( (int) $raw_id );
+		if ( ! $target || ! in_array( $target->post_type, $job['options']['types'], true ) || in_array( $target->post_status, array( 'auto-draft', 'trash' ), true ) ) {
+			return null;
+		}
+		if ( ! $job['options']['private'] && ( $target->post_password || ! in_array( $target->post_status, array( 'publish', 'inherit' ), true ) ) ) {
+			return null;
+		}
+		$address = Source::address( $target );
+		return array( $address['model_id'], $address['entry_id'] );
+	}
+
+	/** Taxonomy terms always get a model: the term collection is built on demand, exactly like a post's own terms. */
+	private static function resolve_term( &$job, $term_id, $taxonomy, $locale ) {
+		if ( '' === $taxonomy ) {
+			return null;
+		}
+		$term = get_term( (int) $term_id, $taxonomy );
+		if ( ! $term || is_wp_error( $term ) ) {
+			return null;
+		}
+		$target = Models::term( $job, $term, $locale );
+		return array( $target['model'], $target['id'] );
+	}
+
+	/** Media is exported before posts are, so a gallery target either already exists in wp-media or never will. */
+	private static function resolve_media( $job, $attachment_id ) {
+		if ( ! isset( $job['models']['wp-media'] ) ) {
+			return null;
+		}
+		$entry_id = substr( hash( 'sha256', 'media:' . (int) $attachment_id ), 0, 12 );
+		$path = Models::content_path( $job, 'wp-media', $job['default_locale'] );
+		if ( ! isset( $job['tables'][ $path ][ $entry_id ] ) ) {
+			return null;
+		}
+		return array( 'wp-media', $entry_id );
+	}
+
+	/**
+	 * Every layout becomes rows of one collection sharing a merged field set, a
+	 * `layout` column naming which one produced each row, and `position`. This
+	 * only holds together when every layout can supply the same title field and
+	 * no two layouts give the same field name a different type; anything looser
+	 * has no single honest shape, so the whole field falls back instead.
+	 */
+	private static function flexible( &$job, $schema, $value, $locale, $source ) {
+		$layouts = $schema['layouts'] ?? array();
+		if ( ! $layouts ) {
+			return null;
+		}
+		$merged = array();
+		foreach ( $layouts as $layout ) {
+			foreach ( (array) ( $layout['sub_fields'] ?? array() ) as $sub ) {
+				$name = sanitize_key( $sub['name'] ?? '' );
+				if ( '' === $name || in_array( $sub['type'] ?? '', self::LAYOUT, true ) ) {
+					continue;
+				}
+				$definition = self::scalar( $sub );
+				if ( ! $definition || ( isset( $merged[ $name ] ) && $merged[ $name ] !== $definition ) ) {
+					return null;
+				}
+				$merged[ $name ] = $definition;
+			}
+		}
+		$title = null;
+		foreach ( $merged as $name => $definition ) {
+			if ( in_array( $definition['type'], self::TITLE_TYPES, true ) ) {
+				$title = $name;
+				break;
+			}
+		}
+		if ( ! $title ) {
+			return null;
+		}
+		foreach ( $layouts as $layout ) {
+			$names = array_map( static function ( $sub ) { return sanitize_key( $sub['name'] ?? '' ); }, (array) ( $layout['sub_fields'] ?? array() ) );
+			if ( ! in_array( $title, $names, true ) ) {
+				return null; // A layout missing the title field could never satisfy it.
+			}
+		}
+		$merged['layout'] = array( 'type' => 'string', 'required' => true );
+		$merged['position'] = array( 'type' => 'integer' );
+		$model = self::model_id( $schema['name'] ?? '', $schema['key'] ?? $source );
+		$name = $schema['label'] ?? $schema['name'] ?? $model;
+		$prepared = array();
+		$ids = array();
+		foreach ( array_values( $value ) as $index => $row ) {
+			if ( ! is_array( $row ) ) {
+				return null;
+			}
+			$data = array( 'layout' => (string) ( $row['acf_fc_layout'] ?? '' ), 'position' => (int) $index );
+			foreach ( $merged as $key => $definition ) {
+				if ( in_array( $key, array( 'layout', 'position' ), true ) ) {
+					continue;
+				}
+				$raw = $row[ $key ] ?? null;
+				$cast = self::cast( $definition, $raw );
+				if ( null !== $cast ) {
+					$data[ $key ] = $cast;
+				} elseif ( null !== $raw && '' !== $raw ) {
+					return null;
+				}
+			}
+			if ( ! isset( $data[ $title ] ) ) {
+				Jobs::warning( $job, array( 'source' => $source . '/' . $index, 'reason' => 'acf-row-has-no-title-value' ) );
+				return null;
+			}
+			$id = substr( hash( 'sha256', $source . '/' . $index ), 0, 12 );
+			$prepared[ $id ] = $data;
+			$ids[] = $id;
+		}
+		Models::model( $job, $model, 'collection', 'site', $name, $merged, $title );
+		foreach ( $prepared as $id => $data ) {
+			Models::entry( $job, $model, $locale, $id, $data );
+		}
+		return array( array( 'type' => 'relations', 'model' => $model ), $ids );
 	}
 }
