@@ -58,6 +58,10 @@ final class Exporter {
 			'attachments' => $attachments,
 			'menus'       => self::menus(),
 			'options'     => self::options(),
+			'redirects'   => Redirects::document()['redirects'],
+			// Not yet in @contentrain/types RawIR; proposed in the B-04 contract note.
+			'seo'         => Seo::document(),
+			'routing'     => Routing::document(),
 		);
 
 		if ( $include_comments ) {
