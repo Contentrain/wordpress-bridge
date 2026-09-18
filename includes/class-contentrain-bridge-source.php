@@ -163,19 +163,37 @@ final class Source {
 		if ( $post->post_password ) {
 			$excluded[] = array( 'source' => 'post/' . $post->ID . '/password', 'reason' => 'password-not-exported' );
 		}
+		list( $raw['acf'], $schema ) = self::acf_fields( $post->ID, 'acf/' . $post->ID, $excluded );
+		return array( 'raw' => $raw, 'acf_schema' => Policy::clean( $schema, $excluded, 'acf-schema/' . $post->ID ), 'address' => self::address( $post ), 'translations' => self::translations( $post ) );
+	}
+
+	/**
+	 * ACF/SCF field objects for a given `post_id` — a real post, or the
+	 * `option`/`options` pseudo-id an Options Page's fields are stored under.
+	 * Cleaned and schema-extracted identically regardless of which, so a
+	 * dynamically-configured options page gets the same treatment a post's
+	 * own ACF fields already do, not a second, divergent implementation.
+	 */
+	public static function acf_fields( $post_id, $source_prefix, &$excluded ) {
+		$raw = array();
 		$schema = array();
 		if ( function_exists( 'get_field_objects' ) ) {
-			$fields = get_field_objects( $post->ID, false, true ) ?: array();
+			$fields = get_field_objects( $post_id, false, true ) ?: array();
 			foreach ( $fields as $name => $field ) {
 				if ( Policy::sensitive( $name ) || in_array( $field['type'], Acf::EXCLUDED, true ) ) {
-					$excluded[] = array( 'source' => 'acf/' . $post->ID . '/' . $name, 'reason' => 'sensitive-field' );
+					$excluded[] = array( 'source' => $source_prefix . '/' . $name, 'reason' => 'sensitive-field' );
 					continue;
 				}
-				$raw['acf'][ $name ] = array( 'value' => self::acf_value( $field, $field['value'], $excluded, 'acf/' . $post->ID . '/' . $name ), 'field_key' => $field['key'] );
+				$raw[ $name ] = array( 'value' => self::acf_value( $field, $field['value'], $excluded, $source_prefix . '/' . $name ), 'field_key' => $field['key'] );
 				$schema[ $name ] = self::schema( $field );
 			}
 		}
-		return array( 'raw' => $raw, 'acf_schema' => Policy::clean( $schema, $excluded, 'acf-schema/' . $post->ID ), 'address' => self::address( $post ), 'translations' => self::translations( $post ) );
+		return array( $raw, $schema );
+	}
+
+	/** Every registered ACF/SCF Options Page, however many sub-pages the site groups fields under. */
+	public static function options_pages() {
+		return function_exists( 'acf_get_options_pages' ) ? array_values( (array) acf_get_options_pages() ) : array();
 	}
 
 	/** ACF groups can use opaque field keys: inspect types before values reach RawIR. */
@@ -215,7 +233,7 @@ final class Source {
 
 	/** The parts of an ACF field definition that describe content, at every depth. */
 	private static function schema( $field ) {
-		$out = array_intersect_key( (array) $field, array_flip( array( 'key', 'name', 'label', 'type', 'required', 'choices', 'multiple', 'return_format', 'sub_fields', 'layouts', 'taxonomy', 'field_type' ) ) );
+		$out = array_intersect_key( (array) $field, array_flip( array( 'key', 'name', 'label', 'type', 'required', 'choices', 'multiple', 'return_format', 'sub_fields', 'layouts', 'taxonomy', 'field_type', 'display' ) ) );
 		foreach ( array( 'sub_fields', 'layouts' ) as $nested ) {
 			if ( ! empty( $out[ $nested ] ) && is_array( $out[ $nested ] ) ) {
 				$out[ $nested ] = array_values( array_map( array( self::class, 'schema' ), $out[ $nested ] ) );

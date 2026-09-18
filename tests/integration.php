@@ -96,7 +96,10 @@ if ( $has_acf ) {
 			array( 'key' => 'field_bridge_po', 'name' => 'po', 'label' => 'Featured post', 'type' => 'post_object' ),
 			array( 'key' => 'field_bridge_cat', 'name' => 'cat', 'label' => 'Category', 'type' => 'taxonomy', 'taxonomy' => 'category', 'field_type' => 'select' ),
 			array( 'key' => 'field_bridge_gallery', 'name' => 'gallery', 'label' => 'Gallery', 'type' => 'gallery' ),
-			array( 'key' => 'field_bridge_person', 'name' => 'person', 'label' => 'Person', 'type' => 'user' ),
+			// Named `owner`, not `person`: a repeater sub-field sharing an exact
+			// name with a top-level field is a real, separate SCF finding (see
+			// RELEASING.md), not something this specific test is about.
+			array( 'key' => 'field_bridge_person', 'name' => 'owner', 'label' => 'Owner', 'type' => 'user' ),
 			array( 'key' => 'field_bridge_cta', 'name' => 'cta_link', 'label' => 'CTA link', 'type' => 'link' ),
 			array(
 				'key' => 'field_bridge_sections', 'name' => 'sections', 'label' => 'Sections', 'type' => 'flexible_content',
@@ -127,12 +130,69 @@ if ( $has_acf ) {
 	update_field( 'po', $post, $page );
 	update_field( 'cat', (int) $category['term_id'], $page );
 	update_field( 'gallery', array( $attachment, $ghost ), $page );
-	update_field( 'person', $admin->ID, $page );
+	update_field( 'owner', $admin->ID, $page );
 	update_field( 'cta_link', array( 'title' => 'Read more', 'url' => 'https://example.test/read-more', 'target' => '_blank' ), $page );
 	update_field( 'sections', array(
 		array( 'acf_fc_layout' => 'text_block', 'heading' => 'Intro', 'body' => 'Welcome copy' ),
 		array( 'acf_fc_layout' => 'quote_block', 'heading' => 'Praise', 'quote' => 'It just works.' ),
 	), $page );
+}
+
+// clone and Options Page have no free ACF license to test against; Secure
+// Custom Fields (WP.org, an ACF fork with the same function names and
+// database format) carries them for free. `function_exists('acf_add_options_page')`
+// is false under ACF Free specifically, so this fixture degrades gracefully
+// if it is ever run there instead.
+$has_scf_pro = function_exists( 'acf_add_options_page' );
+if ( $has_scf_pro ) {
+	acf_add_local_field_group( array(
+		'key' => 'group_bridge_clone_source', 'title' => 'Clone source',
+		'location' => array( array( array( 'param' => 'post_type', 'operator' => '==', 'value' => 'page' ) ) ),
+		'fields' => array(
+			array( 'key' => 'field_bridge_clone_src_text', 'name' => 'note', 'label' => 'Note', 'type' => 'text' ),
+			array( 'key' => 'field_bridge_clone_src_num', 'name' => 'priority', 'label' => 'Priority', 'type' => 'number' ),
+		),
+	) );
+	// Seamless: the clone field replaces itself with the source fields under
+	// their own names — indistinguishable from adding `note`/`priority` to
+	// this field group directly. No prefix, since the only way found to save
+	// a *prefixed* seamless clone's value correctly is through its wrapper
+	// field, and a wrapper is exactly what seamless does not have.
+	acf_add_local_field_group( array(
+		'key' => 'group_bridge_clone_seamless', 'title' => 'Clone seamless use',
+		'location' => array( array( array( 'param' => 'post_type', 'operator' => '==', 'value' => 'page' ) ) ),
+		'fields' => array(
+			array( 'key' => 'field_bridge_clone_seamless', 'name' => 'clone_seamless', 'label' => 'Clone seamless', 'type' => 'clone', 'clone' => array( 'group_bridge_clone_source' ), 'display' => 'seamless', 'prefix_name' => 0 ),
+		),
+	) );
+	update_field( 'note', 'Seamless note', $page );
+	update_field( 'priority', 3, $page );
+	// Group display, prefixed: saved through the clone field's own key with a
+	// nested value, the way ACF/SCF's own admin form does it — saving through
+	// the flat prefixed meta key directly (the naive approach) writes a value
+	// with no resolvable field-key reference and `get_field_objects()` never
+	// sees it at all, found empirically, not assumed.
+	acf_add_local_field_group( array(
+		'key' => 'group_bridge_clone_group', 'title' => 'Clone group use',
+		'location' => array( array( array( 'param' => 'post_type', 'operator' => '==', 'value' => 'page' ) ) ),
+		'fields' => array(
+			array( 'key' => 'field_bridge_clone_group', 'name' => 'meta_info', 'label' => 'Meta info', 'type' => 'clone', 'clone' => array( 'group_bridge_clone_source' ), 'display' => 'group', 'prefix_name' => 1, 'prefix_label' => 0 ),
+		),
+	) );
+	update_field( 'field_bridge_clone_group', array( 'note' => 'Grouped note', 'priority' => 5 ), $page );
+
+	// Options Page: fields that belong to no post at all.
+	acf_add_options_page( array( 'page_title' => 'Bridge Options', 'menu_slug' => 'bridge-options' ) );
+	acf_add_local_field_group( array(
+		'key' => 'group_bridge_options', 'title' => 'Bridge options fields',
+		'location' => array( array( array( 'param' => 'options_page', 'operator' => '==', 'value' => 'bridge-options' ) ) ),
+		'fields' => array(
+			array( 'key' => 'field_bridge_opt_tagline', 'name' => 'site_wide_tagline', 'label' => 'Tagline', 'type' => 'text' ),
+			array( 'key' => 'field_bridge_opt_year', 'name' => 'copyright_year', 'label' => 'Copyright year', 'type' => 'number' ),
+		),
+	) );
+	update_field( 'field_bridge_opt_tagline', 'Owns its content', 'option' );
+	update_field( 'field_bridge_opt_year', 2026, 'option' );
 }
 
 // Polylang (free): 2 languages, 3 translation groups. Real plugin, not a
@@ -193,12 +253,20 @@ if ( $has_polylang ) {
 		update_field( 'po', $post_da, $page_da );
 		update_field( 'cat', (int) $category['term_id'], $page_da );
 		update_field( 'gallery', array( $attachment, $ghost ), $page_da );
-		update_field( 'person', $admin->ID, $page_da );
+		update_field( 'owner', $admin->ID, $page_da );
 		update_field( 'cta_link', array( 'title' => 'Læs mere', 'url' => 'https://example.test/read-more', 'target' => '_blank' ), $page_da );
 		update_field( 'sections', array(
 			array( 'acf_fc_layout' => 'text_block', 'heading' => 'Intro', 'body' => 'Velkomst' ),
 			array( 'acf_fc_layout' => 'quote_block', 'heading' => 'Ros', 'quote' => 'Det virker bare.' ),
 		), $page_da );
+	}
+	// A group-display clone becomes its own nested collection model (like a
+	// native `group` field), so it carries the same cross-locale requirement:
+	// a translated page needs its own entry, not a same-language gap. The
+	// seamless clone above needs no mirror — its fields flatten onto the page
+	// document itself, where an unset scalar is not a parity error.
+	if ( $has_scf_pro ) {
+		update_field( 'field_bridge_clone_group', array( 'note' => 'Grupperet note', 'priority' => 5 ), $page_da );
 	}
 
 	// Custom post meta is per-post, not per-translation-group; the Danish
@@ -507,8 +575,8 @@ if ( $has_acf ) {
 	$ghost_ref = substr( hash( 'sha256', 'media:' . $ghost ), 0, 12 );
 	check( 'relations' === $job['models']['wp-page']['fields']['acf_gallery']['type'] && 'wp-media' === $job['models']['wp-page']['fields']['acf_gallery']['model'] && array( $media_ref, $ghost_ref ) === $page_entry['acf_gallery'], 'gallery becomes relations to the media collection, including a not-yet-transferred file' );
 	$author_ref = substr( hash( 'sha256', 'author:' . $admin->ID ), 0, 12 );
-	check( 'relation' === $job['models']['wp-page']['fields']['acf_person']['type'] && 'wp-authors' === $job['models']['wp-page']['fields']['acf_person']['model'] && $author_ref === $page_entry['acf_person'], 'a user field becomes a relation to the same author collection a post author uses' );
-	check( $page_entry['acf_person'] === $page_entry['author'], 'the ACF user reference and the post author resolve to the same author record' );
+	check( 'relation' === $job['models']['wp-page']['fields']['acf_owner']['type'] && 'wp-authors' === $job['models']['wp-page']['fields']['acf_owner']['model'] && $author_ref === $page_entry['acf_owner'], 'a user field becomes a relation to the same author collection a post author uses' );
+	check( $page_entry['acf_owner'] === $page_entry['author'], 'the ACF user reference and the post author resolve to the same author record' );
 	$link_model = \Contentrain\Bridge\Acf::model_id( 'cta_link', 'field_bridge_cta' );
 	check( 'relation' === $job['models']['wp-page']['fields']['acf_cta_link']['type'] && $link_model === $job['models']['wp-page']['fields']['acf_cta_link']['model'], 'link becomes its own model' );
 	$link_row = json_decode( Files::read( $dir, Models::content_path( $job, $link_model, $job['default_locale'] ) ), true )[ $page_entry['acf_cta_link'] ];
@@ -522,6 +590,30 @@ if ( $has_acf ) {
 	check( 'text_block' === $section_rows[0]['layout'] && 'Intro' === $section_rows[0]['heading'] && 'Welcome copy' === $section_rows[0]['body'], 'a flexible_content row keeps its own layout and fields' );
 	check( 'quote_block' === $section_rows[1]['layout'] && 'Praise' === $section_rows[1]['heading'] && 'It just works.' === $section_rows[1]['quote'], 'a different layout in the same field keeps its own fields' );
 	check( ! isset( $section_rows[0]['quote'] ) && ! isset( $section_rows[1]['body'] ), 'a row does not carry fields from a layout it was not written in' );
+}
+
+if ( $has_scf_pro ) {
+	// Seamless clone: indistinguishable from `note`/`priority` added directly —
+	// no `acf_clone_seamless` field exists at all, proving the replacement is real.
+	check( 'Seamless note' === $page_entry['acf_note'] && ( 3 === $page_entry['acf_priority'] || 3.0 === $page_entry['acf_priority'] ), 'a seamless clone flattens into the parent field group under the source fields\' own names' );
+	check( ! isset( $job['models']['wp-page']['fields']['acf_clone_seamless'] ), 'a seamless clone field itself is never a field on the parent' );
+
+	// Group-display clone: a real `relation`, exactly like a native `group` field.
+	check( 'relation' === $job['models']['wp-page']['fields']['acf_meta_info']['type'], 'a group-display clone becomes a relation, like a native group field' );
+	$clone_group_model = $job['models']['wp-page']['fields']['acf_meta_info']['model'];
+	$clone_group_row = json_decode( Files::read( $dir, Models::content_path( $job, $clone_group_model, $job['default_locale'] ) ), true )[ $page_entry['acf_meta_info'] ];
+	// `prefix_name => 1` on the clone usage itself, so the values are honestly
+	// under the prefixed names ACF/SCF actually reports for it (`meta_info_note`),
+	// not the source group's own unprefixed names — that guarantee is what the
+	// seamless case above already covers, at `prefix_name => 0`.
+	check( 'Grouped note' === $clone_group_row['meta_info_note'] && ( 5 === $clone_group_row['meta_info_priority'] || 5.0 === $clone_group_row['meta_info_priority'] ), 'a group-display clone keeps its own field names and values' );
+
+	// Options Page: a singleton, one entry, fields the site actually configured.
+	$options_model_id = 'acf-options-bridge-options';
+	check( isset( $job['models'][ $options_model_id ] ) && 'singleton' === $job['models'][ $options_model_id ]['kind'], 'an Options Page becomes a singleton model' );
+	$options_entry = json_decode( Files::read( $dir, Models::content_path( $job, $options_model_id, $job['default_locale'] ) ), true );
+	check( 'Bridge Options' === $options_entry['page_title'], 'the Options Page singleton always has a valid title field, whatever its configured fields are named' );
+	check( 'Owns its content' === $options_entry['acf_site_wide_tagline'] && ( 2026 === $options_entry['acf_copyright_year'] || 2026.0 === $options_entry['acf_copyright_year'] ), 'Options Page field values are modelled the same way a post\'s own ACF fields are' );
 }
 
 check( Validator::run( $job )['valid'], 'generated relation graph validates' );

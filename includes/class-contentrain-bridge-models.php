@@ -401,6 +401,50 @@ final class Models {
 		}
 	}
 
+	/**
+	 * One Options Page becomes one singleton, its fields whatever the site
+	 * actually configured — arbitrary, unlike a post's fixed title/body. A
+	 * `page_title` field is always present so the model always has a valid
+	 * title field regardless of what those configured fields are named; ACF
+	 * fields are prefixed the same way a post's own are, so a field legitimately
+	 * named `page_title` cannot collide with it.
+	 */
+	public static function options_page( &$job, $page ) {
+		$post_id = $page['post_id'] ?: 'options';
+		$slug = sanitize_title( $page['menu_slug'] ?? $post_id );
+		$excluded = array();
+		list( $raw, $schema ) = Source::acf_fields( $post_id, 'acf-options/' . $slug, $excluded );
+		foreach ( $excluded as $warning ) {
+			Jobs::warning( $job, $warning );
+		}
+		$schema = Policy::clean( $schema, $excluded, 'acf-options-schema/' . $slug );
+		$mid = 'acf-options-' . $slug;
+		$fields = array( 'page_title' => array( 'type' => 'string', 'required' => true ) );
+		$data = array( 'page_title' => $page['page_title'] ?: $page['menu_slug'] ?: $slug );
+		foreach ( $raw as $key => $acf ) {
+			$name = 'acf_' . str_replace( '-', '_', sanitize_key( $key ) );
+			$source = 'acf-options/' . $slug . '/' . $key;
+			$modelled = isset( $schema[ $key ] ) ? Acf::field( $job, $schema[ $key ], $acf['value'], $job['default_locale'], $source ) : null;
+			if ( null === $modelled ) {
+				Jobs::warning( $job, array( 'source' => $source, 'reason' => 'acf-shape-not-modelled: exported as structured values' ) );
+				$modelled = self::value( $job, $acf['value'], $job['default_locale'], $source );
+			}
+			list( $field, $content ) = $modelled;
+			if ( null === $field ) {
+				continue;
+			}
+			$fields[ $name ] = $field;
+			$data[ $name ] = $content;
+		}
+		// An Options Page's values live in a single wp_options row, not a
+		// per-language one; ACF/SCF's own options-page storage has no concept of
+		// a translated copy, so — like authors, terms, media and menu items —
+		// this model declares `i18n` false rather than inheriting an i18n
+		// site's own, which would demand a same-language copy that can never exist.
+		self::model( $job, $mid, 'singleton', 'site', $page['page_title'] ?: $page['menu_slug'] ?: $slug, $fields, 'page_title', false );
+		self::entry( $job, $mid, $job['default_locale'], '', $data );
+	}
+
 	/** Check short writes so disk exhaustion cannot produce a successful truncated table. */
 	private static function write_stream( $stream, $bytes ) {
 		while ( '' !== $bytes ) {

@@ -49,6 +49,10 @@ final class Jobs {
 		foreach ( $menus as $menu ) {
 			Coverage::tally( $job, array( 'menu_items' ), 'exported', count( $menu['items'] ) );
 		}
+		foreach ( Source::options_pages() as $options_page ) {
+			Models::options_page( $job, $options_page );
+			Coverage::tally( $job, array( 'options_pages' ), 'exported' );
+		}
 		self::warning( $job, array( 'source' => 'rendered-states', 'reason' => 'Source scan does not execute dynamic WordPress/plugin states. Rendered coverage requires the Migrate capture adapter.' ) );
 		self::save( $job );
 		update_user_meta( get_current_user_id(), 'contentrain_bridge_job_' . get_current_blog_id(), $id );

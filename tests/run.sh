@@ -32,13 +32,19 @@ done
 
 "${cli[@]}" plugin activate contentrain-bridge >/dev/null
 
-# ACF is the field layer most WordPress content actually lives in, so the
-# fixture has to exercise it rather than assume it. Free version, from
-# wordpress.org; required: a failed dependency install is not a passing test.
-if ! "${cli[@]}" plugin is-installed advanced-custom-fields >/dev/null 2>&1; then
-  "${cli[@]}" plugin install advanced-custom-fields --version=6.8.10 >/dev/null
+# The field layer most WordPress content actually lives in, so the fixture
+# has to exercise it rather than assume it. Secure Custom Fields (WP.org, a
+# free fork of ACF that carries every Pro field type — clone, Options Page —
+# for free) rather than ACF itself: `clone` and Options Page have no free ACF
+# license to test against, and SCF keeps ACF's own function names and
+# database format, so this one fixture proves both the field types ACF Free
+# already covered *and* the ones it does not, instead of two fixtures that
+# could quietly drift apart. The two plugins define the same functions and
+# cannot both be active.
+if ! "${cli[@]}" plugin is-installed secure-custom-fields >/dev/null 2>&1; then
+  "${cli[@]}" plugin install secure-custom-fields >/dev/null
 fi
-"${cli[@]}" plugin activate advanced-custom-fields >/dev/null
+"${cli[@]}" plugin activate secure-custom-fields >/dev/null
 
 # Menus and language pairs are only real once a real multilingual plugin
 # tags real content; Polylang is free, from wordpress.org, and required for
@@ -76,3 +82,10 @@ fi
 # know nothing about Polylang, so leaving it active would break their own
 # taxonomy lookups for terms nothing here ever tags with a language.
 "${cli[@]}" plugin deactivate polylang >/dev/null
+
+# SCF stays active: test:delta, test:text and test:integrations all reuse this
+# same KEEP=1 site and expect a real ACF-compatible plugin (any function-name
+# check they run, `acf_add_local_field_group` and friends, is satisfied by
+# either ACF or SCF equally). Only B-11's own e2e.sh activates
+# `advanced-custom-fields` itself, later still, and deactivates SCF first for
+# exactly that reason — see the comment there.

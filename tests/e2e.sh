@@ -21,6 +21,15 @@ if [ -z "${BRIDGE_TEST_REPO:-}" ] || [ -z "${BRIDGE_TEST_TOKEN:-}" ]; then
   echo "SKIP: GitHub leg (BRIDGE_TEST_REPO/BRIDGE_TEST_TOKEN not set) — delivering to a local Git repository instead"
 fi
 
+# test:wordpress leaves Secure Custom Fields active for the gates in between
+# (test:delta, test:text, test:integrations, ...) that need a real ACF-
+# compatible plugin. SCF and ACF define the same functions — active together,
+# that is a fatal duplicate-function error, not a compatibility question — so
+# it comes out right before this step's own `advanced-custom-fields` goes in.
+if "${cli[@]}" plugin is-active secure-custom-fields >/dev/null 2>&1; then
+  "${cli[@]}" plugin deactivate secure-custom-fields >/dev/null
+fi
+
 for plugin in advanced-custom-fields:6.8.10 wordpress-seo:28.5 redirection:5.10.0; do
   name="${plugin%%:*}"
   "${cli[@]}" plugin is-installed "$name" >/dev/null 2>&1 || "${cli[@]}" plugin install "$name" --version="${plugin##*:}" >/dev/null

@@ -157,6 +157,18 @@ final class Acf {
 		if ( in_array( $type, self::EXCLUDED, true ) ) {
 			return array( null, null );
 		}
+		// A clone field's own `display` decides its shape, not its type. Seamless
+		// never reaches here as `clone` at all — ACF/SCF replace it with the
+		// cloned fields directly at the parent's own level, under their own
+		// names, so whatever type they really are already gets handled. A
+		// group-display clone is indistinguishable from a real `group` field
+		// once loaded (same `sub_fields`, a nested value keyed by the cloned
+		// fields' own keys — `shape()`'s name-or-key lookup already covers
+		// that), so it is treated as one rather than duplicating that logic.
+		if ( 'clone' === $type && 'group' === ( $schema['display'] ?? '' ) ) {
+			$type = 'group';
+			$schema = array( 'type' => 'group', 'key' => $schema['key'] ?? $source, 'name' => $schema['name'] ?? '', 'label' => $schema['label'] ?? '', 'sub_fields' => $schema['sub_fields'] ?? array() );
+		}
 		if ( 'link' === $type && is_array( $value ) ) {
 			// A link's label and target are content too, not just the URL; model
 			// it exactly like a two-or-three-field group instead of discarding them.
@@ -337,6 +349,15 @@ final class Acf {
 			return null;
 		}
 		$merged = array();
+		// Two layouts can each name a sub-field `heading` while ACF/SCF still
+		// gives each its own field key. A saved row is only ever shaped like the
+		// one layout that produced it, so every key ever seen for a name is a
+		// safe, unambiguous fallback when the row has no entry under the name
+		// itself — exactly the dual lookup `shape()` already does for group and
+		// repeater rows, needed here because a real, formatted flexible_content
+		// field (unlike ACF Free's unregistered fallback) keys its own raw rows
+		// by field key, not by name.
+		$keys = array();
 		foreach ( $layouts as $layout ) {
 			foreach ( (array) ( $layout['sub_fields'] ?? array() ) as $sub ) {
 				$name = sanitize_key( $sub['name'] ?? '' );
@@ -348,6 +369,7 @@ final class Acf {
 					return null;
 				}
 				$merged[ $name ] = $definition;
+				$keys[ $name ][] = $sub['key'] ?? $name;
 			}
 		}
 		$title = null;
@@ -382,6 +404,14 @@ final class Acf {
 					continue;
 				}
 				$raw = $row[ $key ] ?? null;
+				if ( null === $raw ) {
+					foreach ( $keys[ $key ] ?? array() as $alt ) {
+						if ( array_key_exists( $alt, $row ) ) {
+							$raw = $row[ $alt ];
+							break;
+						}
+					}
+				}
 				$cast = self::cast( $definition, $raw );
 				if ( null !== $cast ) {
 					$data[ $key ] = $cast;
