@@ -146,9 +146,9 @@ final class Coverage {
 		// ---- Options: identity, SEO, widgets, Customizer, and the rest by name. ----
 		$options = array();
 		$options_pages = self::options_page_index();
-		$other_locales = self::other_locales( $job );
+		$locale_suffixes = self::translation_suffixes( $job );
 		foreach ( $wpdb->get_col( "SELECT option_name FROM {$wpdb->options}" ) as $name ) { // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Independent enumeration.
-			$outcome = self::option( $name, $job, $options_pages, $other_locales );
+			$outcome = self::option( $name, $job, $options_pages, $locale_suffixes );
 			$options[ $outcome ] = ( $options[ $outcome ] ?? 0 ) + 1;
 		}
 		$sources[] = self::source( 'options', 'site', array_sum( $options ), $options );
@@ -203,51 +203,86 @@ final class Coverage {
 		return array( 'source' => $name, 'group' => $group, 'count' => (int) $count, 'outcomes' => $outcomes ?: (object) array(), 'balanced' => (int) $count === (int) array_sum( $outcomes ) ) + $detail;
 	}
 
-	/** Every registered Options Page's storage `post_id` (default `options`, shared by every page that does not set its own) and its own field names, so a shared post_id's rows can be attributed to the field that actually owns each one. */
+	/** Field types whose own storage is more than one row: a sub-field's row belongs to the parent field that owns it, not to no field at all. */
+	const OPTIONS_COMPOSITE_TYPES = array( 'repeater', 'flexible_content', 'group' );
+
+	/** Every registered Options Page's storage `post_id` (default `options`, shared by every page that does not set its own), its own field names, and which of those fields store more than one row under their own name. */
 	private static function options_page_index() {
 		$pages = array();
 		foreach ( Source::options_pages() as $page ) {
 			$post_id = (string) ( $page['post_id'] ?: 'options' );
 			$slug = $page['menu_slug'] ?? sanitize_title( $post_id );
-			$names = array();
+			$entry = $pages[ $post_id ] ?? array( 'names' => array(), 'composite' => array() );
 			if ( function_exists( 'acf_get_field_groups' ) ) {
 				foreach ( acf_get_field_groups( array( 'options_page' => $slug ) ) as $group ) {
 					foreach ( acf_get_fields( $group ) as $field ) {
-						$names[] = $field['name'];
+						$entry['names'][] = $field['name'];
+						if ( in_array( $field['type'], self::OPTIONS_COMPOSITE_TYPES, true ) || ( 'clone' === $field['type'] && 'group' === ( $field['display'] ?? 'seamless' ) ) ) {
+							$entry['composite'][] = $field['name'];
+						}
 					}
 				}
 			}
-			$pages[ $post_id ] = array_values( array_unique( array_merge( $pages[ $post_id ] ?? array(), $names ) ) );
+			$entry['names'] = array_values( array_unique( $entry['names'] ) );
+			$entry['composite'] = array_values( array_unique( $entry['composite'] ) );
+			$pages[ $post_id ] = $entry;
 		}
 		return $pages;
 	}
 
-	/** Every locale the site's multilingual plugin knows about, apart from the default one a page's untranslated values are already stored under. */
-	private static function other_locales( $job ) {
-		$all = array_values( array_unique( array_map( array( Source::class, 'locale' ), (array) $job['inventory']['languages'] ) ) );
-		return array_values( array_diff( $all, array( Source::default_locale() ) ) );
+	/** A row name belongs to a field either directly, or (for a repeater/group/flexible_content/group-display-clone) as one of that field's own sub-rows. */
+	private static function options_field_for( $rest, $field_names, $composite ) {
+		if ( in_array( $rest, $field_names, true ) ) {
+			return true;
+		}
+		foreach ( $composite as $name ) {
+			if ( 0 === strpos( $rest, $name . '_' ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Every locale suffix a third-party translation plugin could realistically
+	 * write onto an Options Page's storage: Polylang's own `locale` and `slug`
+	 * forms (`da_DK`/`da`, either can be the configured suffix attribute — see
+	 * "ACF Options for Polylang"'s `bea.aofp.lang_attribute` filter), for every
+	 * configured language including the default one — measured empirically,
+	 * the default language gets a redundant suffixed copy too, because the
+	 * plugin never configures ACF's own `default_language` setting. WPML +
+	 * ACFML has no free tier to test against, so the project's own generic
+	 * locale list is kept only as a best-effort fallback pattern alongside it.
+	 */
+	private static function translation_suffixes( $job ) {
+		$suffixes = array();
+		if ( function_exists( 'pll_languages_list' ) ) {
+			$suffixes = array_merge( $suffixes, (array) pll_languages_list( array( 'fields' => 'locale' ) ), (array) pll_languages_list( array( 'fields' => 'slug' ) ) );
+		}
+		$suffixes = array_merge( $suffixes, array_map( array( Source::class, 'locale' ), (array) $job['inventory']['languages'] ) );
+		return array_values( array_unique( array_filter( $suffixes ) ) );
 	}
 
 	/**
 	 * A third-party plugin can give an Options Page a per-language copy of its
 	 * values — WPML + ACFML, or the free "ACF Options for Polylang" (BeAPI),
-	 * which suffixes a locale onto a non-default `post_id`
-	 * (`{post_id}_{locale}_{field}`) — storage this plugin never reads (see
-	 * `i18n: false` in `Models::options_page()`), so those rows must not be
-	 * counted as if nothing exists for them.
+	 * which suffixes a locale onto a `post_id` (`{post_id}_{locale}_{field}`,
+	 * including the default `options` post_id itself) — storage this plugin
+	 * never reads (see `i18n: false` in `Models::options_page()`), so those
+	 * rows must not be counted as if nothing exists for them.
 	 */
-	private static function option( $name, $job, $options_pages = array(), $other_locales = array() ) {
+	private static function option( $name, $job, $options_pages = array(), $locale_suffixes = array() ) {
 		$bare = '_' === ( $name[0] ?? '' ) ? substr( $name, 1 ) : $name;
-		foreach ( $options_pages as $post_id => $field_names ) {
+		foreach ( $options_pages as $post_id => $page ) {
 			if ( 0 !== strpos( $bare, $post_id . '_' ) ) {
 				continue;
 			}
 			$rest = substr( $bare, strlen( $post_id ) + 1 );
-			if ( in_array( $rest, $field_names, true ) ) {
+			if ( self::options_field_for( $rest, $page['names'], $page['composite'] ) ) {
 				return 'exported:acf-options';
 			}
-			foreach ( $other_locales as $locale ) {
-				if ( 0 === strpos( $rest, $locale . '_' ) && in_array( substr( $rest, strlen( $locale ) + 1 ), $field_names, true ) ) {
+			foreach ( $locale_suffixes as $locale ) {
+				if ( 0 === strpos( $rest, $locale . '_' ) && self::options_field_for( substr( $rest, strlen( $locale ) + 1 ), $page['names'], $page['composite'] ) ) {
 					return 'unsupported:options-page-translation';
 				}
 			}

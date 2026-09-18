@@ -190,10 +190,25 @@ if ( $has_scf_pro ) {
 		'fields' => array(
 			array( 'key' => 'field_bridge_opt_tagline', 'name' => 'site_wide_tagline', 'label' => 'Tagline', 'type' => 'text' ),
 			array( 'key' => 'field_bridge_opt_year', 'name' => 'copyright_year', 'label' => 'Copyright year', 'type' => 'number' ),
+			// A repeater's own sub-rows (`options_social_links_0_url`, ...) are
+			// stored under the field's own name, not the field's own row —
+			// coverage must attribute them to `social_links`, not fold them
+			// into `excluded:configuration-not-content` for not matching a
+			// field name exactly.
+			array(
+				'key' => 'field_bridge_opt_social', 'name' => 'social_links', 'label' => 'Social links', 'type' => 'repeater',
+				'sub_fields' => array(
+					array( 'key' => 'field_bridge_opt_social_url', 'name' => 'url', 'label' => 'URL', 'type' => 'text' ),
+				),
+			),
 		),
 	) );
 	update_field( 'field_bridge_opt_tagline', 'Owns its content', 'option' );
 	update_field( 'field_bridge_opt_year', 2026, 'option' );
+	update_field( 'field_bridge_opt_social', array(
+		array( 'url' => 'https://example.test/a' ),
+		array( 'url' => 'https://example.test/b' ),
+	), 'option' );
 
 	// Two more Options Pages, neither given its own `post_id` — the common
 	// setup (a parent page and its sub-pages) defaults every one of them to
@@ -220,13 +235,10 @@ if ( $has_scf_pro ) {
 	) );
 	update_field( 'field_bridge_opt_footer_text', 'All rights reserved', 'option' );
 
-	// A per-language copy WordPress core knows nothing about, in the exact
-	// shape "ACF Options for Polylang" (BeAPI, installed for real above) uses
-	// for a non-default `post_id` (`{post_id}_{locale}_{field}`, verified by
-	// reading that plugin's own source) — planted directly rather than through
-	// its own runtime language-switching, which needs a real admin request
-	// context this script does not have. Proves this plugin's own coverage
-	// accounting and detection warning against the real naming convention.
+	// An Options Page with its own custom `post_id`. Its per-language copy is
+	// planted further below, after Polylang's languages exist, through the
+	// real "ACF Options for Polylang" plugin's own runtime — not a guessed
+	// `update_option()` shape.
 	acf_add_options_page( array( 'page_title' => 'Bridge Locale Options', 'menu_slug' => 'bridge-locale-options', 'post_id' => 'bridge_locale_options' ) );
 	acf_add_local_field_group( array(
 		'key' => 'group_bridge_locale_options', 'title' => 'Bridge locale options fields',
@@ -236,8 +248,6 @@ if ( $has_scf_pro ) {
 		),
 	) );
 	update_field( 'field_bridge_opt_locale_note', 'Default language value', 'bridge_locale_options' );
-	update_option( 'bridge_locale_options_da_locale_note', 'Dansk værdi' );
-	update_option( '_bridge_locale_options_da_locale_note', 'field_bridge_opt_locale_note' );
 }
 
 // Polylang (free): 2 languages, 3 translation groups. Real plugin, not a
@@ -312,6 +322,27 @@ if ( $has_polylang ) {
 	// document itself, where an unset scalar is not a parity error.
 	if ( $has_scf_pro ) {
 		update_field( 'field_bridge_clone_group', array( 'note' => 'Grupperet note', 'priority' => 5 ), $page_da );
+	}
+
+	// A real per-language copy through the actual "ACF Options for Polylang"
+	// plugin (BeAPI, installed for real above), for both a page's own custom
+	// `post_id` (`bridge_locale_options`) and the default `options` post_id
+	// shared by every page that does not set its own — its own
+	// `acf/validate_post_id` filter does this suffixing, not a planted
+	// `update_option()`.
+	if ( $has_scf_pro ) {
+		PLL()->curlang = PLL()->model->get_language( 'da' );
+		update_field( 'field_bridge_opt_locale_note', 'Dansk værdi', 'bridge_locale_options' );
+		update_field( 'field_bridge_opt_header_text', 'Dansk banner', 'option' );
+		// The default language gets a redundant suffixed copy too: this
+		// plugin never configures ACF's own `default_language` setting, so
+		// its own "is this the default language" check is never true for any
+		// explicit `curlang` — measured empirically against the real plugin,
+		// not assumed. Coverage's translation-row detection must not be a
+		// "da only" special case.
+		PLL()->curlang = PLL()->model->get_language( 'en' );
+		update_field( 'field_bridge_opt_year', 2027, 'option' );
+		PLL()->curlang = false;
 	}
 
 	// Custom post meta is per-post, not per-translation-group; the Danish
@@ -678,6 +709,21 @@ if ( $has_scf_pro ) {
 	check( 'Welcome banner' === $header_entry['acf_header_text'], 'the header Options Page value is its own, not the footer\'s' );
 	check( 'All rights reserved' === $footer_entry['acf_footer_text'], 'the footer Options Page value is its own, not the header\'s' );
 
+	if ( $has_polylang ) {
+		// The export must not depend on whatever language an admin's own
+		// admin-bar filter happens to be set to when they run it — Polylang
+		// sets `curlang` from exactly that filter (`admin-base.php`
+		// `set_current_language()`), and the real "ACF Options for Polylang"
+		// plugin then redirects a normal `get_field_object()` read to that
+		// language's row. Proven directly against the same read the export
+		// itself performs, on the real per-language row planted above.
+		PLL()->curlang = PLL()->model->get_language( 'da' );
+		$curlang_excluded = array();
+		list( $curlang_raw, ) = Source::acf_fields_for_options_page( 'options', 'bridge-header', 'acf-options/bridge-header', $curlang_excluded );
+		PLL()->curlang = false;
+		check( 'Welcome banner' === ( $curlang_raw['header_text']['value'] ?? null ), 'an Options Page read while an admin\'s language filter is set to Danish still returns the untranslated default, not the Danish redirect' );
+	}
+
 	// A third-party plugin can give an Options Page a per-language copy this
 	// plugin does not read; a real detection (the plugin installed above) must
 	// name the gap, and coverage must attribute both the exported default
@@ -693,8 +739,15 @@ if ( $has_scf_pro ) {
 			break;
 		}
 	}
-	check( 10 === ( $options_source['outcomes']['exported:acf-options'] ?? 0 ), 'every exported Options Page field\'s storage rows (value + reference, 5 fields) are reported as exported' );
-	check( 2 === ( $options_source['outcomes']['unsupported:options-page-translation'] ?? 0 ), 'a detected per-language Options Page row (value + reference) is reported as unsupported, not silently excluded' );
+	// 5 scalar fields (value + reference, 10 rows) plus one 2-row repeater
+	// (its own value + reference, and each row's own sub-field value +
+	// reference: 3 pairs, 6 rows) = 16.
+	check( 16 === ( $options_source['outcomes']['exported:acf-options'] ?? 0 ), 'every exported Options Page field\'s storage rows, including a repeater\'s own sub-rows, are reported as exported' );
+	// Three real per-language rows (value + reference each, 6 rows): the
+	// custom `bridge_locale_options` post_id, the default `options` post_id,
+	// and — matching the plugin's own default-language quirk — a copy under
+	// the *default* language's own suffix, not only a non-default one.
+	check( 6 === ( $options_source['outcomes']['unsupported:options-page-translation'] ?? 0 ), 'every real per-language Options Page row (value + reference) is reported as unsupported, not silently excluded' );
 	$locale_options_id = 'acf-options-bridge-locale-options';
 	$locale_entry = json_decode( Files::read( $dir, Models::content_path( $job, $locale_options_id, $job['default_locale'] ) ), true );
 	check( 'Default language value' === $locale_entry['acf_locale_note'], 'an Options Page with a detected per-language copy still exports only its default-language value' );

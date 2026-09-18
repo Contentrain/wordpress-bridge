@@ -150,9 +150,14 @@ final class Acf {
 	/**
 	 * One ACF field → a Contentrain field definition plus its value, creating a
 	 * model for a group or repeater. Returns null when the shape has no honest
-	 * model, so the caller can fall back and say so.
+	 * model, so the caller can fall back and say so. `$i18n` names whether the
+	 * model this field belongs to is itself per-locale content: null inherits
+	 * the job's own (a post's ACF fields), `false` forces a single-copy
+	 * collection (an Options Page's, which only ever gets one locale's worth
+	 * of entries — see `Models::options_page()`) so the validator does not
+	 * demand a same-language copy this export never writes.
 	 */
-	public static function field( &$job, $schema, $value, $locale, $source ) {
+	public static function field( &$job, $schema, $value, $locale, $source, $i18n = null ) {
 		$type = $schema['type'] ?? '';
 		if ( in_array( $type, self::EXCLUDED, true ) ) {
 			return array( null, null );
@@ -199,7 +204,7 @@ final class Acf {
 			if ( ! is_array( $value ) || ! $value ) {
 				return array( null, null );
 			}
-			return self::flexible( $job, $schema, $value, $locale, $source );
+			return self::flexible( $job, $schema, $value, $locale, $source, $i18n );
 		}
 		if ( 'group' === $type || 'repeater' === $type ) {
 			$shape = self::shape( $schema['sub_fields'] ?? array() );
@@ -242,7 +247,7 @@ final class Acf {
 				$prepared[ $id ] = $data;
 				$ids[] = $id;
 			}
-			Models::model( $job, $model, 'collection', 'site', $name, $fields, $shape['title'] );
+			Models::model( $job, $model, 'collection', 'site', $name, $fields, $shape['title'], $i18n );
 			foreach ( $prepared as $id => $data ) {
 				Models::entry( $job, $model, $locale, $id, $data );
 			}
@@ -343,7 +348,7 @@ final class Acf {
 	 * no two layouts give the same field name a different type; anything looser
 	 * has no single honest shape, so the whole field falls back instead.
 	 */
-	private static function flexible( &$job, $schema, $value, $locale, $source ) {
+	private static function flexible( &$job, $schema, $value, $locale, $source, $i18n = null ) {
 		$layouts = $schema['layouts'] ?? array();
 		if ( ! $layouts ) {
 			return null;
@@ -427,7 +432,7 @@ final class Acf {
 			$prepared[ $id ] = $data;
 			$ids[] = $id;
 		}
-		Models::model( $job, $model, 'collection', 'site', $name, $merged, $title );
+		Models::model( $job, $model, 'collection', 'site', $name, $merged, $title, $i18n );
 		foreach ( $prepared as $id => $data ) {
 			Models::entry( $job, $model, $locale, $id, $data );
 		}
