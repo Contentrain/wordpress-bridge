@@ -31,11 +31,11 @@ final class Jobs {
 			'inventory' => $inventory, 'default_locale' => $locale, 'locales' => array( $locale => true ), 'i18n' => count( $languages ) > 1,
 			'options' => array( 'types' => $types, 'private' => ! empty( $input['private'] ), 'comments' => ! empty( $input['comments'] ), 'scan_plugins' => ! empty( $input['scan_plugins'] ), 'scan_sources' => ! empty( $input['scan_sources'] ), 'selected_meta' => array_values( array_filter( array_map( 'sanitize_text_field', (array) ( $input['selected_meta'] ?? array() ) ) ) ), 'labels' => array_map( 'sanitize_text_field', (array) ( $input['labels'] ?? array() ) ) ),
 			'uploads' => array_intersect_key( (array) wp_get_upload_dir(), array_flip( array( 'basedir', 'baseurl' ) ) ),
+			'record_scope' => Inventory::scope( $types, array_filter( array_map( 'sanitize_text_field', (array) ( $input['selected_meta'] ?? array() ) ) ), ! empty( $input['private'] ) ), 'records' => array(),
 			'models' => array(), 'tables' => array(), 'files' => array(), 'candidates' => array(), 'counts' => array( 'posts' => 0, 'media' => 0, 'media_files' => 0, 'media_bytes' => 0, 'media_kept_remote' => 0, 'comments' => 0, 'warnings' => 0 ),
 		);
 		$site = array( 'url' => home_url( '/' ), 'title' => get_bloginfo( 'name' ), 'description' => get_bloginfo( 'description' ), 'language' => $locale, 'base_site_url' => site_url( '/' ), 'base_blog_url' => home_url( '/' ), 'generator' => 'WordPress/' . get_bloginfo( 'version' ), 'export_date' => $job['created_at'] );
 		Models::file( $job, 'bridge/site.json', Policy::json( $site ) );
-		Models::file( $job, 'bridge/inventory.json', Policy::json( $inventory ) );
 		Models::file( $job, 'bridge/options.json', Policy::json( Exporter::options() ) );
 		Models::model( $job, 'site', 'singleton', 'site', 'Site', array( 'title' => array( 'type' => 'string' ), 'description' => array( 'type' => 'text' ), 'source_url' => array( 'type' => 'url' ) ) );
 		Models::entry( $job, 'site', $locale, '', array( 'title' => $site['title'], 'description' => $site['description'], 'source_url' => $site['url'] ) );
@@ -132,6 +132,8 @@ final class Jobs {
 				self::posts( $job );
 			} elseif ( 'terms' === $job['phase'] ) {
 				self::terms( $job );
+			} elseif ( 'inventory' === $job['phase'] ) {
+				self::inventory( $job );
 			} elseif ( 'comments' === $job['phase'] ) {
 				self::comments( $job );
 			} elseif ( 'sources' === $job['phase'] ) {
@@ -301,6 +303,23 @@ final class Jobs {
 			$job['cursor'] = (int) $id;
 		}
 		if ( count( $ids ) < 50 ) {
+			$job['phase'] = 'inventory';
+			$job['cursor'] = 0;
+			$job['inventory_cursor'] = Inventory::start();
+		}
+	}
+
+	/**
+	 * Every record in scope, every status: the cursor the next export's delta is
+	 * measured from. Taken inside the same revision-checked snapshot as the content.
+	 */
+	private static function inventory( &$job ) {
+		list( $records, $job['inventory_cursor'] ) = Inventory::page( $job['record_scope'], $job['inventory_cursor'] );
+		foreach ( $records as $record ) {
+			$job['records'][ Inventory::key( $record ) ] = $record;
+		}
+		if ( 'done' === $job['inventory_cursor']['stage'] ) {
+			unset( $job['inventory_cursor'] );
 			$job['phase'] = 'comments';
 			$job['cursor'] = 0;
 		}
@@ -410,10 +429,17 @@ final class Jobs {
 	private static function finish( &$job ) {
 		Models::file( $job, 'bridge/validation.json', Policy::json( Validator::run( $job ) ) );
 		Models::file( $job, 'CONTENTRAIN-EXPORT.md', "# Contentrain WordPress export\n\nFree, editable JSON and Markdown content. Models live in `.contentrain/models`.\n\nMarkdown bodies preserve the original WordPress HTML; shortcodes and dynamic blocks require a renderer. Source files and the live WordPress theme have not been rewritten. Transferred media lives under `media/` and content links to it; anything too large or unreadable kept its WordPress URL and is listed in the warnings. Review `bridge/warnings.json` and `bridge/string-sources.json` for scope and text decisions.\n\nUse Contentrain Studio or the query SDK to edit/read this store. For an Astro website, choose the optional Migrate handoff from WordPress after delivery.\n" );
-		$manifest = array( 'format' => 'contentrain-bridge@1', 'version' => CONTENTRAIN_BRIDGE_VERSION, 'snapshot' => $job['id'], 'site' => $job['inventory']['site'], 'created_at' => $job['created_at'], 'scope' => $job['options'], 'counts' => $job['counts'], 'files' => $job['files'], 'media' => array( 'transferred_files' => $job['counts']['media_files'], 'transferred_bytes' => $job['counts']['media_bytes'], 'kept_as_source_url' => $job['counts']['media_kept_remote'], 'stored_under' => 'media/', 'note' => $job['counts']['media_kept_remote'] ? 'Some media still points at WordPress; see bridge/warnings.json' : 'All exported media travels with the content' ), 'source_reuse' => 'not-applied', 'complete_source_coverage' => false );
-		Models::file( $job, 'bridge/manifest.json', Policy::json( $manifest ) );
+		Models::file( $job, 'bridge/inventory.json', Policy::json( Inventory::document( $job['record_scope'], $job['records'], $job['created_at'], true, $job['inventory'] ) ) );
+		self::manifest( $job );
 		$job['phase'] = 'ready';
 		$job['cursor'] = 0;
+	}
+
+	/** The manifest lists every other file; rewritten when delivery adds one. */
+	public static function manifest( &$job ) {
+		unset( $job['files']['bridge/manifest.json'] );
+		$manifest = array( 'format' => 'contentrain-bridge@1', 'version' => CONTENTRAIN_BRIDGE_VERSION, 'snapshot' => $job['id'], 'site' => $job['inventory']['site'], 'created_at' => $job['created_at'], 'scope' => $job['options'], 'counts' => $job['counts'], 'files' => $job['files'], 'media' => array( 'transferred_files' => $job['counts']['media_files'], 'transferred_bytes' => $job['counts']['media_bytes'], 'kept_as_source_url' => $job['counts']['media_kept_remote'], 'stored_under' => 'media/', 'note' => $job['counts']['media_kept_remote'] ? 'Some media still points at WordPress; see bridge/warnings.json' : 'All exported media travels with the content' ), 'source_reuse' => 'not-applied', 'complete_source_coverage' => false );
+		Models::file( $job, 'bridge/manifest.json', Policy::json( $manifest ) );
 	}
 
 	public static function warning( &$job, $warning ) {

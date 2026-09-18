@@ -69,6 +69,19 @@ final class GitHub {
 				}
 				$previous = $manifest['files'];
 			}
+			// The inventory the repository was built from is the delta cursor. It
+			// lives in the repository, not in WordPress, so it survives a reinstall;
+			// the previous manifest's hash is what says nobody edited it since.
+			if ( isset( $remote['bridge/inventory.json'] ) && isset( $job['records'] ) ) {
+				$blob = self::request( $token, 'GET', $prefix . '/git/blobs/' . $remote['bridge/inventory.json'] );
+				$raw = (string) base64_decode( str_replace( "\n", '', $blob['content'] ), true );
+				$trusted = $previous['bridge/inventory.json']['sha256'] ?? null;
+				$after = json_decode( Files::read( Files::dir( $job['id'] ) . '/output', 'bridge/inventory.json' ), true );
+				// Edited in Git after delivery: not a cursor this export can trust.
+				$before = $trusted && ! hash_equals( $trusted, hash( 'sha256', $raw ) ) ? null : json_decode( $raw, true );
+				Models::file( $job, 'bridge/delta.json', Policy::json( Delta::compare( $before, $after ) ) );
+				Jobs::manifest( $job );
+			}
 			$job['github'] = array( 'repository' => $repository, 'base' => $base['object']['sha'], 'base_tree' => $commit['tree']['sha'], 'branch' => 'contentrain/bridge-' . $job['id'], 'phase' => 'files', 'cursor' => 0, 'nodes' => array(), 'remote' => $remote, 'previous' => $previous );
 		} );
 	}
