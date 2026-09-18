@@ -14,9 +14,14 @@ import { existsSync } from 'node:fs'
 const roots = process.argv.slice(2).length ? process.argv.slice(2) : ['store', 'delta', 'seo', 'text', 'integrations'].map((d) => join(here, '.out', d)).filter((d) => existsSync(d))
 
 // Planted by tests/integration.php and tests/delta.php, or configured in compose.yml.
+// Unpublished content: must not appear in a public-scope export. The A-09 planner
+// fixture (delta/planner) is private scope on purpose, drafts included, so these
+// are not looked for there. Credentials are looked for everywhere.
+const PUBLIC_SCOPE_CANARIES = ['delta-unreleased-launch']
+const privateScope = (file) => /[\\/]delta[\\/]planner[\\/]/.test(file)
 const CANARIES = [
   'never-export-me', 'never-export-nested', 'hidden-credential', 'private@example.test', 'private-in-meta@example.test',
-  '192.0.2.1', 'test-only-token', 'bridge-local-only', 'bridge-admin@example.test', 'delta-unreleased-launch',
+  '192.0.2.1', 'test-only-token', 'bridge-local-only', 'bridge-admin@example.test',
   // Planted by tests/seo-fixture.php in Yoast's general option.
   'never-export-semrush', 'never-export-wincher', 'never-export-myyoast',
   // Planted by tests/integrations.php in the services' own settings.
@@ -44,6 +49,7 @@ const scan = (dirs) => {
       files++
       const text = readFileSync(file, 'utf8')
       for (const canary of CANARIES) if (text.includes(canary)) hits.push(`${file}: ${canary}`)
+      if (!privateScope(file)) for (const canary of PUBLIC_SCOPE_CANARIES) if (text.includes(canary)) hits.push(`${file}: ${canary}`)
       for (const pattern of PATTERNS) if (pattern.test(text)) hits.push(`${file}: ${pattern}`)
     }
   }

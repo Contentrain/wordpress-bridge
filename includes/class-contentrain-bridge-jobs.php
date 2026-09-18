@@ -218,8 +218,9 @@ final class Jobs {
 			$image_meta = (array) $a['image_meta'];
 			$a['image_meta'] = array_intersect_key( $image_meta, array_flip( array( 'width', 'height', 'sizes', 'file' ) ) );
 			Models::row( $job, 'bridge/raw-attachments.json', $id, $a );
-			Models::model( $job, 'wp-media', 'collection', 'assets', 'Media', array( 'title' => array( 'type' => 'string' ), 'url' => array( 'type' => 'url' ), 'file' => array( 'type' => 'file' ), 'alt' => array( 'type' => 'text' ), 'caption' => array( 'type' => 'richtext' ), 'description' => array( 'type' => 'richtext' ) ), 'title', false );
-			$data = array_intersect_key( $a, array_flip( array( 'title', 'alt', 'caption', 'description' ) ) );
+			Models::model( $job, 'wp-media', 'collection', 'assets', 'Media', array( 'title' => array( 'type' => 'string' ), 'url' => array( 'type' => 'url' ), 'file' => array( 'type' => 'file' ), 'alt' => array( 'type' => 'text' ), 'caption' => array( 'type' => 'richtext' ), 'description' => array( 'type' => 'richtext' ), 'wp_id' => array( 'type' => 'integer' ) ), 'title', false );
+			// wp_id, like every other WordPress-sourced model: a later delta names an attachment by it.
+			$data = array_intersect_key( $a, array_flip( array( 'title', 'alt', 'caption', 'description' ) ) ) + array( 'wp_id' => (int) $id );
 			if ( $a['url'] ) {
 				$data['url'] = $a['url'];
 			}
