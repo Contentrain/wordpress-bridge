@@ -9,9 +9,12 @@ status=0
 # Plugin Check walks the directory before it applies --exclude-directories, so a
 # path it cannot read is a hard failure rather than a skipped exclusion. The
 # acceptance run leaves its store under tests/.out; run.sh makes it traversable.
+# In a linked git worktree (used to run parallel sessions against this repo),
+# .git is a file rather than a directory, and Plugin Check flags it as a
+# hidden file; exclude it explicitly so the check passes from any worktree.
 "${cli[@]}" plugin check contentrain-bridge \
   --exclude-directories=tests,tools,dist,.github \
-  --exclude-files=.gitignore,package.json,package-lock.json,RELEASING.md \
+  --exclude-files=.gitignore,package.json,package-lock.json,RELEASING.md,.git \
   --format=strict-json > "$here/.out/plugin-check.json" || status=$?
 node --input-type=module - "$here/.out/plugin-check.json" "$status" <<'JS'
 import {readFileSync} from 'node:fs';
