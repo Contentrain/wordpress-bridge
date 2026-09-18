@@ -51,7 +51,6 @@ final class Jobs {
 		}
 		foreach ( Source::options_pages() as $options_page ) {
 			Models::options_page( $job, $options_page );
-			Coverage::tally( $job, array( 'options_pages' ), 'exported' );
 		}
 		self::warning( $job, array( 'source' => 'rendered-states', 'reason' => 'Source scan does not execute dynamic WordPress/plugin states. Rendered coverage requires the Migrate capture adapter.' ) );
 		self::save( $job );

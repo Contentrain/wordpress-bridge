@@ -163,17 +163,17 @@ final class Source {
 		if ( $post->post_password ) {
 			$excluded[] = array( 'source' => 'post/' . $post->ID . '/password', 'reason' => 'password-not-exported' );
 		}
-		list( $raw['acf'], $schema ) = self::acf_fields( $post->ID, 'acf/' . $post->ID, $excluded );
+		list( $acf, $schema ) = self::acf_fields( $post->ID, 'acf/' . $post->ID, $excluded );
+		// A post with no ACF fields carries no `acf` key at all, not an empty
+		// one: an inventory fingerprint must not change for every non-ACF
+		// record just because this plugin now also knows how to read ACF.
+		if ( $acf ) {
+			$raw['acf'] = $acf;
+		}
 		return array( 'raw' => $raw, 'acf_schema' => Policy::clean( $schema, $excluded, 'acf-schema/' . $post->ID ), 'address' => self::address( $post ), 'translations' => self::translations( $post ) );
 	}
 
-	/**
-	 * ACF/SCF field objects for a given `post_id` — a real post, or the
-	 * `option`/`options` pseudo-id an Options Page's fields are stored under.
-	 * Cleaned and schema-extracted identically regardless of which, so a
-	 * dynamically-configured options page gets the same treatment a post's
-	 * own ACF fields already do, not a second, divergent implementation.
-	 */
+	/** ACF/SCF field objects for a real post: every field group whose location rule matches it, exactly what `get_field_objects()` already scopes correctly for a single, ordinary post. */
 	public static function acf_fields( $post_id, $source_prefix, &$excluded ) {
 		$raw = array();
 		$schema = array();
@@ -186,6 +186,38 @@ final class Source {
 				}
 				$raw[ $name ] = array( 'value' => self::acf_value( $field, $field['value'], $excluded, $source_prefix . '/' . $name ), 'field_key' => $field['key'] );
 				$schema[ $name ] = self::schema( $field );
+			}
+		}
+		return array( $raw, $schema );
+	}
+
+	/**
+	 * ACF/SCF field objects for one specific Options Page — never everything
+	 * stored at its `post_id`. Every options page defaults to the same
+	 * `post_id` ('options') unless a site explicitly gives it its own, so
+	 * `get_field_objects( $post_id )` there would return every options page's
+	 * fields, not just this one's — scoped instead by the field groups whose
+	 * own location rule names this page.
+	 */
+	public static function acf_fields_for_options_page( $post_id, $slug, $source_prefix, &$excluded ) {
+		$raw = array();
+		$schema = array();
+		if ( ! function_exists( 'acf_get_field_groups' ) ) {
+			return array( $raw, $schema );
+		}
+		foreach ( acf_get_field_groups( array( 'options_page' => $slug ) ) as $group ) {
+			foreach ( acf_get_fields( $group ) as $field ) {
+				$loaded = get_field_object( $field['key'], $post_id, false );
+				if ( ! $loaded ) {
+					continue;
+				}
+				$name = $loaded['name'];
+				if ( Policy::sensitive( $name ) || in_array( $loaded['type'], Acf::EXCLUDED, true ) ) {
+					$excluded[] = array( 'source' => $source_prefix . '/' . $name, 'reason' => 'sensitive-field' );
+					continue;
+				}
+				$raw[ $name ] = array( 'value' => self::acf_value( $loaded, $loaded['value'], $excluded, $source_prefix . '/' . $name ), 'field_key' => $loaded['key'] );
+				$schema[ $name ] = self::schema( $loaded );
 			}
 		}
 		return array( $raw, $schema );

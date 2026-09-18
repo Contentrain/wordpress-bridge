@@ -145,8 +145,10 @@ final class Coverage {
 
 		// ---- Options: identity, SEO, widgets, Customizer, and the rest by name. ----
 		$options = array();
+		$options_pages = self::options_page_index();
+		$other_locales = self::other_locales( $job );
 		foreach ( $wpdb->get_col( "SELECT option_name FROM {$wpdb->options}" ) as $name ) { // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Independent enumeration.
-			$outcome = self::option( $name, $job );
+			$outcome = self::option( $name, $job, $options_pages, $other_locales );
 			$options[ $outcome ] = ( $options[ $outcome ] ?? 0 ) + 1;
 		}
 		$sources[] = self::source( 'options', 'site', array_sum( $options ), $options );
@@ -201,7 +203,55 @@ final class Coverage {
 		return array( 'source' => $name, 'group' => $group, 'count' => (int) $count, 'outcomes' => $outcomes ?: (object) array(), 'balanced' => (int) $count === (int) array_sum( $outcomes ) ) + $detail;
 	}
 
-	private static function option( $name, $job ) {
+	/** Every registered Options Page's storage `post_id` (default `options`, shared by every page that does not set its own) and its own field names, so a shared post_id's rows can be attributed to the field that actually owns each one. */
+	private static function options_page_index() {
+		$pages = array();
+		foreach ( Source::options_pages() as $page ) {
+			$post_id = (string) ( $page['post_id'] ?: 'options' );
+			$slug = $page['menu_slug'] ?? sanitize_title( $post_id );
+			$names = array();
+			if ( function_exists( 'acf_get_field_groups' ) ) {
+				foreach ( acf_get_field_groups( array( 'options_page' => $slug ) ) as $group ) {
+					foreach ( acf_get_fields( $group ) as $field ) {
+						$names[] = $field['name'];
+					}
+				}
+			}
+			$pages[ $post_id ] = array_values( array_unique( array_merge( $pages[ $post_id ] ?? array(), $names ) ) );
+		}
+		return $pages;
+	}
+
+	/** Every locale the site's multilingual plugin knows about, apart from the default one a page's untranslated values are already stored under. */
+	private static function other_locales( $job ) {
+		$all = array_values( array_unique( array_map( array( Source::class, 'locale' ), (array) $job['inventory']['languages'] ) ) );
+		return array_values( array_diff( $all, array( Source::default_locale() ) ) );
+	}
+
+	/**
+	 * A third-party plugin can give an Options Page a per-language copy of its
+	 * values — WPML + ACFML, or the free "ACF Options for Polylang" (BeAPI),
+	 * which suffixes a locale onto a non-default `post_id`
+	 * (`{post_id}_{locale}_{field}`) — storage this plugin never reads (see
+	 * `i18n: false` in `Models::options_page()`), so those rows must not be
+	 * counted as if nothing exists for them.
+	 */
+	private static function option( $name, $job, $options_pages = array(), $other_locales = array() ) {
+		$bare = '_' === ( $name[0] ?? '' ) ? substr( $name, 1 ) : $name;
+		foreach ( $options_pages as $post_id => $field_names ) {
+			if ( 0 !== strpos( $bare, $post_id . '_' ) ) {
+				continue;
+			}
+			$rest = substr( $bare, strlen( $post_id ) + 1 );
+			if ( in_array( $rest, $field_names, true ) ) {
+				return 'exported:acf-options';
+			}
+			foreach ( $other_locales as $locale ) {
+				if ( 0 === strpos( $rest, $locale . '_' ) && in_array( substr( $rest, strlen( $locale ) + 1 ), $field_names, true ) ) {
+					return 'unsupported:options-page-translation';
+				}
+			}
+		}
 		if ( in_array( $name, array( 'blogname', 'blogdescription', 'siteurl', 'home', 'WPLANG', 'permalink_structure', 'show_on_front', 'page_on_front', 'page_for_posts', 'posts_per_page', 'timezone_string', 'date_format', 'time_format', 'category_base', 'tag_base' ), true ) ) {
 			return 'exported:site-identity';
 		}

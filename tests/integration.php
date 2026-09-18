@@ -96,10 +96,11 @@ if ( $has_acf ) {
 			array( 'key' => 'field_bridge_po', 'name' => 'po', 'label' => 'Featured post', 'type' => 'post_object' ),
 			array( 'key' => 'field_bridge_cat', 'name' => 'cat', 'label' => 'Category', 'type' => 'taxonomy', 'taxonomy' => 'category', 'field_type' => 'select' ),
 			array( 'key' => 'field_bridge_gallery', 'name' => 'gallery', 'label' => 'Gallery', 'type' => 'gallery' ),
-			// Named `owner`, not `person`: a repeater sub-field sharing an exact
-			// name with a top-level field is a real, separate SCF finding (see
-			// RELEASING.md), not something this specific test is about.
-			array( 'key' => 'field_bridge_person', 'name' => 'owner', 'label' => 'Owner', 'type' => 'user' ),
+			// Named `person`, exactly like the repeater's own sub-field below:
+			// two fields sharing a name at different nesting depths is legal
+			// ACF/SCF, resolved correctly by key — see the `update_field` calls
+			// below, which save by key for exactly this reason.
+			array( 'key' => 'field_bridge_person', 'name' => 'person', 'label' => 'Person', 'type' => 'user' ),
 			array( 'key' => 'field_bridge_cta', 'name' => 'cta_link', 'label' => 'CTA link', 'type' => 'link' ),
 			array(
 				'key' => 'field_bridge_sections', 'name' => 'sections', 'label' => 'Sections', 'type' => 'flexible_content',
@@ -130,7 +131,7 @@ if ( $has_acf ) {
 	update_field( 'po', $post, $page );
 	update_field( 'cat', (int) $category['term_id'], $page );
 	update_field( 'gallery', array( $attachment, $ghost ), $page );
-	update_field( 'owner', $admin->ID, $page );
+	update_field( 'field_bridge_person', $admin->ID, $page );
 	update_field( 'cta_link', array( 'title' => 'Read more', 'url' => 'https://example.test/read-more', 'target' => '_blank' ), $page );
 	update_field( 'sections', array(
 		array( 'acf_fc_layout' => 'text_block', 'heading' => 'Intro', 'body' => 'Welcome copy' ),
@@ -193,6 +194,50 @@ if ( $has_scf_pro ) {
 	) );
 	update_field( 'field_bridge_opt_tagline', 'Owns its content', 'option' );
 	update_field( 'field_bridge_opt_year', 2026, 'option' );
+
+	// Two more Options Pages, neither given its own `post_id` — the common
+	// setup (a parent page and its sub-pages) defaults every one of them to
+	// the same `options` post_id. Each singleton must get only the fields
+	// its own field group is located to, not every field stored at that
+	// shared post_id.
+	acf_add_options_page( array( 'page_title' => 'Bridge Header', 'menu_slug' => 'bridge-header' ) );
+	acf_add_local_field_group( array(
+		'key' => 'group_bridge_header_options', 'title' => 'Bridge header fields',
+		'location' => array( array( array( 'param' => 'options_page', 'operator' => '==', 'value' => 'bridge-header' ) ) ),
+		'fields' => array(
+			array( 'key' => 'field_bridge_opt_header_text', 'name' => 'header_text', 'label' => 'Header text', 'type' => 'text' ),
+		),
+	) );
+	update_field( 'field_bridge_opt_header_text', 'Welcome banner', 'option' );
+
+	acf_add_options_page( array( 'page_title' => 'Bridge Footer', 'menu_slug' => 'bridge-footer' ) );
+	acf_add_local_field_group( array(
+		'key' => 'group_bridge_footer_options', 'title' => 'Bridge footer fields',
+		'location' => array( array( array( 'param' => 'options_page', 'operator' => '==', 'value' => 'bridge-footer' ) ) ),
+		'fields' => array(
+			array( 'key' => 'field_bridge_opt_footer_text', 'name' => 'footer_text', 'label' => 'Footer text', 'type' => 'text' ),
+		),
+	) );
+	update_field( 'field_bridge_opt_footer_text', 'All rights reserved', 'option' );
+
+	// A per-language copy WordPress core knows nothing about, in the exact
+	// shape "ACF Options for Polylang" (BeAPI, installed for real above) uses
+	// for a non-default `post_id` (`{post_id}_{locale}_{field}`, verified by
+	// reading that plugin's own source) — planted directly rather than through
+	// its own runtime language-switching, which needs a real admin request
+	// context this script does not have. Proves this plugin's own coverage
+	// accounting and detection warning against the real naming convention.
+	acf_add_options_page( array( 'page_title' => 'Bridge Locale Options', 'menu_slug' => 'bridge-locale-options', 'post_id' => 'bridge_locale_options' ) );
+	acf_add_local_field_group( array(
+		'key' => 'group_bridge_locale_options', 'title' => 'Bridge locale options fields',
+		'location' => array( array( array( 'param' => 'options_page', 'operator' => '==', 'value' => 'bridge-locale-options' ) ) ),
+		'fields' => array(
+			array( 'key' => 'field_bridge_opt_locale_note', 'name' => 'locale_note', 'label' => 'Locale note', 'type' => 'text' ),
+		),
+	) );
+	update_field( 'field_bridge_opt_locale_note', 'Default language value', 'bridge_locale_options' );
+	update_option( 'bridge_locale_options_da_locale_note', 'Dansk værdi' );
+	update_option( '_bridge_locale_options_da_locale_note', 'field_bridge_opt_locale_note' );
 }
 
 // Polylang (free): 2 languages, 3 translation groups. Real plugin, not a
@@ -253,7 +298,7 @@ if ( $has_polylang ) {
 		update_field( 'po', $post_da, $page_da );
 		update_field( 'cat', (int) $category['term_id'], $page_da );
 		update_field( 'gallery', array( $attachment, $ghost ), $page_da );
-		update_field( 'owner', $admin->ID, $page_da );
+		update_field( 'field_bridge_person', $admin->ID, $page_da );
 		update_field( 'cta_link', array( 'title' => 'Læs mere', 'url' => 'https://example.test/read-more', 'target' => '_blank' ), $page_da );
 		update_field( 'sections', array(
 			array( 'acf_fc_layout' => 'text_block', 'heading' => 'Intro', 'body' => 'Velkomst' ),
@@ -347,6 +392,13 @@ check( 'review' === $summary['phase'], 'resumable export reaches review' );
 $job = Jobs::read( $id );
 check( isset( $job['tables']['bridge/raw-posts.json'][ $book ] ), 'REST-hidden CPT is exported' );
 check( ! isset( $job['tables']['bridge/raw-posts.json'][ $draft ] ), 'draft excluded in public scope' );
+// A post outside every ACF field group's location rule must keep exactly the
+// raw shape it had before this plugin knew how to read ACF at all: an
+// inventory fingerprint must not change for every non-ACF record just
+// because ACF support exists now.
+$post_raw_row = $job['tables']['bridge/raw-posts.json'][ $post ];
+$post_raw = json_decode( Files::read( Files::dir( $id ), 'rows/' . hash( 'sha256', 'bridge/raw-posts.json' ) . '/' . $post_raw_row . '.json' ), true );
+check( ! array_key_exists( 'acf', $post_raw ), 'a post outside every ACF field group carries no acf key at all, so its inventory fingerprint is unchanged by ACF support' );
 check( ! isset( $job['models']['wp-post']['fields']['slug'] ), 'document system slug is not declared as a field' );
 check( isset( $job['models']['wp-structured-values'] ), 'nested content becomes editable related records' );
 if ( $has_acf ) {
@@ -575,8 +627,8 @@ if ( $has_acf ) {
 	$ghost_ref = substr( hash( 'sha256', 'media:' . $ghost ), 0, 12 );
 	check( 'relations' === $job['models']['wp-page']['fields']['acf_gallery']['type'] && 'wp-media' === $job['models']['wp-page']['fields']['acf_gallery']['model'] && array( $media_ref, $ghost_ref ) === $page_entry['acf_gallery'], 'gallery becomes relations to the media collection, including a not-yet-transferred file' );
 	$author_ref = substr( hash( 'sha256', 'author:' . $admin->ID ), 0, 12 );
-	check( 'relation' === $job['models']['wp-page']['fields']['acf_owner']['type'] && 'wp-authors' === $job['models']['wp-page']['fields']['acf_owner']['model'] && $author_ref === $page_entry['acf_owner'], 'a user field becomes a relation to the same author collection a post author uses' );
-	check( $page_entry['acf_owner'] === $page_entry['author'], 'the ACF user reference and the post author resolve to the same author record' );
+	check( 'relation' === $job['models']['wp-page']['fields']['acf_person']['type'] && 'wp-authors' === $job['models']['wp-page']['fields']['acf_person']['model'] && $author_ref === $page_entry['acf_person'], 'a user field becomes a relation to the same author collection a post author uses' );
+	check( $page_entry['acf_person'] === $page_entry['author'], 'the ACF user reference and the post author resolve to the same author record' );
 	$link_model = \Contentrain\Bridge\Acf::model_id( 'cta_link', 'field_bridge_cta' );
 	check( 'relation' === $job['models']['wp-page']['fields']['acf_cta_link']['type'] && $link_model === $job['models']['wp-page']['fields']['acf_cta_link']['model'], 'link becomes its own model' );
 	$link_row = json_decode( Files::read( $dir, Models::content_path( $job, $link_model, $job['default_locale'] ) ), true )[ $page_entry['acf_cta_link'] ];
@@ -614,6 +666,38 @@ if ( $has_scf_pro ) {
 	$options_entry = json_decode( Files::read( $dir, Models::content_path( $job, $options_model_id, $job['default_locale'] ) ), true );
 	check( 'Bridge Options' === $options_entry['page_title'], 'the Options Page singleton always has a valid title field, whatever its configured fields are named' );
 	check( 'Owns its content' === $options_entry['acf_site_wide_tagline'] && ( 2026 === $options_entry['acf_copyright_year'] || 2026.0 === $options_entry['acf_copyright_year'] ), 'Options Page field values are modelled the same way a post\'s own ACF fields are' );
+
+	// Two Options Pages sharing the default `options` post_id: each singleton
+	// must carry only the fields its own field group is located to.
+	$header_id = 'acf-options-bridge-header';
+	$footer_id = 'acf-options-bridge-footer';
+	check( isset( $job['models'][ $header_id ]['fields']['acf_header_text'] ) && ! isset( $job['models'][ $header_id ]['fields']['acf_footer_text'] ), 'an Options Page sharing the default post_id carries only its own field, not a sibling page\'s' );
+	check( isset( $job['models'][ $footer_id ]['fields']['acf_footer_text'] ) && ! isset( $job['models'][ $footer_id ]['fields']['acf_header_text'] ), 'a sibling Options Page on the same shared post_id carries only its own field in turn' );
+	$header_entry = json_decode( Files::read( $dir, Models::content_path( $job, $header_id, $job['default_locale'] ) ), true );
+	$footer_entry = json_decode( Files::read( $dir, Models::content_path( $job, $footer_id, $job['default_locale'] ) ), true );
+	check( 'Welcome banner' === $header_entry['acf_header_text'], 'the header Options Page value is its own, not the footer\'s' );
+	check( 'All rights reserved' === $footer_entry['acf_footer_text'], 'the footer Options Page value is its own, not the header\'s' );
+
+	// A third-party plugin can give an Options Page a per-language copy this
+	// plugin does not read; a real detection (the plugin installed above) must
+	// name the gap, and coverage must attribute both the exported default
+	// value and the unread translation honestly, not fold either into
+	// `excluded:configuration-not-content`.
+	$options_warning_reasons = implode( '|', array_column( json_decode( Files::read( $dir, 'bridge/warnings.json' ), true ), 'reason' ) );
+	check( false !== strpos( $options_warning_reasons, 'acf-options-translation-plugin-detected' ), 'a detected Options Page translation plugin is reported, not silently ignored' );
+	$coverage = json_decode( Files::read( $dir, 'bridge/coverage.json' ), true );
+	$options_source = null;
+	foreach ( $coverage['sources'] as $source ) {
+		if ( 'options' === $source['source'] ) {
+			$options_source = $source;
+			break;
+		}
+	}
+	check( 10 === ( $options_source['outcomes']['exported:acf-options'] ?? 0 ), 'every exported Options Page field\'s storage rows (value + reference, 5 fields) are reported as exported' );
+	check( 2 === ( $options_source['outcomes']['unsupported:options-page-translation'] ?? 0 ), 'a detected per-language Options Page row (value + reference) is reported as unsupported, not silently excluded' );
+	$locale_options_id = 'acf-options-bridge-locale-options';
+	$locale_entry = json_decode( Files::read( $dir, Models::content_path( $job, $locale_options_id, $job['default_locale'] ) ), true );
+	check( 'Default language value' === $locale_entry['acf_locale_note'], 'an Options Page with a detected per-language copy still exports only its default-language value' );
 }
 
 check( Validator::run( $job )['valid'], 'generated relation graph validates' );

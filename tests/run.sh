@@ -42,7 +42,7 @@ done
 # could quietly drift apart. The two plugins define the same functions and
 # cannot both be active.
 if ! "${cli[@]}" plugin is-installed secure-custom-fields >/dev/null 2>&1; then
-  "${cli[@]}" plugin install secure-custom-fields >/dev/null
+  "${cli[@]}" plugin install secure-custom-fields --version=6.9.5 >/dev/null
 fi
 "${cli[@]}" plugin activate secure-custom-fields >/dev/null
 
@@ -53,6 +53,15 @@ if ! "${cli[@]}" plugin is-installed polylang >/dev/null 2>&1; then
   "${cli[@]}" plugin install polylang >/dev/null
 fi
 "${cli[@]}" plugin activate polylang >/dev/null
+
+# The free BeAPI plugin that gives an Options Page a real per-language copy of
+# its values, so the export's own warning for it (an Options Page's values
+# are otherwise a single, default-language row — see Models::options_page())
+# is proven against the real thing detecting it, not a guessed constant.
+if ! "${cli[@]}" plugin is-installed acf-options-for-polylang >/dev/null 2>&1; then
+  "${cli[@]}" plugin install acf-options-for-polylang --version=2.0.0 >/dev/null
+fi
+"${cli[@]}" plugin activate acf-options-for-polylang >/dev/null
 
 log="$(mktemp)"
 "${compose[@]}" exec -T wordpress \
@@ -81,7 +90,7 @@ fi
 # steps (test:seo, test:delta, test:e2e, ...) reuse this same KEEP=1 site and
 # know nothing about Polylang, so leaving it active would break their own
 # taxonomy lookups for terms nothing here ever tags with a language.
-"${cli[@]}" plugin deactivate polylang >/dev/null
+"${cli[@]}" plugin deactivate polylang acf-options-for-polylang >/dev/null
 
 # SCF stays active: test:delta, test:text and test:integrations all reuse this
 # same KEEP=1 site and expect a real ACF-compatible plugin (any function-name

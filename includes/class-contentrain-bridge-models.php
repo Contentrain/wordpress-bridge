@@ -413,7 +413,7 @@ final class Models {
 		$post_id = $page['post_id'] ?: 'options';
 		$slug = sanitize_title( $page['menu_slug'] ?? $post_id );
 		$excluded = array();
-		list( $raw, $schema ) = Source::acf_fields( $post_id, 'acf-options/' . $slug, $excluded );
+		list( $raw, $schema ) = Source::acf_fields_for_options_page( $post_id, $page['menu_slug'] ?? $slug, 'acf-options/' . $slug, $excluded );
 		foreach ( $excluded as $warning ) {
 			Jobs::warning( $job, $warning );
 		}
@@ -436,13 +436,20 @@ final class Models {
 			$fields[ $name ] = $field;
 			$data[ $name ] = $content;
 		}
-		// An Options Page's values live in a single wp_options row, not a
-		// per-language one; ACF/SCF's own options-page storage has no concept of
-		// a translated copy, so — like authors, terms, media and menu items —
-		// this model declares `i18n` false rather than inheriting an i18n
-		// site's own, which would demand a same-language copy that can never exist.
+		// ACF/SCF's own Options Page storage has no per-language copy — one
+		// `options_{name}` (or `{post_id}_{name}`) row per field, not one per
+		// locale — so this model declares `i18n` false rather than inheriting
+		// an i18n site's own, which would demand a same-language copy that
+		// storage structurally cannot hold. A third-party plugin CAN add one
+		// (WPML + ACFML; the free "ACF Options for Polylang"), and this plugin
+		// does not read it — named below rather than silently dropped.
 		self::model( $job, $mid, 'singleton', 'site', $page['page_title'] ?: $page['menu_slug'] ?: $slug, $fields, 'page_title', false );
 		self::entry( $job, $mid, $job['default_locale'], '', $data );
+		if ( has_filter( 'wpml_default_language' ) && ( function_exists( 'acfml' ) || class_exists( 'ACFML' ) ) ) {
+			Jobs::warning( $job, array( 'source' => 'acf-options/' . $slug, 'reason' => 'acf-options-translation-plugin-detected: WPML + ACFML can translate this Options Page; only its default-language values are exported' ) );
+		} elseif ( defined( 'BEA_ACF_OPTIONS_FOR_POLYLANG_VERSION' ) ) {
+			Jobs::warning( $job, array( 'source' => 'acf-options/' . $slug, 'reason' => 'acf-options-translation-plugin-detected: ACF Options for Polylang can translate this Options Page; only its default-language values are exported' ) );
+		}
 	}
 
 	/** Check short writes so disk exhaustion cannot produce a successful truncated table. */
