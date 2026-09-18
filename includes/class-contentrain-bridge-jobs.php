@@ -128,9 +128,7 @@ final class Jobs {
 			if ( (int) $expected !== $job['step'] ) {
 				return self::summary( $job );
 			}
-			if ( $job['revision'] !== Source::revision() ) {
-				throw new \RuntimeException( 'WordPress content changed during export' . ( Source::changed_by() ? ' (' . Source::changed_by() . ')' : '' ) . '. Restart to obtain a consistent snapshot.' ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Diagnostic data is escaped at the admin output boundary or JSON encoded.
-			}
+			self::snapshot( $job );
 			if ( 'media' === $job['phase'] ) {
 				self::media( $job );
 			} elseif ( 'posts' === $job['phase'] ) {
@@ -151,11 +149,34 @@ final class Jobs {
 					self::finish( $job );
 				}
 			}
-			if ( $job['revision'] !== Source::revision() ) {
-				throw new \RuntimeException( 'WordPress content changed during export' . ( Source::changed_by() ? ' (' . Source::changed_by() . ')' : '' ) . '. Restart to obtain a consistent snapshot.' ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Diagnostic data is escaped at the admin output boundary or JSON encoded.
-			}
+			self::snapshot( $job );
 			++$job['step'];
 		} );
+	}
+
+	/**
+	 * The snapshot still holds when nothing changed, or when every change since
+	 * it was taken is to a post type this export does not read: WordPress
+	 * creating a fallback navigation on a block theme's first render cannot make
+	 * a posts-and-pages export inconsistent. Anything else, or a start too old to
+	 * see in the change log, refuses and says what changed.
+	 */
+	private static function snapshot( &$job ) {
+		$current = Source::revision();
+		if ( $job['revision'] === $current ) {
+			return;
+		}
+		$since = Source::changes_since( $job['revision'] );
+		$scope = array_merge( $job['options']['types'], array( 'nav_menu_item', 'attachment' ) );
+		$relevant = null === $since ? array( Source::changed_by() ) : array_values( array_filter( $since, static function ( $label ) use ( $scope ) {
+			return ! preg_match( '/^(save_post|deleted_post):(.+)$/', $label, $m ) || in_array( $m[2], $scope, true );
+		} ) );
+		if ( $relevant ) {
+			$what = implode( ', ', array_unique( array_filter( $relevant ) ) );
+			throw new \RuntimeException( 'WordPress content changed during export' . ( '' !== $what ? ' (' . $what . ')' : '' ) . '. Restart to obtain a consistent snapshot.' ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Diagnostic data is escaped at the admin output boundary or JSON encoded.
+		}
+		$job['revision'] = $current;
+		$job['changes_outside_scope'] = array_values( array_unique( array_merge( $job['changes_outside_scope'] ?? array(), $since ) ) );
 	}
 
 	/**
@@ -522,6 +543,16 @@ final class Jobs {
 		Models::file( $job, 'bridge/validation.json', Policy::json( Validator::run( $job ) ) );
 		Models::file( $job, 'CONTENTRAIN-EXPORT.md', "# Contentrain WordPress export\n\nFree, editable JSON and Markdown content. Models live in `.contentrain/models`.\n\nMarkdown bodies preserve the original WordPress HTML; shortcodes and dynamic blocks require a renderer. Source files and the live WordPress theme have not been rewritten. Transferred media lives under `media/` and content links to it; anything too large or unreadable kept its WordPress URL and is listed in the warnings. Review `bridge/warnings.json` and `bridge/string-sources.json` for scope and text decisions.\n\nUse Contentrain Studio or the query SDK to edit/read this store. For an Astro website, choose the optional Migrate handoff from WordPress after delivery.\n" );
 		Models::file( $job, 'bridge/inventory.json', Policy::json( Inventory::document( $job['record_scope'], $job['records'], $job['created_at'], true, $job['inventory'] ) ) );
+		// Services the site is connected to. The home page is read for script hosts only when the
+		// person chose to scan rendered pages; no credential is written, only names and hosts.
+		$home = '';
+		if ( ! empty( $job['options']['scan_render'] ) ) {
+			$response = wp_remote_get( home_url( '/' ), array( 'timeout' => 15, 'redirection' => 2, 'limit_response_size' => 2 * MB_IN_BYTES ) );
+			$home = is_wp_error( $response ) ? '' : (string) wp_remote_retrieve_body( $response );
+		}
+		$integrations = Integrations::detect( array_map( 'intval', array_keys( $job['tables']['bridge/raw-posts.json'] ?? array() ) ), $home );
+		Models::file( $job, 'bridge/integrations.json', Policy::json( $integrations ) );
+		$job['integrations_summary'] = array_values( array_map( static function ( $s ) { return array_intersect_key( $s, array_flip( array( 'service', 'name', 'category', 'reconnect_required', 'secret_present' ) ) ); }, $integrations['services'] ) );
 		$coverage = Coverage::report( $job );
 		Models::file( $job, 'bridge/coverage.json', Policy::json( $coverage ) );
 		$job['coverage_summary'] = $coverage['totals'] + array( 'complete' => $coverage['complete'] );
@@ -546,6 +577,9 @@ final class Jobs {
 		$result = array_intersect_key( $job, array_flip( array( 'id', 'phase', 'cursor', 'step', 'counts', 'created_at' ) ) ) + array( 'files' => count( $job['files'] ), 'models' => array_values( $job['models'] ), 'candidates' => count( $job['candidates'] ), 'unreviewed' => count( array_filter( $job['candidates'], static function ( $candidate ) { return 'review' === $candidate['decision']; } ) ) );
 		if ( isset( $job['coverage_summary'] ) ) {
 			$result['coverage'] = $job['coverage_summary'];
+		}
+		if ( isset( $job['integrations_summary'] ) ) {
+			$result['integrations'] = $job['integrations_summary'];
 		}
 		if ( isset( $job['github'] ) ) {
 			$result['github'] = array_intersect_key( $job['github'], array_flip( array( 'repository', 'branch', 'phase', 'cursor', 'commit', 'url', 'removed', 'conflicts', 'on_conflict' ) ) );

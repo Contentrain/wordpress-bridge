@@ -19,7 +19,7 @@ defined( 'ABSPATH' ) || exit;
 define( 'CONTENTRAIN_BRIDGE_VERSION', '0.2.1' );
 define( 'CONTENTRAIN_BRIDGE_FILE', __FILE__ );
 
-foreach ( array( 'policy', 'files', 'exporter', 'source', 'inventory', 'delta', 'seo', 'redirects', 'routing', 'scanner', 'text', 'coverage', 'acf', 'models', 'validator', 'jobs', 'github', 'admin' ) as $contentrain_bridge_class ) {
+foreach ( array( 'policy', 'files', 'exporter', 'source', 'inventory', 'delta', 'seo', 'redirects', 'routing', 'scanner', 'text', 'coverage', 'integrations', 'acf', 'models', 'validator', 'jobs', 'github', 'admin' ) as $contentrain_bridge_class ) {
 	require_once __DIR__ . '/includes/class-contentrain-bridge-' . $contentrain_bridge_class . '.php';
 }
 unset( $contentrain_bridge_class );
@@ -29,8 +29,8 @@ foreach ( array( 'save_post', 'deleted_post', 'added_post_meta', 'updated_post_m
 	add_action( $contentrain_bridge_hook, array( '\Contentrain\Bridge\Source', 'changed' ), 10, 3 );
 }
 unset( $contentrain_bridge_hook );
-add_action( 'updated_option', array( '\Contentrain\Bridge\Source', 'option_changed' ), 10, 1 );
-add_action( 'added_option', array( '\Contentrain\Bridge\Source', 'option_changed' ), 10, 1 );
+add_action( 'updated_option', array( '\Contentrain\Bridge\Source', 'option_changed' ), 10, 3 );
+add_action( 'added_option', array( '\Contentrain\Bridge\Source', 'option_changed' ), 10, 3 );
 add_action( 'deleted_option', array( '\Contentrain\Bridge\Source', 'option_changed' ), 10, 1 );
 add_action( 'contentrain_bridge_cleanup', array( '\Contentrain\Bridge\Files', 'cleanup' ) );
 register_activation_hook( __FILE__, 'contentrain_bridge_activate' );

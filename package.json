@@ -16,7 +16,8 @@
     "test:e2e": "tests/e2e.sh",
     "test:delivery-git": "tests/delivery-git.sh",
     "test:text": "tests/text.sh",
-    "test:coverage": "tests/coverage.sh"
+    "test:coverage": "tests/coverage.sh",
+    "test:integrations": "tests/integrations.sh"
   },
   "devDependencies": {
     "@contentrain/types": "1.14.0",
