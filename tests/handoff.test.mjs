@@ -17,6 +17,11 @@ test('Bridge intake preserves source identities and rejects tampering', () => {
     assert.deepEqual(JSON.parse(readFileSync(join(target, 'entry-source-map.json'))), entries)
     assert.deepEqual(JSON.parse(readFileSync(join(target, 'comments-export.json'))).entries, entries)
     assert.deepEqual(readFileSync(join(target, 'store/.contentrain/config.json')), readFileSync(join(source, '.contentrain/config.json')))
+    // B-04: redirects are RawIR's own field; SEO and routing ride beside it until types adopts them.
+    const raw = JSON.parse(readFileSync(join(target, 'rawir.json')))
+    assert.deepEqual(raw.redirects, JSON.parse(readFileSync(join(source, 'bridge/redirects.json'))).redirects)
+    assert.equal(raw.seo.format, 'contentrain-bridge-seo@1')
+    assert.equal(raw.routing.format, 'contentrain-bridge-routing@1')
     assert.throws(() => prepareMigrate(source, target), /already exists/)
     writeFileSync(join(source, '.contentrain/config.json'), '{}')
     assert.throws(() => prepareMigrate(source, join(root, 'tampered')), /size|hash/)

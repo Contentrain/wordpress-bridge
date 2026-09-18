@@ -62,6 +62,10 @@ jobs:
         env:
           KEEP: 1
       - run: npm run test:plugin
+      # B-04: no-plugin case, then Yoast SEO + Redirection. Every exported head
+      # value is compared with the page WordPress serves, every redirect is
+      # requested, and @contentrain/verify establishes old/new parity from it.
+      - run: npm run test:seo
       # B-06: T0 inventory through a real export, twelve mutations, an exact
       # delta, idempotency and the refusals. Mutates the throwaway site, so it
       # runs after the store the other gates read has been copied out.
