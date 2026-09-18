@@ -40,6 +40,14 @@ if ! "${cli[@]}" plugin is-installed advanced-custom-fields >/dev/null 2>&1; the
 fi
 "${cli[@]}" plugin activate advanced-custom-fields >/dev/null
 
+# Menus and language pairs are only real once a real multilingual plugin
+# tags real content; Polylang is free, from wordpress.org, and required for
+# the same reason ACF is: a failed dependency install is not a passing test.
+if ! "${cli[@]}" plugin is-installed polylang >/dev/null 2>&1; then
+  "${cli[@]}" plugin install polylang >/dev/null
+fi
+"${cli[@]}" plugin activate polylang >/dev/null
+
 log="$(mktemp)"
 "${compose[@]}" exec -T wordpress \
   php /var/www/html/wp-content/plugins/contentrain-bridge/tests/integration.php | tee "$log"

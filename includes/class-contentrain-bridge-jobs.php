@@ -21,7 +21,7 @@ final class Jobs {
 		if ( ! Files::mkdir( $dir ) ) {
 			throw new \RuntimeException( 'Cannot create export job.' );
 		}
-		$locale = Source::locale( get_locale() );
+		$locale = Source::default_locale();
 		// One language means a store without locale-named files; the decision is
 		// taken here because it selects the paths every later step writes to.
 		$languages = array_values( array_unique( array_map( array( Source::class, 'locale' ), (array) $inventory['languages'] ) ) );
@@ -41,16 +41,13 @@ final class Jobs {
 		Models::file( $job, 'bridge/seo.json', Policy::json( Seo::document() ) );
 		Models::file( $job, 'bridge/redirects.json', Policy::json( Redirects::document() ) );
 		Models::file( $job, 'bridge/routing.json', Policy::json( Routing::document() ) );
-		Models::model( $job, 'site', 'singleton', 'site', 'Site', array( 'title' => array( 'type' => 'string' ), 'description' => array( 'type' => 'text' ), 'source_url' => array( 'type' => 'url' ) ) );
+		Models::model( $job, 'site', 'singleton', 'site', 'Site', array( 'title' => array( 'type' => 'string' ), 'description' => array( 'type' => 'text' ), 'source_url' => array( 'type' => 'url' ) ), 'title', false );
 		Models::entry( $job, 'site', $locale, '', array( 'title' => $site['title'], 'description' => $site['description'], 'source_url' => $site['url'] ) );
 		$menus = Exporter::menus();
 		Models::file( $job, 'bridge/raw-menus.json', Policy::json( $menus ) );
-		Models::model( $job, 'wp-menu-items', 'collection', 'site', 'Navigation links', array( 'title' => array( 'type' => 'string' ), 'url' => array( 'type' => 'url' ), 'position' => array( 'type' => 'integer' ), 'menu' => array( 'type' => 'string' ), 'wp_parent' => array( 'type' => 'integer' ) ) );
+		Models::menus( $job, $menus, $inventory['menu_locations'] );
 		foreach ( $menus as $menu ) {
 			Coverage::tally( $job, array( 'menu_items' ), 'exported', count( $menu['items'] ) );
-			foreach ( $menu['items'] as $item ) {
-				Models::entry( $job, 'wp-menu-items', $locale, substr( hash( 'sha256', 'menu:' . $item['id'] ), 0, 12 ), array( 'title' => $item['title'], 'url' => $item['url'], 'position' => $item['order'], 'menu' => $menu['name'], 'wp_parent' => (int) $item['parent'] ) );
-			}
 		}
 		self::warning( $job, array( 'source' => 'rendered-states', 'reason' => 'Source scan does not execute dynamic WordPress/plugin states. Rendered coverage requires the Migrate capture adapter.' ) );
 		self::save( $job );
@@ -200,7 +197,7 @@ final class Jobs {
 			$image_meta = (array) $a['image_meta'];
 			$a['image_meta'] = array_intersect_key( $image_meta, array_flip( array( 'width', 'height', 'sizes', 'file' ) ) );
 			Models::row( $job, 'bridge/raw-attachments.json', $id, $a );
-			Models::model( $job, 'wp-media', 'collection', 'assets', 'Media', array( 'title' => array( 'type' => 'string' ), 'url' => array( 'type' => 'url' ), 'file' => array( 'type' => 'file' ), 'alt' => array( 'type' => 'text' ), 'caption' => array( 'type' => 'richtext' ), 'description' => array( 'type' => 'richtext' ) ) );
+			Models::model( $job, 'wp-media', 'collection', 'assets', 'Media', array( 'title' => array( 'type' => 'string' ), 'url' => array( 'type' => 'url' ), 'file' => array( 'type' => 'file' ), 'alt' => array( 'type' => 'text' ), 'caption' => array( 'type' => 'richtext' ), 'description' => array( 'type' => 'richtext' ) ), 'title', false );
 			$data = array_intersect_key( $a, array_flip( array( 'title', 'alt', 'caption', 'description' ) ) );
 			if ( $a['url'] ) {
 				$data['url'] = $a['url'];
@@ -330,14 +327,20 @@ final class Jobs {
 			if ( ! $t || is_wp_error( $t ) ) {
 				throw new \RuntimeException( 'Cannot read taxonomy term.' );
 			}
-			Models::term( $job, $t, $job['default_locale'] );
-			Coverage::tally( $job, array( 'terms', $t->taxonomy ), 'exported' );
-			foreach ( get_term_meta( $t->term_id ) as $key => $values ) {
-				Coverage::tally( $job, array( 'term_meta' ), Policy::sensitive( $key ) ? 'excluded:sensitive-key' : 'exported', count( (array) $values ) );
-			}
-			$seo = Seo::term( $t );
-			if ( $seo ) {
-				Models::row( $job, 'bridge/seo-entries.json', 'term:' . $t->taxonomy . ':' . $t->term_id, $seo );
+			// A multilingual plugin's own bookkeeping taxonomy (Polylang's `language`,
+			// `term_language`, `term_translations`) is not content; only a public
+			// taxonomy becomes a model, matching map_post()'s same filter.
+			$taxonomy = get_taxonomy( $t->taxonomy );
+			if ( $taxonomy && $taxonomy->public ) {
+				Models::term( $job, $t, $job['default_locale'] );
+				Coverage::tally( $job, array( 'terms', $t->taxonomy ), 'exported' );
+				foreach ( get_term_meta( $t->term_id ) as $key => $values ) {
+					Coverage::tally( $job, array( 'term_meta' ), Policy::sensitive( $key ) ? 'excluded:sensitive-key' : 'exported', count( (array) $values ) );
+				}
+				$seo = Seo::term( $t );
+				if ( $seo ) {
+					Models::row( $job, 'bridge/seo-entries.json', 'term:' . $t->taxonomy . ':' . $t->term_id, $seo );
+				}
 			}
 			$job['cursor'] = (int) $id;
 		}

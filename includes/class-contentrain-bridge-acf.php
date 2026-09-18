@@ -271,7 +271,7 @@ final class Acf {
 		foreach ( $ids as $raw ) {
 			$target = null;
 			if ( 'relationship' === $type || 'post_object' === $type ) {
-				$target = self::resolve_post( $job, $raw );
+				$target = Source::reference( $job, $raw );
 			} elseif ( 'taxonomy' === $type ) {
 				$target = self::resolve_term( $job, $raw, $schema['taxonomy'] ?? '', $locale );
 			} elseif ( 'user' === $type ) {
@@ -296,19 +296,6 @@ final class Acf {
 		}
 		$model = array_key_first( $models );
 		return $multiple ? array( array( 'type' => 'relations', 'model' => $model ), $refs ) : array( array( 'type' => 'relation', 'model' => $model ), $refs[0] );
-	}
-
-	/** A relationship/post_object target must be resolvable from this same export, not merely exist in WordPress. */
-	private static function resolve_post( $job, $raw_id ) {
-		$target = get_post( (int) $raw_id );
-		if ( ! $target || ! in_array( $target->post_type, $job['options']['types'], true ) || in_array( $target->post_status, array( 'auto-draft', 'trash' ), true ) ) {
-			return null;
-		}
-		if ( ! $job['options']['private'] && ( $target->post_password || ! in_array( $target->post_status, array( 'publish', 'inherit' ), true ) ) ) {
-			return null;
-		}
-		$address = Source::address( $target );
-		return array( $address['model_id'], $address['entry_id'] );
 	}
 
 	/** Taxonomy terms always get a model: the term collection is built on demand, exactly like a post's own terms. */

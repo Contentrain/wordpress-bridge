@@ -97,7 +97,15 @@ final class Exporter {
 	/** Map a WordPress post without interpreting or rewriting its HTML. */
 	public static function map_post( $post, $selected = array(), &$excluded = array() ) {
 		$author = get_userdata( $post->post_author );
-		$terms  = wp_get_object_terms( $post->ID, get_object_taxonomies( $post->post_type ) );
+		// A multilingual plugin registers its own bookkeeping taxonomies (Polylang's
+		// `language`, `post_translations`) against every translatable post type;
+		// they are never content, and `@contentrain/wp-import` explicitly documents
+		// that these must never become models.
+		$taxonomies = array_filter( get_object_taxonomies( $post->post_type ), static function ( $taxonomy ) {
+			$definition = get_taxonomy( $taxonomy );
+			return $definition && $definition->public;
+		} );
+		$terms = wp_get_object_terms( $post->ID, array_values( $taxonomies ) );
 
 		return array(
 			'id'             => (int) $post->ID,
@@ -200,12 +208,20 @@ final class Exporter {
 	public static function menus() {
 		$results = array();
 		foreach ( wp_get_nav_menus() as $menu ) {
-			$items = wp_get_nav_menu_items( $menu->term_id );
+			$raw_items = wp_get_nav_menu_items( $menu->term_id );
+			$items     = array_map( array( self::class, 'map_menu_item' ), is_array( $raw_items ) ? $raw_items : array() );
+			// A parent id only means something within its own menu; flag one that
+			// names no sibling here rather than leaving a dangling reference implicit.
+			$ids = array_column( $items, 'id' );
+			foreach ( $items as &$item ) {
+				$item['parent_unresolved'] = (bool) ( $item['parent'] && ! in_array( $item['parent'], $ids, true ) );
+			}
+			unset( $item );
 			$results[] = array(
 				'id'    => (int) $menu->term_id,
 				'slug'  => $menu->slug,
 				'name'  => $menu->name,
-				'items' => array_map( array( self::class, 'map_menu_item' ), is_array( $items ) ? $items : array() ),
+				'items' => $items,
 			);
 		}
 		return $results;
