@@ -71,6 +71,29 @@ into the emitted project's public directory. Hosted Migrate onboarding and an
 Astro end-to-end acceptance are separate integration gates, not proven by this
 adapter test.
 
+## Delta cursor (what changed since the last delivery)
+
+Every export writes `bridge/inventory.json` (`contentrain-bridge-inventory@2`):
+one row per post, page, CPT record, attachment, menu item and public term in
+scope, every status, with a fingerprint of the mapped record. WordPress keeps no
+delta state; the inventory travels with the content. When a GitHub delivery finds
+an inventory in the repository, it writes `bridge/delta.json`, a
+`SourceDeltaPlan` (`@contentrain/types`) with `created`, `updated`, `moved` and
+`deleted` (`trashed`/`purged`) entries.
+
+Deletions are proven by comparing inventories, never by `modified_after`: that
+feed misses deletions and meta-only (ACF) edits, and `tests/delta.php` proves it.
+An inventory edited in Git, a legacy inventory, a type that left the scope (its
+plugin was deactivated) or a truncated walk makes `deletions_detectable` false
+rather than reporting records as deleted. In a public-scope export, drafts and
+trashed records keep their id, status and fingerprint but not their slug or
+address. `model`, `entry_id`, `conflict` and `redirects` are left to the planner,
+which reads the store.
+
+```sh
+KEEP=1 npm run test:wordpress && npm run test:delta && npm run test:secrets
+```
+
 ## Current coverage boundaries
 
 ACF shapes that cannot be fully represented use a reported structured fallback;

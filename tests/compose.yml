@@ -20,7 +20,7 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "127.0.0.1:8094:80"
+      - "127.0.0.1:${BRIDGE_TEST_PORT:-8094}:80"
     environment:
       WORDPRESS_DB_HOST: db
       WORDPRESS_DB_NAME: bridge

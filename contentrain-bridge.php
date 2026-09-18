@@ -19,7 +19,7 @@ defined( 'ABSPATH' ) || exit;
 define( 'CONTENTRAIN_BRIDGE_VERSION', '0.2.1' );
 define( 'CONTENTRAIN_BRIDGE_FILE', __FILE__ );
 
-foreach ( array( 'policy', 'files', 'exporter', 'source', 'scanner', 'acf', 'models', 'validator', 'jobs', 'github', 'admin' ) as $contentrain_bridge_class ) {
+foreach ( array( 'policy', 'files', 'exporter', 'source', 'inventory', 'delta', 'scanner', 'acf', 'models', 'validator', 'jobs', 'github', 'admin' ) as $contentrain_bridge_class ) {
 	require_once __DIR__ . '/includes/class-contentrain-bridge-' . $contentrain_bridge_class . '.php';
 }
 unset( $contentrain_bridge_class );
