@@ -88,8 +88,8 @@ final class Inventory {
 				}
 			}
 			foreach ( $ids as $id ) {
-				$term = get_term_by( 'term_taxonomy_id', (int) $id );
-				if ( $term && ! is_wp_error( $term ) ) {
+				$term = Source::term_by( 'term_taxonomy_id', (int) $id );
+				if ( $term ) {
 					$records[] = self::term_record( $term );
 				}
 				$cursor['after'] = (int) $id;
@@ -261,8 +261,8 @@ final class Inventory {
 		if ( isset( $mapped['terms'] ) && is_array( $mapped['terms'] ) ) {
 			$refs = array();
 			foreach ( $mapped['terms'] as $term ) {
-				$found = get_term_by( 'slug', $term['slug'], $term['taxonomy'] );
-				$refs[] = $term['taxonomy'] . ':' . ( $found && ! is_wp_error( $found ) ? (int) $found->term_id : $term['slug'] );
+				$found = Source::term_by( 'slug', $term['slug'], $term['taxonomy'] );
+				$refs[] = $term['taxonomy'] . ':' . ( $found ? (int) $found->term_id : $term['slug'] );
 			}
 			sort( $refs, SORT_STRING );
 			$mapped['terms'] = $refs;

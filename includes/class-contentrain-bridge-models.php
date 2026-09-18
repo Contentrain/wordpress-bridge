@@ -180,8 +180,8 @@ final class Models {
 			$data['author'] = $author['id'];
 		}
 		foreach ( $p['terms'] as $term ) {
-			$t = get_term_by( 'slug', $term['slug'], $term['taxonomy'] );
-			if ( ! $t || is_wp_error( $t ) ) {
+			$t = Source::term_by( 'slug', $term['slug'], $term['taxonomy'] );
+			if ( ! $t ) {
 				throw new \RuntimeException( 'A referenced taxonomy term could not be read.' );
 			}
 			$target = self::term( $job, $t, $a['locale'] );

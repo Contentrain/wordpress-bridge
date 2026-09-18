@@ -51,7 +51,7 @@ final class Source {
 			'languages' => function_exists( 'pll_languages_list' ) ? pll_languages_list() : array( get_locale() ),
 			'menu_locations' => get_nav_menu_locations(),
 			'media' => $media,
-			'comments' => array_map( 'intval', (array) wp_count_comments() ),
+			'comments' => array_map( 'intval', (array) self::without_curlang( 'wp_count_comments' ) ),
 			'acf_groups' => $groups,
 			'capabilities' => array(
 				'forms' => $detect( array( 'contact-form-7', 'wpforms-lite', 'wpforms', 'gravityforms', 'ninja-forms', 'formidable', 'fluentform', 'forminator' ) ),
@@ -251,6 +251,56 @@ final class Source {
 		// nothing is registered — `(array) false` would silently produce one
 		// bogus page instead of none.
 		return array_values( (array) ( acf_get_options_pages() ?: array() ) );
+	}
+
+	/**
+	 * A term already identified by slug+taxonomy or by term_taxonomy_id, read
+	 * regardless of Polylang's current admin-bar language filter (`curlang`).
+	 * `get_term_by()` routes both fields through `get_terms()`, which Polylang
+	 * filters to the current language whenever the caller does not set `lang`
+	 * — a term in any other language then reads back as "not found", even
+	 * though the reference itself (a post's own term relationship, a raw
+	 * term_taxonomy row) has nothing to do with which language an admin
+	 * happens to be browsing in. `lang => ''` is Polylang's own documented way
+	 * to disable that filter for a single query.
+	 */
+	public static function term_by( $field, $value, $taxonomy = '' ) {
+		$args = array( 'lang' => '', 'get' => 'all', 'hide_empty' => false, 'number' => 1, 'update_term_meta_cache' => false );
+		if ( 'term_taxonomy_id' === $field ) {
+			$args['term_taxonomy_id'] = $value;
+		} elseif ( 'slug' === $field ) {
+			$value = (string) $value;
+			if ( '' === $value || ! taxonomy_exists( $taxonomy ) ) {
+				return false;
+			}
+			$args['taxonomy'] = $taxonomy;
+			$args['slug'] = $value;
+		} else {
+			return false;
+		}
+		$terms = get_terms( $args );
+		return is_wp_error( $terms ) || empty( $terms ) ? false : reset( $terms );
+	}
+
+	/**
+	 * Runs a site-wide callback (no per-post `lang` argument of its own to
+	 * disable Polylang's filter with, unlike `term_by()`) with the admin's
+	 * language filter cleared, so a whole-site count does not silently scope
+	 * itself to whichever language an admin happens to be browsing in —
+	 * `wp_count_comments()` falls through to a comment query Polylang filters
+	 * by `curlang` the same way it filters terms.
+	 */
+	public static function without_curlang( $callback ) {
+		$active = function_exists( 'pll_languages_list' );
+		$previous = $active ? PLL()->curlang : null;
+		if ( $active ) {
+			PLL()->curlang = false;
+		}
+		$result = call_user_func( $callback );
+		if ( $active ) {
+			PLL()->curlang = $previous;
+		}
+		return $result;
 	}
 
 	/** ACF groups can use opaque field keys: inspect types before values reach RawIR. */

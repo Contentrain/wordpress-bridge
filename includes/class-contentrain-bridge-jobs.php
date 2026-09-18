@@ -361,8 +361,8 @@ final class Jobs {
 				$job['cursor'] = $id;
 				continue;
 			}
-			$t = get_term_by( 'term_taxonomy_id', $id );
-			if ( ! $t || is_wp_error( $t ) ) {
+			$t = Source::term_by( 'term_taxonomy_id', $id );
+			if ( ! $t ) {
 				throw new \RuntimeException( 'Cannot read taxonomy term.' );
 			}
 			// A registered but non-public taxonomy (e.g. `nav_menu`, or a
