@@ -22,7 +22,7 @@
   "devDependencies": {
     "@contentrain/types": "1.14.0",
     "@contentrain/verify": "0.2.0",
-    "@contentrain/wp-import": "0.4.2",
+    "@contentrain/wp-import": "0.4.6",
     "contentrain": "0.13.1"
   }
 }

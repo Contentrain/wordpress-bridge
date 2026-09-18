@@ -144,6 +144,16 @@ final class Models {
 		}
 	}
 
+	/** Every locale the site's multilingual plugin knows about, normalized the same way `Jobs::create()` derives `$job['i18n']`. */
+	private static function site_locales( $job ) {
+		return array_values( array_unique( array_map( array( Source::class, 'locale' ), (array) $job['inventory']['languages'] ) ) );
+	}
+
+	/** Locales the site has but this specific translation group does not. */
+	private static function missing_locales( $job, $present ) {
+		return array_values( array_diff( self::site_locales( $job ), $present ) );
+	}
+
 	public static function post( &$job, $record ) {
 		$p = $record['raw'];
 		$a = $record['address'];
@@ -221,9 +231,16 @@ final class Models {
 		self::row( $job, 'bridge/routes.json', $p['id'], array( 'source_url' => $p['link'], 'entry' => $a, 'body_format' => 'wordpress-html', 'source_hash' => hash( 'sha256', Policy::json( $p ) ) ) );
 		// One pair per translation group (`RawLanguagePair`'s own contract), not
 		// one per post: every member of the group carries the identical map, so
-		// only the canonical member writes it.
+		// only the canonical member writes it. A locale the site has but this
+		// group does not is named, not hidden behind a copy of another
+		// locale's text pretending to be a translation.
 		if ( Source::canonical( $record['translations'] ) === $p['id'] ) {
-			self::row( $job, 'bridge/language-pairs.json', $p['id'], array( 'post' => $p['id'], 'translations' => $record['translations'] ) );
+			$pair = array( 'post' => $p['id'], 'translations' => $record['translations'] );
+			$missing = self::missing_locales( $job, array_keys( $record['translations'] ) );
+			if ( $missing ) {
+				$pair['missing_translations'] = $missing;
+			}
+			self::row( $job, 'bridge/language-pairs.json', $p['id'], $pair );
 		}
 		if ( $record['acf_schema'] ) {
 			self::row( $job, 'bridge/acf-schema.json', $p['id'], $record['acf_schema'] );
