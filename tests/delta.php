@@ -38,9 +38,25 @@ function entry_for( $plan, $type, $id ) {
 	}
 	return null;
 }
+/**
+ * The A-09 planner's fixture layout: a store's `.contentrain/` contents at the
+ * top of `$to`, and `entry-source-map.json` beside them — copied unchanged into
+ * `ai/packages/wp-import/src/fixtures/`.
+ */
+function planner_store( $job_id, $to ) {
+	$from = Files::dir( $job_id ) . '/output';
+	Files::remove( $to );
+	foreach ( array_keys( Jobs::read( $job_id )['files'] ) as $path ) {
+		if ( 0 === strpos( $path, '.contentrain/' ) || 'bridge/entry-source-map.json' === $path ) {
+			$target = $to . '/' . ( 0 === strpos( $path, '.contentrain/' ) ? substr( $path, 13 ) : 'entry-source-map.json' );
+			wp_mkdir_p( dirname( $target ) );
+			copy( Files::path( $from, $path ), $target );
+		}
+	}
+}
 /** Run an export to `ready` the way the admin screen does. */
-function export( $types ) {
-	$summary = Jobs::create( array( 'types' => $types, 'private' => false, 'scan_sources' => false, 'selected_meta' => array( 'delta_api_key' ) ) );
+function export( $types, $private = false ) {
+	$summary = Jobs::create( array( 'types' => $types, 'private' => $private, 'scan_sources' => false, 'selected_meta' => array( 'delta_api_key' ) ) );
 	for ( $i = 0; $i < 500 && 'review' !== $summary['phase']; ++$i ) { $summary = Jobs::step( $summary['id'], $summary['step'] ); }
 	$summary = Jobs::review( $summary['id'], array(), true );
 	for ( $i = 0; $i < 500 && 'ready' !== $summary['phase']; ++$i ) { $summary = Jobs::step( $summary['id'], $summary['step'] ); }
@@ -139,6 +155,14 @@ check( false === strpos( $t0_raw, 'ghp_' ), 'no credential reaches the inventory
 $standalone = Inventory::build( $t0['scope'] );
 check( $standalone['inventory_hash'] === $t0['inventory_hash'], 'a standalone walk of the same scope reproduces the export\'s inventory hash' );
 drop_job( $t0_job );
+// The same moment in private scope, for the planner fixture: drafts are records
+// a planner has to place too, and a public-scope store does not hold them.
+$fixture = sys_get_temp_dir() . '/bridge-delta-fixture';
+Files::remove( $fixture );
+$t0p_job = export( $types, true );
+planner_store( $t0p_job, $fixture . '/t0-store' );
+$t0p = json_decode( Files::read( Files::dir( $t0p_job ) . '/output', 'bridge/inventory.json' ), true );
+drop_job( $t0p_job );
 echo "T0 inventory: " . count( $t0['records'] ) . " records, hash {$t0['inventory_hash']}\n";
 
 // ---- The twelve mutations (AO-3 §3). ----
@@ -300,5 +324,16 @@ file_put_contents( $out . '/refused.json', Policy::json( Delta::compare( $tamper
 file_put_contents( $out . '/expected.json', Policy::json( $expected ) );
 
 drop_job( $t1_job );
+
+// ---- Planner fixture: T0 store, T1 export and the delta between them, private scope. ----
+$t1p_job = export( $types, true );
+planner_store( $t1p_job, $fixture . '/t1-export' );
+$t1p = json_decode( Files::read( Files::dir( $t1p_job ) . '/output', 'bridge/inventory.json' ), true );
+$fixture_plan = Delta::compare( $t0p, $t1p );
+check( $expected === ops( $fixture_plan ) && true === $fixture_plan['deletions_detectable'], 'private scope: the same twelve entries, deletions detectable' );
+drop_job( $t1p_job );
+file_put_contents( $fixture . '/t1.delta.json', Policy::json( $fixture_plan ) );
+file_put_contents( $fixture . '/expected.json', Policy::json( $expected ) );
+rename( $fixture, $out . '/planner' );
 if ( $acceptance_job ) { update_user_meta( $admin->ID, 'contentrain_bridge_job_1', $acceptance_job ); }
 echo "\n$checks checks passed. Delta output: $out\n";
