@@ -86,6 +86,27 @@ if ( $has_acf ) {
 					array( 'key' => 'field_bridge_quote_text', 'name' => 'quote', 'label' => 'Quote', 'type' => 'textarea' ),
 				),
 			),
+			array( 'key' => 'field_bridge_rel', 'name' => 'rel', 'label' => 'Related posts', 'type' => 'relationship' ),
+			array( 'key' => 'field_bridge_rel_mixed', 'name' => 'rel_mixed', 'label' => 'Related mixed', 'type' => 'relationship' ),
+			array( 'key' => 'field_bridge_rel_out_of_scope', 'name' => 'rel_out_of_scope', 'label' => 'Related out of scope', 'type' => 'relationship' ),
+			array( 'key' => 'field_bridge_po', 'name' => 'po', 'label' => 'Featured post', 'type' => 'post_object' ),
+			array( 'key' => 'field_bridge_cat', 'name' => 'cat', 'label' => 'Category', 'type' => 'taxonomy', 'taxonomy' => 'category', 'field_type' => 'select' ),
+			array( 'key' => 'field_bridge_gallery', 'name' => 'gallery', 'label' => 'Gallery', 'type' => 'gallery' ),
+			array( 'key' => 'field_bridge_person', 'name' => 'person', 'label' => 'Person', 'type' => 'user' ),
+			array( 'key' => 'field_bridge_cta', 'name' => 'cta_link', 'label' => 'CTA link', 'type' => 'link' ),
+			array(
+				'key' => 'field_bridge_sections', 'name' => 'sections', 'label' => 'Sections', 'type' => 'flexible_content',
+				'layouts' => array(
+					'layout_bridge_text' => array( 'key' => 'layout_bridge_text', 'name' => 'text_block', 'label' => 'Text', 'sub_fields' => array(
+						array( 'key' => 'field_bridge_sec_heading_a', 'name' => 'heading', 'label' => 'Heading', 'type' => 'text' ),
+						array( 'key' => 'field_bridge_sec_body', 'name' => 'body', 'label' => 'Body', 'type' => 'textarea' ),
+					) ),
+					'layout_bridge_quote' => array( 'key' => 'layout_bridge_quote', 'name' => 'quote_block', 'label' => 'Quote', 'sub_fields' => array(
+						array( 'key' => 'field_bridge_sec_heading_b', 'name' => 'heading', 'label' => 'Heading', 'type' => 'text' ),
+						array( 'key' => 'field_bridge_sec_quote', 'name' => 'quote', 'label' => 'Quote', 'type' => 'text' ),
+					) ),
+				),
+			),
 		),
 	) );
 	update_field( 'tagline', 'Content you own', $page );
@@ -95,6 +116,18 @@ if ( $has_acf ) {
 	update_field( 'quotes', array(
 		array( 'person' => 'Ada', 'quote' => 'It reads like my site.' ),
 		array( 'person' => 'Grace', 'quote' => 'The diff is the content.' ),
+	), $page );
+	update_field( 'rel', array( $post ), $page );
+	update_field( 'rel_mixed', array( $post, $book ), $page );
+	update_field( 'rel_out_of_scope', array( $draft, 999999 ), $page );
+	update_field( 'po', $post, $page );
+	update_field( 'cat', (int) $category['term_id'], $page );
+	update_field( 'gallery', array( $attachment, $ghost ), $page );
+	update_field( 'person', $admin->ID, $page );
+	update_field( 'cta_link', array( 'title' => 'Read more', 'url' => 'https://example.test/read-more', 'target' => '_blank' ), $page );
+	update_field( 'sections', array(
+		array( 'acf_fc_layout' => 'text_block', 'heading' => 'Intro', 'body' => 'Welcome copy' ),
+		array( 'acf_fc_layout' => 'quote_block', 'heading' => 'Praise', 'quote' => 'It just works.' ),
 	), $page );
 }
 
@@ -157,14 +190,30 @@ $acf_class = '\Contentrain\Bridge\Acf';
 check( $acf_class::model_id( 'hero', 'field_a' ) !== $acf_class::model_id( 'hero', 'field_b' ), 'same-name ACF models have stable distinct identities' );
 check( '2026-09-11' === $acf_class::cast( array( 'type' => 'date' ), '20260911' ), 'ACF stored dates normalize to ISO date' );
 check( null === $acf_class::scalar( array( 'type' => 'select', 'multiple' => true, 'choices' => array( 'a' => 'A', 'b' => 'B' ) ) ), 'multi-select cannot be treated as a scalar select' );
-$result = $acf_class::field( $probe, array( 'type' => 'link' ), array( 'url' => 'https://example.test', 'title' => 'Read more', 'target' => '_blank' ), $job['default_locale'], 'link' );
-check( null === $result, 'link label and target use lossless fallback, not URL-only cast' );
+$link_schema = array( 'type' => 'link', 'key' => 'field_probe_link', 'name' => 'link' );
+$result = $acf_class::field( $probe, $link_schema, array( 'url' => 'https://example.test', 'title' => 'Read more', 'target' => '_blank' ), $job['default_locale'], 'link' );
+$link_model = $acf_class::model_id( 'link', 'field_probe_link' );
+check( null !== $result && 'relation' === $result[0]['type'] && $link_model === $result[0]['model'], 'a link becomes its own model instead of a lossy URL-only cast' );
+check( 'url' === $probe['models'][ $link_model ]['title_field'], 'a link is titled by its URL, which is never empty, rather than its optional label' );
+// Two flexible_content layouts that cannot agree on a title field have no single
+// honest shape, so the field falls back whole rather than half-modelling it.
+$flex_schema = array(
+	'type' => 'flexible_content', 'key' => 'field_probe_flex', 'name' => 'flex',
+	'layouts' => array(
+		array( 'sub_fields' => array( array( 'name' => 'heading', 'type' => 'text' ) ) ),
+		array( 'sub_fields' => array( array( 'name' => 'body', 'type' => 'textarea' ) ) ),
+	),
+);
+$result = $acf_class::field( $probe, $flex_schema, array( array( 'acf_fc_layout' => 'a', 'heading' => 'Only in layout a' ) ), $job['default_locale'], 'flex' );
+check( null === $result, 'flexible_content layouts that share no common title field fall back instead of half-modelling' );
 $nested_schema = array( 'key' => 'field_nested', 'name' => 'nested', 'type' => 'group', 'sub_fields' => array( array( 'key' => 'field_heading', 'name' => 'heading', 'type' => 'text' ), array( 'key' => 'field_children', 'name' => 'children', 'type' => 'repeater' ) ) );
+$models_before = $probe['models'];
 $result = $acf_class::field( $probe, $nested_schema, array( 'heading' => 'Hello', 'children' => array( array( 'text' => 'Must survive' ) ) ), $job['default_locale'], 'nested' );
-check( null === $result && ! $probe['models'], 'unsupported nested ACF fields cannot be silently dropped from a successful model' );
+check( null === $result && $models_before === $probe['models'], 'unsupported nested ACF fields cannot be silently dropped from a successful model' );
 $no_title_schema = array( 'key' => 'field_rows', 'name' => 'rows', 'type' => 'repeater', 'sub_fields' => array( array( 'key' => 'field_heading', 'name' => 'heading', 'type' => 'text' ) ) );
+$models_before = $probe['models'];
 $result = $acf_class::field( $probe, $no_title_schema, array( array( 'heading' => 'One' ), array( 'heading' => '' ) ), $job['default_locale'], 'rows' );
-check( null === $result && ! $probe['models'], 'untitled row keeps the entire value in fallback without orphan partial models' );
+check( null === $result && $models_before === $probe['models'], 'untitled row keeps the entire value in fallback without orphan partial models' );
 $redactions = array();
 $private_schema = array( 'type' => 'group', 'name' => 'public_group', 'sub_fields' => array( array( 'key' => 'field_opaque', 'name' => 'connection', 'type' => 'password' ), array( 'key' => 'field_heading', 'name' => 'heading', 'type' => 'text' ) ) );
 $clean_acf = Source::acf_value( $private_schema, array( 'field_opaque' => 'hidden-credential', 'field_heading' => 'Safe headline' ), $redactions, 'acf' );
@@ -263,6 +312,34 @@ if ( $has_acf ) {
 	check( 0 === $rows[ $page_entry['acf_quotes'][0] ]['position'], 'row order is preserved as data' );
 	$hero = json_decode( Files::read( $dir, Models::content_path( $job, \Contentrain\Bridge\Acf::model_id( 'hero', 'field_bridge_hero' ), $job['default_locale'] ) ), true );
 	check( 'Own your words' === $hero[ $page_entry['acf_hero'] ]['heading'], 'the group row is reachable through the relation' );
+
+	// ACF Pro field types: relationship, post_object, taxonomy, gallery, user, link, flexible_content.
+	$post_address = Source::address( get_post( $post ) );
+	check( 'relation' === $job['models']['wp-page']['fields']['acf_po']['type'] && 'wp-post' === $job['models']['wp-page']['fields']['acf_po']['model'] && $post_address['entry_id'] === $page_entry['acf_po'], 'post_object becomes a relation to the referenced post' );
+	check( 'relations' === $job['models']['wp-page']['fields']['acf_rel']['type'] && 'wp-post' === $job['models']['wp-page']['fields']['acf_rel']['model'] && array( $post_address['entry_id'] ) === $page_entry['acf_rel'], 'relationship becomes relations to the referenced posts' );
+	check( 'wp-structured-values' === $job['models']['wp-page']['fields']['acf_rel_mixed']['model'] && 2 === count( $page_entry['acf_rel_mixed'] ), 'a relationship spanning more than one post type falls back without dropping either reference' );
+	check( 'wp-structured-values' === $job['models']['wp-page']['fields']['acf_rel_out_of_scope']['model'] && 2 === count( $page_entry['acf_rel_out_of_scope'] ), 'relationship targets outside the export scope fall back rather than vanish' );
+	$term_ref = substr( hash( 'sha256', 'term:' . (int) $category['term_id'] ), 0, 12 );
+	check( 'relation' === $job['models']['wp-page']['fields']['acf_cat']['type'] && 'wp-tax-category' === $job['models']['wp-page']['fields']['acf_cat']['model'] && $term_ref === $page_entry['acf_cat'], 'taxonomy becomes a relation to the term collection' );
+	$media_ref = substr( hash( 'sha256', 'media:' . $attachment ), 0, 12 );
+	$ghost_ref = substr( hash( 'sha256', 'media:' . $ghost ), 0, 12 );
+	check( 'relations' === $job['models']['wp-page']['fields']['acf_gallery']['type'] && 'wp-media' === $job['models']['wp-page']['fields']['acf_gallery']['model'] && array( $media_ref, $ghost_ref ) === $page_entry['acf_gallery'], 'gallery becomes relations to the media collection, including a not-yet-transferred file' );
+	$author_ref = substr( hash( 'sha256', 'author:' . $admin->ID ), 0, 12 );
+	check( 'relation' === $job['models']['wp-page']['fields']['acf_person']['type'] && 'wp-authors' === $job['models']['wp-page']['fields']['acf_person']['model'] && $author_ref === $page_entry['acf_person'], 'a user field becomes a relation to the same author collection a post author uses' );
+	check( $page_entry['acf_person'] === $page_entry['author'], 'the ACF user reference and the post author resolve to the same author record' );
+	$link_model = \Contentrain\Bridge\Acf::model_id( 'cta_link', 'field_bridge_cta' );
+	check( 'relation' === $job['models']['wp-page']['fields']['acf_cta_link']['type'] && $link_model === $job['models']['wp-page']['fields']['acf_cta_link']['model'], 'link becomes its own model' );
+	$link_row = json_decode( Files::read( $dir, Models::content_path( $job, $link_model, $job['default_locale'] ) ), true )[ $page_entry['acf_cta_link'] ];
+	check( 'https://example.test/read-more' === $link_row['url'] && 'Read more' === $link_row['title'] && '_blank' === $link_row['target'], 'a link keeps its label and target alongside the URL' );
+	$sections_model = \Contentrain\Bridge\Acf::model_id( 'sections', 'field_bridge_sections' );
+	check( 'relations' === $job['models']['wp-page']['fields']['acf_sections']['type'] && $sections_model === $job['models']['wp-page']['fields']['acf_sections']['model'], 'flexible_content becomes its own collection' );
+	$sections = json_decode( Files::read( $dir, Models::content_path( $job, $sections_model, $job['default_locale'] ) ), true );
+	$section_rows = array_map( static function ( $ref ) use ( $sections ) { return $sections[ $ref ]; }, $page_entry['acf_sections'] );
+	usort( $section_rows, static function ( $a, $b ) { return $a['position'] <=> $b['position']; } );
+	check( 2 === count( $section_rows ), 'every flexible_content row is exported' );
+	check( 'text_block' === $section_rows[0]['layout'] && 'Intro' === $section_rows[0]['heading'] && 'Welcome copy' === $section_rows[0]['body'], 'a flexible_content row keeps its own layout and fields' );
+	check( 'quote_block' === $section_rows[1]['layout'] && 'Praise' === $section_rows[1]['heading'] && 'It just works.' === $section_rows[1]['quote'], 'a different layout in the same field keeps its own fields' );
+	check( ! isset( $section_rows[0]['quote'] ) && ! isset( $section_rows[1]['body'] ), 'a row does not carry fields from a layout it was not written in' );
 }
 
 check( Validator::run( $job )['valid'], 'generated relation graph validates' );

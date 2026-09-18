@@ -77,14 +77,19 @@ final class Validator {
 				$valid = is_bool( $value );
 			} elseif ( 'relation' === $type || 'relations' === $type ) {
 				$refs = 'relations' === $type ? $value : array( $value );
-				$valid = is_array( $refs );
+				$valid = is_array( $refs ) && isset( $job['models'][ $field['model'] ] );
+				$target = $valid ? $job['models'][ $field['model'] ] : null;
 				foreach ( $valid ? $refs : array() as $ref ) {
-					if ( ! is_string( $ref ) || ! isset( $job['models'][ $field['model'] ] ) ) {
+					if ( ! is_string( $ref ) ) {
 						$valid = false;
 						break;
 					}
-					$target = $job['models'][ $field['model'] ];
-					if ( ! isset( $job['tables'][ Models::content_path( $job, $target, $locale ) ][ $ref ] ) ) {
+					// A document (the WordPress `post` type) stores its entry as a
+					// file, not a table row; every other kind is checked as before.
+					$exists = 'document' === $target['kind']
+						? isset( $job['files'][ Models::content_path( $job, $target, $locale, $ref ) ] )
+						: isset( $job['tables'][ Models::content_path( $job, $target, $locale ) ][ $ref ] );
+					if ( ! $exists ) {
 						$valid = false;
 					}
 				}
