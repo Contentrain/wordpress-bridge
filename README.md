@@ -135,6 +135,23 @@ repository that already holds a Bridge export:
 replays every state into real Git. `npm run test:e2e` runs the whole chain,
 WordPress to Astro, including a second delivery.
 
+## Interface text
+
+With "Find interface text" on, an export inventories the text the site shows
+that is not content: gettext calls, literal HTML and `echo`ed strings in theme
+templates, JavaScript strings, widget titles and text, menu labels, Customizer
+settings, and — opt-in, fetched from the site as a visitor — what the home,
+single, page, search and not-found pages actually render.
+
+`bridge/hardcoded-text.json` lists every candidate with all its occurrences and
+exactly one outcome: `transfer` (to the `ui-strings` dictionary, the
+`theme-settings` singleton, or content already exported), `exclude` with its
+reason (code, URL, number, placeholder-only, dynamic gettext argument, secret,
+content, or rendered from a source string it links to), or `error` (a file too
+large or unreadable, a page that could not be fetched). Occurrences merge only
+when text, locale and context are all the same. Keys depend on the text and its
+context only, so moving a string to another file does not change its key.
+
 ## Current coverage boundaries
 
 ACF shapes that cannot be fully represented use a reported structured fallback;

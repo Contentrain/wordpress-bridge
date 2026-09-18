@@ -29,7 +29,7 @@ final class Jobs {
 			'id' => $id, 'owner' => get_current_user_id(), 'blog' => get_current_blog_id(), 'created_at' => gmdate( 'c' ),
 			'revision' => Source::revision(), 'phase' => 'media', 'cursor' => 0, 'step' => 0,
 			'inventory' => $inventory, 'default_locale' => $locale, 'locales' => array( $locale => true ), 'i18n' => count( $languages ) > 1,
-			'options' => array( 'types' => $types, 'private' => ! empty( $input['private'] ), 'comments' => ! empty( $input['comments'] ), 'scan_plugins' => ! empty( $input['scan_plugins'] ), 'scan_sources' => ! empty( $input['scan_sources'] ), 'selected_meta' => array_values( array_filter( array_map( 'sanitize_text_field', (array) ( $input['selected_meta'] ?? array() ) ) ) ), 'labels' => array_map( 'sanitize_text_field', (array) ( $input['labels'] ?? array() ) ) ),
+			'options' => array( 'types' => $types, 'private' => ! empty( $input['private'] ), 'comments' => ! empty( $input['comments'] ), 'scan_plugins' => ! empty( $input['scan_plugins'] ), 'scan_sources' => ! empty( $input['scan_sources'] ), 'scan_render' => ! empty( $input['scan_render'] ), 'selected_meta' => array_values( array_filter( array_map( 'sanitize_text_field', (array) ( $input['selected_meta'] ?? array() ) ) ) ), 'labels' => array_map( 'sanitize_text_field', (array) ( $input['labels'] ?? array() ) ) ),
 			'uploads' => array_intersect_key( (array) wp_get_upload_dir(), array_flip( array( 'basedir', 'baseurl' ) ) ),
 			'record_scope' => Inventory::scope( $types, array_filter( array_map( 'sanitize_text_field', (array) ( $input['selected_meta'] ?? array() ) ) ), ! empty( $input['private'] ) ), 'records' => array(),
 			'models' => array(), 'tables' => array(), 'files' => array(), 'candidates' => array(), 'counts' => array( 'posts' => 0, 'media' => 0, 'media_files' => 0, 'media_bytes' => 0, 'media_kept_remote' => 0, 'comments' => 0, 'warnings' => 0 ),
@@ -367,24 +367,57 @@ final class Jobs {
 		}
 	}
 
+	/**
+	 * Interface text, one bounded step at a time: each source file, then site
+	 * settings (options, widgets, menus, Customizer), then each render state.
+	 * Occurrences are merged into candidates only when every source is read, so
+	 * a candidate lists all its occurrences and carries one outcome.
+	 */
 	private static function sources( &$job ) {
-		$file = $job['source_files'][ $job['cursor'] ] ?? null;
-		if ( $file ) {
-			$result = Scanner::scan( $file, $job['default_locale'] );
-			foreach ( $result['candidates'] as $candidate ) {
-				$job['candidates'][ $candidate['id'] ] = $candidate;
-			}
-			foreach ( $result['warnings'] as $warning ) {
-				self::warning( $job, $warning );
-			}
+		if ( ! $job['options']['scan_sources'] ) {
+			$job['phase'] = 'review';
+			$job['cursor'] = 0;
+			return;
+		}
+		$files = $job['source_files'];
+		$states = $job['options']['scan_render'] ? ( $job['render_states'] = $job['render_states'] ?? Text::render_states() ) : array();
+		$step = $job['cursor'];
+		$job['text'] = $job['text'] ?? array( 'occurrences' => array(), 'errors' => array(), 'counts' => array( 'unlisted_excluded' => 0, 'unlisted_by_reason' => array(), 'sources' => array( 'files' => count( $files ), 'settings' => 1, 'render_states' => count( $states ) ) ) );
+		if ( $step < count( $files ) ) {
+			$result = Scanner::scan( $files[ $step ], $job['default_locale'] );
+		} elseif ( $step === count( $files ) ) {
+			$result = Text::settings( $job['default_locale'] );
+		} elseif ( $step <= count( $files ) + count( $states ) ) {
+			$state = array_keys( $states )[ $step - count( $files ) - 1 ];
+			$result = Text::render( $state, $states[ $state ], $job['default_locale'] );
+		} else {
+			$job['candidates'] = Text::merge( $job['text']['occurrences'], Text::content_texts() );
 			if ( count( $job['candidates'] ) > 20000 ) {
 				throw new \RuntimeException( 'More than 20,000 text candidates. Select a smaller source scope.' );
 			}
-			++$job['cursor'];
-		} else {
 			$job['phase'] = 'review';
 			$job['cursor'] = 0;
+			return;
 		}
+		foreach ( array_merge( $result['candidates'], $result['excluded'] ) as $occurrence ) {
+			$job['text']['occurrences'][] = $occurrence;
+		}
+		// Beyond the per-file listing cap, excluded occurrences are counted by reason, never dropped.
+		foreach ( $result['excluded_counts'] as $reason => $count ) {
+			$listed = count( array_filter( $result['excluded'], static function ( $o ) use ( $reason ) { return $reason === $o['reason']; } ) );
+			if ( $count > $listed ) {
+				$job['text']['counts']['unlisted_excluded'] += $count - $listed;
+				$job['text']['counts']['unlisted_by_reason'][ $reason ] = ( $job['text']['counts']['unlisted_by_reason'][ $reason ] ?? 0 ) + $count - $listed;
+			}
+		}
+		foreach ( $result['errors'] as $error ) {
+			$job['text']['errors'][] = $error;
+			self::warning( $job, array( 'source' => $error['source'], 'reason' => 'text-scan-error: ' . $error['reason'] ) );
+		}
+		if ( count( $job['text']['occurrences'] ) > 100000 ) {
+			throw new \RuntimeException( 'More than 100,000 text occurrences. Select a smaller source scope.' );
+		}
+		++$job['cursor'];
 	}
 
 	public static function review( $id, $decisions, $finish = false ) {
@@ -397,6 +430,10 @@ final class Jobs {
 					throw new \RuntimeException( 'Invalid text review decision.' );
 				}
 				$candidate = &$job['candidates'][ $id ];
+				// A secret is recorded redacted and a dynamic argument is code: neither is text to keep.
+				if ( 'include' === $decision['decision'] && preg_match( '/(^|,)(secret|dynamic)(,|$)/', (string) ( $candidate['reason'] ?? '' ) ) ) {
+					throw new \RuntimeException( 'This candidate cannot be included: ' . $candidate['reason'] ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Diagnostic data is escaped at the admin output boundary or JSON encoded.
+				}
 				$key = $decision['key'] ?? $candidate['key'];
 				if ( ! preg_match( '/^[a-z][a-z0-9_.-]{1,120}$/D', $key ) ) {
 					throw new \RuntimeException( 'Invalid dictionary key.' );
@@ -407,11 +444,15 @@ final class Jobs {
 			}
 			if ( $finish ) {
 				$seen = array();
+				$settings = array();
 				foreach ( $job['candidates'] as $candidate ) {
 					if ( 'review' === $candidate['decision'] ) {
 						throw new \RuntimeException( 'Review every text candidate before finalizing.' );
 					}
-					if ( 'include' === $candidate['decision'] ) {
+					$target = $candidate['target'] ?? 'dictionary:ui-strings';
+					if ( 'include' === $candidate['decision'] && 0 === strpos( $target, 'theme-settings.' ) ) {
+						$settings[ $candidate['locale'] ][ substr( $target, 15 ) ] = $candidate['value'];
+					} elseif ( 'include' === $candidate['decision'] && 0 === strpos( $target, 'dictionary:' ) ) {
 						$key = $candidate['locale'] . ':' . $candidate['key'];
 						if ( isset( $seen[ $key ] ) && $seen[ $key ] !== $candidate['value'] ) {
 							throw new \RuntimeException( 'Different strings cannot use the same dictionary key.' );
@@ -420,7 +461,17 @@ final class Jobs {
 						Models::model( $job, 'ui-strings', 'dictionary', 'system', 'Interface text', array(), 'key' );
 						Models::entry( $job, 'ui-strings', $candidate['locale'], $candidate['key'], $candidate['value'] );
 					}
+					// Site title/description and menu labels are already exported as content; nothing more to write.
 					Models::row( $job, 'bridge/string-sources.json', $candidate['id'], $candidate );
+				}
+				// Customizer text becomes one editable singleton, a field per setting.
+				foreach ( $settings as $locale => $values ) {
+					ksort( $values );
+					Models::model( $job, 'theme-settings', 'singleton', 'system', 'Theme settings', array_map( static function () { return array( 'type' => 'string' ); }, $values ), array_keys( $values )[0] );
+					Models::entry( $job, 'theme-settings', $locale, '', $values );
+				}
+				if ( isset( $job['text'] ) ) {
+					Models::file( $job, 'bridge/hardcoded-text.json', Policy::json( Text::document( $job['candidates'], $job['text']['errors'], $job['text']['counts'] ) ) );
 				}
 				foreach ( $job['models'] as $model ) {
 					Models::file( $job, '.contentrain/models/' . $model['id'] . '.json', Policy::json( $model, Policy::MODEL_ORDER ) );

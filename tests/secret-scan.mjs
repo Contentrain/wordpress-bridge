@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
 import { existsSync } from 'node:fs'
-const roots = process.argv.slice(2).length ? process.argv.slice(2) : ['store', 'delta', 'seo'].map((d) => join(here, '.out', d)).filter((d) => existsSync(d))
+const roots = process.argv.slice(2).length ? process.argv.slice(2) : ['store', 'delta', 'seo', 'text'].map((d) => join(here, '.out', d)).filter((d) => existsSync(d))
 
 // Planted by tests/integration.php and tests/delta.php, or configured in compose.yml.
 const CANARIES = [
