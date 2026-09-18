@@ -96,6 +96,10 @@ if ( $has_acf ) {
 			array( 'key' => 'field_bridge_po', 'name' => 'po', 'label' => 'Featured post', 'type' => 'post_object' ),
 			array( 'key' => 'field_bridge_cat', 'name' => 'cat', 'label' => 'Category', 'type' => 'taxonomy', 'taxonomy' => 'category', 'field_type' => 'select' ),
 			array( 'key' => 'field_bridge_gallery', 'name' => 'gallery', 'label' => 'Gallery', 'type' => 'gallery' ),
+			// Named `person`, exactly like the repeater's own sub-field below:
+			// two fields sharing a name at different nesting depths is legal
+			// ACF/SCF, resolved correctly by key — see the `update_field` calls
+			// below, which save by key for exactly this reason.
 			array( 'key' => 'field_bridge_person', 'name' => 'person', 'label' => 'Person', 'type' => 'user' ),
 			array( 'key' => 'field_bridge_cta', 'name' => 'cta_link', 'label' => 'CTA link', 'type' => 'link' ),
 			array(
@@ -127,12 +131,123 @@ if ( $has_acf ) {
 	update_field( 'po', $post, $page );
 	update_field( 'cat', (int) $category['term_id'], $page );
 	update_field( 'gallery', array( $attachment, $ghost ), $page );
-	update_field( 'person', $admin->ID, $page );
+	update_field( 'field_bridge_person', $admin->ID, $page );
 	update_field( 'cta_link', array( 'title' => 'Read more', 'url' => 'https://example.test/read-more', 'target' => '_blank' ), $page );
 	update_field( 'sections', array(
 		array( 'acf_fc_layout' => 'text_block', 'heading' => 'Intro', 'body' => 'Welcome copy' ),
 		array( 'acf_fc_layout' => 'quote_block', 'heading' => 'Praise', 'quote' => 'It just works.' ),
 	), $page );
+}
+
+// clone and Options Page have no free ACF license to test against; Secure
+// Custom Fields (WP.org, an ACF fork with the same function names and
+// database format) carries them for free. `function_exists('acf_add_options_page')`
+// is false under ACF Free specifically, so this fixture degrades gracefully
+// if it is ever run there instead.
+$has_scf_pro = function_exists( 'acf_add_options_page' );
+if ( $has_scf_pro ) {
+	acf_add_local_field_group( array(
+		'key' => 'group_bridge_clone_source', 'title' => 'Clone source',
+		'location' => array( array( array( 'param' => 'post_type', 'operator' => '==', 'value' => 'page' ) ) ),
+		'fields' => array(
+			array( 'key' => 'field_bridge_clone_src_text', 'name' => 'note', 'label' => 'Note', 'type' => 'text' ),
+			array( 'key' => 'field_bridge_clone_src_num', 'name' => 'priority', 'label' => 'Priority', 'type' => 'number' ),
+		),
+	) );
+	// Seamless: the clone field replaces itself with the source fields under
+	// their own names — indistinguishable from adding `note`/`priority` to
+	// this field group directly. No prefix, since the only way found to save
+	// a *prefixed* seamless clone's value correctly is through its wrapper
+	// field, and a wrapper is exactly what seamless does not have.
+	acf_add_local_field_group( array(
+		'key' => 'group_bridge_clone_seamless', 'title' => 'Clone seamless use',
+		'location' => array( array( array( 'param' => 'post_type', 'operator' => '==', 'value' => 'page' ) ) ),
+		'fields' => array(
+			array( 'key' => 'field_bridge_clone_seamless', 'name' => 'clone_seamless', 'label' => 'Clone seamless', 'type' => 'clone', 'clone' => array( 'group_bridge_clone_source' ), 'display' => 'seamless', 'prefix_name' => 0 ),
+		),
+	) );
+	update_field( 'note', 'Seamless note', $page );
+	update_field( 'priority', 3, $page );
+	// Group display, prefixed: saved through the clone field's own key with a
+	// nested value, the way ACF/SCF's own admin form does it — saving through
+	// the flat prefixed meta key directly (the naive approach) writes a value
+	// with no resolvable field-key reference and `get_field_objects()` never
+	// sees it at all, found empirically, not assumed.
+	acf_add_local_field_group( array(
+		'key' => 'group_bridge_clone_group', 'title' => 'Clone group use',
+		'location' => array( array( array( 'param' => 'post_type', 'operator' => '==', 'value' => 'page' ) ) ),
+		'fields' => array(
+			array( 'key' => 'field_bridge_clone_group', 'name' => 'meta_info', 'label' => 'Meta info', 'type' => 'clone', 'clone' => array( 'group_bridge_clone_source' ), 'display' => 'group', 'prefix_name' => 1, 'prefix_label' => 0 ),
+		),
+	) );
+	update_field( 'field_bridge_clone_group', array( 'note' => 'Grouped note', 'priority' => 5 ), $page );
+
+	// Options Page: fields that belong to no post at all.
+	acf_add_options_page( array( 'page_title' => 'Bridge Options', 'menu_slug' => 'bridge-options' ) );
+	acf_add_local_field_group( array(
+		'key' => 'group_bridge_options', 'title' => 'Bridge options fields',
+		'location' => array( array( array( 'param' => 'options_page', 'operator' => '==', 'value' => 'bridge-options' ) ) ),
+		'fields' => array(
+			array( 'key' => 'field_bridge_opt_tagline', 'name' => 'site_wide_tagline', 'label' => 'Tagline', 'type' => 'text' ),
+			array( 'key' => 'field_bridge_opt_year', 'name' => 'copyright_year', 'label' => 'Copyright year', 'type' => 'number' ),
+			// A repeater's own sub-rows (`options_social_links_0_url`, ...) are
+			// stored under the field's own name, not the field's own row —
+			// coverage must attribute them to `social_links`, not fold them
+			// into `excluded:configuration-not-content` for not matching a
+			// field name exactly.
+			array(
+				'key' => 'field_bridge_opt_social', 'name' => 'social_links', 'label' => 'Social links', 'type' => 'repeater',
+				'sub_fields' => array(
+					array( 'key' => 'field_bridge_opt_social_url', 'name' => 'url', 'label' => 'URL', 'type' => 'text' ),
+				),
+			),
+		),
+	) );
+	update_field( 'field_bridge_opt_tagline', 'Owns its content', 'option' );
+	update_field( 'field_bridge_opt_year', 2026, 'option' );
+	update_field( 'field_bridge_opt_social', array(
+		array( 'url' => 'https://example.test/a' ),
+		array( 'url' => 'https://example.test/b' ),
+	), 'option' );
+
+	// Two more Options Pages, neither given its own `post_id` — the common
+	// setup (a parent page and its sub-pages) defaults every one of them to
+	// the same `options` post_id. Each singleton must get only the fields
+	// its own field group is located to, not every field stored at that
+	// shared post_id.
+	acf_add_options_page( array( 'page_title' => 'Bridge Header', 'menu_slug' => 'bridge-header' ) );
+	acf_add_local_field_group( array(
+		'key' => 'group_bridge_header_options', 'title' => 'Bridge header fields',
+		'location' => array( array( array( 'param' => 'options_page', 'operator' => '==', 'value' => 'bridge-header' ) ) ),
+		'fields' => array(
+			array( 'key' => 'field_bridge_opt_header_text', 'name' => 'header_text', 'label' => 'Header text', 'type' => 'text' ),
+		),
+	) );
+	update_field( 'field_bridge_opt_header_text', 'Welcome banner', 'option' );
+
+	acf_add_options_page( array( 'page_title' => 'Bridge Footer', 'menu_slug' => 'bridge-footer' ) );
+	acf_add_local_field_group( array(
+		'key' => 'group_bridge_footer_options', 'title' => 'Bridge footer fields',
+		'location' => array( array( array( 'param' => 'options_page', 'operator' => '==', 'value' => 'bridge-footer' ) ) ),
+		'fields' => array(
+			array( 'key' => 'field_bridge_opt_footer_text', 'name' => 'footer_text', 'label' => 'Footer text', 'type' => 'text' ),
+		),
+	) );
+	update_field( 'field_bridge_opt_footer_text', 'All rights reserved', 'option' );
+
+	// An Options Page with its own custom `post_id`. Its per-language copy is
+	// planted further below, after Polylang's languages exist, through the
+	// real "ACF Options for Polylang" plugin's own runtime — not a guessed
+	// `update_option()` shape.
+	acf_add_options_page( array( 'page_title' => 'Bridge Locale Options', 'menu_slug' => 'bridge-locale-options', 'post_id' => 'bridge_locale_options' ) );
+	acf_add_local_field_group( array(
+		'key' => 'group_bridge_locale_options', 'title' => 'Bridge locale options fields',
+		'location' => array( array( array( 'param' => 'options_page', 'operator' => '==', 'value' => 'bridge-locale-options' ) ) ),
+		'fields' => array(
+			array( 'key' => 'field_bridge_opt_locale_note', 'name' => 'locale_note', 'label' => 'Locale note', 'type' => 'text' ),
+		),
+	) );
+	update_field( 'field_bridge_opt_locale_note', 'Default language value', 'bridge_locale_options' );
 }
 
 // Polylang (free): 2 languages, 3 translation groups. Real plugin, not a
@@ -193,12 +308,41 @@ if ( $has_polylang ) {
 		update_field( 'po', $post_da, $page_da );
 		update_field( 'cat', (int) $category['term_id'], $page_da );
 		update_field( 'gallery', array( $attachment, $ghost ), $page_da );
-		update_field( 'person', $admin->ID, $page_da );
+		update_field( 'field_bridge_person', $admin->ID, $page_da );
 		update_field( 'cta_link', array( 'title' => 'Læs mere', 'url' => 'https://example.test/read-more', 'target' => '_blank' ), $page_da );
 		update_field( 'sections', array(
 			array( 'acf_fc_layout' => 'text_block', 'heading' => 'Intro', 'body' => 'Velkomst' ),
 			array( 'acf_fc_layout' => 'quote_block', 'heading' => 'Ros', 'quote' => 'Det virker bare.' ),
 		), $page_da );
+	}
+	// A group-display clone becomes its own nested collection model (like a
+	// native `group` field), so it carries the same cross-locale requirement:
+	// a translated page needs its own entry, not a same-language gap. The
+	// seamless clone above needs no mirror — its fields flatten onto the page
+	// document itself, where an unset scalar is not a parity error.
+	if ( $has_scf_pro ) {
+		update_field( 'field_bridge_clone_group', array( 'note' => 'Grupperet note', 'priority' => 5 ), $page_da );
+	}
+
+	// A real per-language copy through the actual "ACF Options for Polylang"
+	// plugin (BeAPI, installed for real above), for both a page's own custom
+	// `post_id` (`bridge_locale_options`) and the default `options` post_id
+	// shared by every page that does not set its own — its own
+	// `acf/validate_post_id` filter does this suffixing, not a planted
+	// `update_option()`.
+	if ( $has_scf_pro ) {
+		PLL()->curlang = PLL()->model->get_language( 'da' );
+		update_field( 'field_bridge_opt_locale_note', 'Dansk værdi', 'bridge_locale_options' );
+		update_field( 'field_bridge_opt_header_text', 'Dansk banner', 'option' );
+		// The default language gets a redundant suffixed copy too: this
+		// plugin never configures ACF's own `default_language` setting, so
+		// its own "is this the default language" check is never true for any
+		// explicit `curlang` — measured empirically against the real plugin,
+		// not assumed. Coverage's translation-row detection must not be a
+		// "da only" special case.
+		PLL()->curlang = PLL()->model->get_language( 'en' );
+		update_field( 'field_bridge_opt_year', 2027, 'option' );
+		PLL()->curlang = false;
 	}
 
 	// Custom post meta is per-post, not per-translation-group; the Danish
@@ -279,6 +423,13 @@ check( 'review' === $summary['phase'], 'resumable export reaches review' );
 $job = Jobs::read( $id );
 check( isset( $job['tables']['bridge/raw-posts.json'][ $book ] ), 'REST-hidden CPT is exported' );
 check( ! isset( $job['tables']['bridge/raw-posts.json'][ $draft ] ), 'draft excluded in public scope' );
+// A post outside every ACF field group's location rule must keep exactly the
+// raw shape it had before this plugin knew how to read ACF at all: an
+// inventory fingerprint must not change for every non-ACF record just
+// because ACF support exists now.
+$post_raw_row = $job['tables']['bridge/raw-posts.json'][ $post ];
+$post_raw = json_decode( Files::read( Files::dir( $id ), 'rows/' . hash( 'sha256', 'bridge/raw-posts.json' ) . '/' . $post_raw_row . '.json' ), true );
+check( ! array_key_exists( 'acf', $post_raw ), 'a post outside every ACF field group carries no acf key at all, so its inventory fingerprint is unchanged by ACF support' );
 check( ! isset( $job['models']['wp-post']['fields']['slug'] ), 'document system slug is not declared as a field' );
 check( isset( $job['models']['wp-structured-values'] ), 'nested content becomes editable related records' );
 if ( $has_acf ) {
@@ -522,6 +673,84 @@ if ( $has_acf ) {
 	check( 'text_block' === $section_rows[0]['layout'] && 'Intro' === $section_rows[0]['heading'] && 'Welcome copy' === $section_rows[0]['body'], 'a flexible_content row keeps its own layout and fields' );
 	check( 'quote_block' === $section_rows[1]['layout'] && 'Praise' === $section_rows[1]['heading'] && 'It just works.' === $section_rows[1]['quote'], 'a different layout in the same field keeps its own fields' );
 	check( ! isset( $section_rows[0]['quote'] ) && ! isset( $section_rows[1]['body'] ), 'a row does not carry fields from a layout it was not written in' );
+}
+
+if ( $has_scf_pro ) {
+	// Seamless clone: indistinguishable from `note`/`priority` added directly —
+	// no `acf_clone_seamless` field exists at all, proving the replacement is real.
+	check( 'Seamless note' === $page_entry['acf_note'] && ( 3 === $page_entry['acf_priority'] || 3.0 === $page_entry['acf_priority'] ), 'a seamless clone flattens into the parent field group under the source fields\' own names' );
+	check( ! isset( $job['models']['wp-page']['fields']['acf_clone_seamless'] ), 'a seamless clone field itself is never a field on the parent' );
+
+	// Group-display clone: a real `relation`, exactly like a native `group` field.
+	check( 'relation' === $job['models']['wp-page']['fields']['acf_meta_info']['type'], 'a group-display clone becomes a relation, like a native group field' );
+	$clone_group_model = $job['models']['wp-page']['fields']['acf_meta_info']['model'];
+	$clone_group_row = json_decode( Files::read( $dir, Models::content_path( $job, $clone_group_model, $job['default_locale'] ) ), true )[ $page_entry['acf_meta_info'] ];
+	// `prefix_name => 1` on the clone usage itself, so the values are honestly
+	// under the prefixed names ACF/SCF actually reports for it (`meta_info_note`),
+	// not the source group's own unprefixed names — that guarantee is what the
+	// seamless case above already covers, at `prefix_name => 0`.
+	check( 'Grouped note' === $clone_group_row['meta_info_note'] && ( 5 === $clone_group_row['meta_info_priority'] || 5.0 === $clone_group_row['meta_info_priority'] ), 'a group-display clone keeps its own field names and values' );
+
+	// Options Page: a singleton, one entry, fields the site actually configured.
+	$options_model_id = 'acf-options-bridge-options';
+	check( isset( $job['models'][ $options_model_id ] ) && 'singleton' === $job['models'][ $options_model_id ]['kind'], 'an Options Page becomes a singleton model' );
+	$options_entry = json_decode( Files::read( $dir, Models::content_path( $job, $options_model_id, $job['default_locale'] ) ), true );
+	check( 'Bridge Options' === $options_entry['page_title'], 'the Options Page singleton always has a valid title field, whatever its configured fields are named' );
+	check( 'Owns its content' === $options_entry['acf_site_wide_tagline'] && ( 2026 === $options_entry['acf_copyright_year'] || 2026.0 === $options_entry['acf_copyright_year'] ), 'Options Page field values are modelled the same way a post\'s own ACF fields are' );
+
+	// Two Options Pages sharing the default `options` post_id: each singleton
+	// must carry only the fields its own field group is located to.
+	$header_id = 'acf-options-bridge-header';
+	$footer_id = 'acf-options-bridge-footer';
+	check( isset( $job['models'][ $header_id ]['fields']['acf_header_text'] ) && ! isset( $job['models'][ $header_id ]['fields']['acf_footer_text'] ), 'an Options Page sharing the default post_id carries only its own field, not a sibling page\'s' );
+	check( isset( $job['models'][ $footer_id ]['fields']['acf_footer_text'] ) && ! isset( $job['models'][ $footer_id ]['fields']['acf_header_text'] ), 'a sibling Options Page on the same shared post_id carries only its own field in turn' );
+	$header_entry = json_decode( Files::read( $dir, Models::content_path( $job, $header_id, $job['default_locale'] ) ), true );
+	$footer_entry = json_decode( Files::read( $dir, Models::content_path( $job, $footer_id, $job['default_locale'] ) ), true );
+	check( 'Welcome banner' === $header_entry['acf_header_text'], 'the header Options Page value is its own, not the footer\'s' );
+	check( 'All rights reserved' === $footer_entry['acf_footer_text'], 'the footer Options Page value is its own, not the header\'s' );
+
+	if ( $has_polylang ) {
+		// The export must not depend on whatever language an admin's own
+		// admin-bar filter happens to be set to when they run it — Polylang
+		// sets `curlang` from exactly that filter (`admin-base.php`
+		// `set_current_language()`), and the real "ACF Options for Polylang"
+		// plugin then redirects a normal `get_field_object()` read to that
+		// language's row. Proven directly against the same read the export
+		// itself performs, on the real per-language row planted above.
+		PLL()->curlang = PLL()->model->get_language( 'da' );
+		$curlang_excluded = array();
+		list( $curlang_raw, ) = Source::acf_fields_for_options_page( 'options', 'bridge-header', 'acf-options/bridge-header', $curlang_excluded );
+		PLL()->curlang = false;
+		check( 'Welcome banner' === ( $curlang_raw['header_text']['value'] ?? null ), 'an Options Page read while an admin\'s language filter is set to Danish still returns the untranslated default, not the Danish redirect' );
+	}
+
+	// A third-party plugin can give an Options Page a per-language copy this
+	// plugin does not read; a real detection (the plugin installed above) must
+	// name the gap, and coverage must attribute both the exported default
+	// value and the unread translation honestly, not fold either into
+	// `excluded:configuration-not-content`.
+	$options_warning_reasons = implode( '|', array_column( json_decode( Files::read( $dir, 'bridge/warnings.json' ), true ), 'reason' ) );
+	check( false !== strpos( $options_warning_reasons, 'acf-options-translation-plugin-detected' ), 'a detected Options Page translation plugin is reported, not silently ignored' );
+	$coverage = json_decode( Files::read( $dir, 'bridge/coverage.json' ), true );
+	$options_source = null;
+	foreach ( $coverage['sources'] as $source ) {
+		if ( 'options' === $source['source'] ) {
+			$options_source = $source;
+			break;
+		}
+	}
+	// 5 scalar fields (value + reference, 10 rows) plus one 2-row repeater
+	// (its own value + reference, and each row's own sub-field value +
+	// reference: 3 pairs, 6 rows) = 16.
+	check( 16 === ( $options_source['outcomes']['exported:acf-options'] ?? 0 ), 'every exported Options Page field\'s storage rows, including a repeater\'s own sub-rows, are reported as exported' );
+	// Three real per-language rows (value + reference each, 6 rows): the
+	// custom `bridge_locale_options` post_id, the default `options` post_id,
+	// and — matching the plugin's own default-language quirk — a copy under
+	// the *default* language's own suffix, not only a non-default one.
+	check( 6 === ( $options_source['outcomes']['unsupported:options-page-translation'] ?? 0 ), 'every real per-language Options Page row (value + reference) is reported as unsupported, not silently excluded' );
+	$locale_options_id = 'acf-options-bridge-locale-options';
+	$locale_entry = json_decode( Files::read( $dir, Models::content_path( $job, $locale_options_id, $job['default_locale'] ) ), true );
+	check( 'Default language value' === $locale_entry['acf_locale_note'], 'an Options Page with a detected per-language copy still exports only its default-language value' );
 }
 
 check( Validator::run( $job )['valid'], 'generated relation graph validates' );

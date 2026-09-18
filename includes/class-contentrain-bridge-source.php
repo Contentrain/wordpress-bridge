@@ -163,19 +163,94 @@ final class Source {
 		if ( $post->post_password ) {
 			$excluded[] = array( 'source' => 'post/' . $post->ID . '/password', 'reason' => 'password-not-exported' );
 		}
+		list( $acf, $schema ) = self::acf_fields( $post->ID, 'acf/' . $post->ID, $excluded );
+		// A post with no ACF fields carries no `acf` key at all, not an empty
+		// one: an inventory fingerprint must not change for every non-ACF
+		// record just because this plugin now also knows how to read ACF.
+		if ( $acf ) {
+			$raw['acf'] = $acf;
+		}
+		return array( 'raw' => $raw, 'acf_schema' => Policy::clean( $schema, $excluded, 'acf-schema/' . $post->ID ), 'address' => self::address( $post ), 'translations' => self::translations( $post ) );
+	}
+
+	/** ACF/SCF field objects for a real post: every field group whose location rule matches it, exactly what `get_field_objects()` already scopes correctly for a single, ordinary post. */
+	public static function acf_fields( $post_id, $source_prefix, &$excluded ) {
+		$raw = array();
 		$schema = array();
 		if ( function_exists( 'get_field_objects' ) ) {
-			$fields = get_field_objects( $post->ID, false, true ) ?: array();
+			$fields = get_field_objects( $post_id, false, true ) ?: array();
 			foreach ( $fields as $name => $field ) {
 				if ( Policy::sensitive( $name ) || in_array( $field['type'], Acf::EXCLUDED, true ) ) {
-					$excluded[] = array( 'source' => 'acf/' . $post->ID . '/' . $name, 'reason' => 'sensitive-field' );
+					$excluded[] = array( 'source' => $source_prefix . '/' . $name, 'reason' => 'sensitive-field' );
 					continue;
 				}
-				$raw['acf'][ $name ] = array( 'value' => self::acf_value( $field, $field['value'], $excluded, 'acf/' . $post->ID . '/' . $name ), 'field_key' => $field['key'] );
+				$raw[ $name ] = array( 'value' => self::acf_value( $field, $field['value'], $excluded, $source_prefix . '/' . $name ), 'field_key' => $field['key'] );
 				$schema[ $name ] = self::schema( $field );
 			}
 		}
-		return array( 'raw' => $raw, 'acf_schema' => Policy::clean( $schema, $excluded, 'acf-schema/' . $post->ID ), 'address' => self::address( $post ), 'translations' => self::translations( $post ) );
+		return array( $raw, $schema );
+	}
+
+	/**
+	 * ACF/SCF field objects for one specific Options Page — never everything
+	 * stored at its `post_id`. Every options page defaults to the same
+	 * `post_id` ('options') unless a site explicitly gives it its own, so
+	 * `get_field_objects( $post_id )` there would return every options page's
+	 * fields, not just this one's — scoped instead by the field groups whose
+	 * own location rule names this page.
+	 */
+	public static function acf_fields_for_options_page( $post_id, $slug, $source_prefix, &$excluded ) {
+		$raw = array();
+		$schema = array();
+		if ( ! function_exists( 'acf_get_field_groups' ) ) {
+			return array( $raw, $schema );
+		}
+		// "ACF Options for Polylang" redirects a normal `get_field_object()`
+		// read to whatever language Polylang's `curlang` happens to be set to
+		// at the moment this runs — in wp-admin that is the admin-bar
+		// language filter, not this site's default language (verified: the
+		// plugin never configures ACF's own `default_language` setting, so
+		// its own "is this the default" check never holds). This plugin's
+		// `i18n: false` Options Page model only has room for one value, so it
+		// must always be the untranslated one, regardless of who happens to
+		// be running the export and what they last clicked in the admin bar.
+		$untranslated = function_exists( 'bea_aofp_switch_to_untranslated' );
+		if ( $untranslated ) {
+			bea_aofp_switch_to_untranslated();
+		}
+		try {
+			foreach ( acf_get_field_groups( array( 'options_page' => $slug ) ) as $group ) {
+				foreach ( acf_get_fields( $group ) as $field ) {
+					$loaded = get_field_object( $field['key'], $post_id, false );
+					if ( ! $loaded ) {
+						continue;
+					}
+					$name = $loaded['name'];
+					if ( Policy::sensitive( $name ) || in_array( $loaded['type'], Acf::EXCLUDED, true ) ) {
+						$excluded[] = array( 'source' => $source_prefix . '/' . $name, 'reason' => 'sensitive-field' );
+						continue;
+					}
+					$raw[ $name ] = array( 'value' => self::acf_value( $loaded, $loaded['value'], $excluded, $source_prefix . '/' . $name ), 'field_key' => $loaded['key'] );
+					$schema[ $name ] = self::schema( $loaded );
+				}
+			}
+		} finally {
+			if ( $untranslated ) {
+				bea_aofp_restore_current_lang();
+			}
+		}
+		return array( $raw, $schema );
+	}
+
+	/** Every registered ACF/SCF Options Page, however many sub-pages the site groups fields under. */
+	public static function options_pages() {
+		if ( ! function_exists( 'acf_get_options_pages' ) ) {
+			return array();
+		}
+		// `acf_get_options_pages()` returns `false`, not an empty array, when
+		// nothing is registered — `(array) false` would silently produce one
+		// bogus page instead of none.
+		return array_values( (array) ( acf_get_options_pages() ?: array() ) );
 	}
 
 	/** ACF groups can use opaque field keys: inspect types before values reach RawIR. */
@@ -215,7 +290,7 @@ final class Source {
 
 	/** The parts of an ACF field definition that describe content, at every depth. */
 	private static function schema( $field ) {
-		$out = array_intersect_key( (array) $field, array_flip( array( 'key', 'name', 'label', 'type', 'required', 'choices', 'multiple', 'return_format', 'sub_fields', 'layouts', 'taxonomy', 'field_type' ) ) );
+		$out = array_intersect_key( (array) $field, array_flip( array( 'key', 'name', 'label', 'type', 'required', 'choices', 'multiple', 'return_format', 'sub_fields', 'layouts', 'taxonomy', 'field_type', 'display' ) ) );
 		foreach ( array( 'sub_fields', 'layouts' ) as $nested ) {
 			if ( ! empty( $out[ $nested ] ) && is_array( $out[ $nested ] ) ) {
 				$out[ $nested ] = array_values( array_map( array( self::class, 'schema' ), $out[ $nested ] ) );
