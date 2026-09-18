@@ -168,6 +168,13 @@ if ( $has_polylang ) {
 	pll_set_post_language( $book_da, 'da' );
 	pll_save_post_translations( array( 'en' => $book, 'da' => $book_da ) );
 
+	// A real site is rarely fully translated: a post nobody has translated
+	// yet is not a translation group of one member sharing a locale with
+	// itself, it is a group with a real gap. Tagged with a language (so it is
+	// not merely "unset"), never given a `da` counterpart.
+	$solo_post = wp_insert_post( array( 'post_type' => 'post', 'post_title' => 'English only', 'post_content' => '<p>Never translated.</p>', 'post_status' => 'publish', 'post_author' => $admin->ID ) );
+	pll_set_post_language( $solo_post, 'en' );
+
 	// A translated page has its own field values, not a copy of the source
 	// language's; mirroring them here (rather than leaving $page_da's ACF
 	// fields unset) is what a real translated page looks like.
@@ -379,6 +386,8 @@ if ( $has_polylang ) {
 	check( isset( $pairs[ $page ] ) && $same_map( array( 'en' => $page, 'da' => $page_da ), $pairs[ $page ]['translations'] ), 'the page/page_da group has exactly one pair' );
 	check( isset( $pairs[ $team_en ] ) && $same_map( array( 'en' => $team_en, 'da' => $team_da ), $pairs[ $team_en ]['translations'] ), 'a third, unrelated translation group is also a single pair' );
 	check( ! isset( $pairs[ $post_da ] ) && ! isset( $pairs[ $page_da ] ) && ! isset( $pairs[ $team_da ] ), 'the non-canonical member of each group writes no pair of its own' );
+	check( ! isset( $pairs[ $post ]['missing_translations'] ) && ! isset( $pairs[ $page ]['missing_translations'] ), 'a fully bilingual group reports no missing translation' );
+	check( isset( $pairs[ $solo_post ] ) && array( 'en' => $solo_post ) === $pairs[ $solo_post ]['translations'] && array( 'da' ) === $pairs[ $solo_post ]['missing_translations'], 'a post nobody has translated yet is its own one-member group, with the gap named rather than hidden' );
 	// A re-used test database accumulates earlier runs' groups (RELEASING.md's
 	// own caveat), so this counts at least this run's three rather than an
 	// exact total; each da-tagged member above already proves no duplicate
