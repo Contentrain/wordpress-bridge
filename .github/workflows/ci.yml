@@ -71,6 +71,10 @@ jobs:
       # runs after the store the other gates read has been copied out.
       - run: npm run test:delta
       # Everything handed over — store and delta — scanned for planted secrets.
+      # B-08: a fixture theme's interface text from every source — gettext, HTML,
+      # echo, JS, widgets, menus, Customizer and five rendered pages. Every
+      # occurrence is accounted for, one outcome per candidate, keys stable.
+      - run: npm run test:text
       - run: npm run test:secrets
       # Repeat delivery: deletions the delta proves are removed, unexplained ones
       # refused, a person's edit reported and resolved; replayed into real Git.

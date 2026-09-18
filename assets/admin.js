@@ -56,7 +56,7 @@
     for (const candidate of candidates) {
       const fieldset = document.createElement('fieldset');
       const legend = document.createElement('legend');
-      legend.textContent = `${candidate.source}:${candidate.line} · ${candidate.context}`;
+      legend.textContent = `${candidate.source}${candidate.line ? ':' + candidate.line : ''} · ${candidate.context}${candidate.occurrences ? ' · ×' + candidate.occurrences.length : ''}${candidate.reason ? ' · ' + candidate.reason : ''}`;
       const text = document.createElement('p');
       text.textContent = candidate.value;
       const keyLabel = document.createElement('label');
@@ -92,7 +92,7 @@
   action('create', async () => {
     const types = [...$('types').querySelectorAll('input[type="checkbox"]:checked')].map(input => input.value);
     const labels = Object.fromEntries([...$('types').querySelectorAll('input[type="text"]')].map(input => [input.dataset.type, input.value]));
-    job = await api({ op: 'create', types, labels, private: $('private').checked, comments: $('comments').checked, scan_sources: $('scan').checked, scan_plugins: $('plugins').checked, selected_meta: $('meta').value.split(',').map(x => x.trim()).filter(Boolean) });
+    job = await api({ op: 'create', types, labels, private: $('private').checked, comments: $('comments').checked, scan_sources: $('scan').checked, scan_plugins: $('plugins').checked, scan_render: $('render').checked, selected_meta: $('meta').value.split(',').map(x => x.trim()).filter(Boolean) });
     await loop();
   });
   action('resume', loop);

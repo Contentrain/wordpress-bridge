@@ -47,6 +47,9 @@ export function prepareMigrate(source, destination) {
   if (seo) raw.seo = { ...seo, entries: json('bridge/seo-entries.json', {}) }
   const routing = json('bridge/routing.json', null)
   if (routing) raw.routing = routing
+  // B-08: every interface-text candidate with its one outcome; not yet a RawIR field (proposed).
+  const text = json('bridge/hardcoded-text.json', null)
+  if (text) raw.hardcoded_text = text
   for (const post of raw.posts) {
     const entry = entries[String(post.id)]
     if (!entry || !verified.has(`.contentrain/models/${entry.model_id}.json`)) throw new Error('Post has no exported model address: ' + post.id)
