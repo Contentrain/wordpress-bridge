@@ -81,6 +81,12 @@ final class Admin {
 				<input id="cr-token" type="password" class="regular-text" autocomplete="off" />
 				<p><?php esc_html_e( 'The token is used only for these requests and is not saved. Delivery creates a separate branch. Existing edited content is never silently overwritten.', 'contentrain-bridge' ); ?></p>
 				<label><input id="cr-consent" type="checkbox" /> <?php esc_html_e( 'Send this export to the selected GitHub repository. I have reviewed its content and repository visibility.', 'contentrain-bridge' ); ?></label>
+				<label for="cr-conflict"><?php esc_html_e( 'If a file was edited in the repository since the last delivery', 'contentrain-bridge' ); ?></label>
+				<select id="cr-conflict">
+					<option value="refuse"><?php esc_html_e( 'Stop and show me what changed', 'contentrain-bridge' ); ?></option>
+					<option value="keep-repository"><?php esc_html_e( 'Keep the repository version, deliver everything else', 'contentrain-bridge' ); ?></option>
+					<option value="use-wordpress"><?php esc_html_e( 'Use the WordPress version on the delivery branch, for review', 'contentrain-bridge' ); ?></option>
+				</select>
 				<button id="cr-github" type="button" class="button button-primary"><?php esc_html_e( 'Deliver to GitHub', 'contentrain-bridge' ); ?></button>
 				<p><a id="cr-receipt" target="_blank" rel="noopener noreferrer" hidden><?php esc_html_e( 'View delivered commit', 'contentrain-bridge' ); ?></a></p>
 			</section>
@@ -125,7 +131,7 @@ final class Admin {
 					if ( empty( $input['consent'] ) ) {
 						throw new \RuntimeException( 'Explicit GitHub transfer consent is required.' );
 					}
-					$result = GitHub::start( $id, $input['token'] ?? '', $input['repository'] ?? '' );
+					$result = GitHub::start( $id, $input['token'] ?? '', $input['repository'] ?? '', in_array( $input['on_conflict'] ?? 'refuse', GitHub::CONFLICT_CHOICES, true ) ? $input['on_conflict'] : 'refuse' );
 					break;
 				case 'github-step':
 					if ( ! is_ssl() && 'local' !== wp_get_environment_type() ) {

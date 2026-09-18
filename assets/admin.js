@@ -119,7 +119,7 @@
     let token = $('token').value;
     $('token').value = '';
     try {
-      job = await api({ op: 'github-start', id: job.id, token, repository: $('repo').value.trim(), consent: true });
+      job = await api({ op: 'github-start', id: job.id, token, repository: $('repo').value.trim(), consent: true, on_conflict: $('conflict').value });
       while (job.github.phase !== 'done') {
         job = await api({ op: 'github-step', id: job.id, token, cursor: job.github.cursor });
         $('status').textContent = sprintf(__('Delivering file step %d', 'contentrain-bridge'), job.github.cursor);

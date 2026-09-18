@@ -226,11 +226,7 @@ final class Jobs {
 	/** Copy one upload into the export; returns its stored path, or null with a reason. */
 	private static function transfer( &$job, $basedir, $relative ) {
 		$relative = preg_replace( '#^\./#', '', $relative );
-		$path = 'media/' . $relative;
-		if ( ! preg_match( '#^[a-zA-Z0-9_.\-/]+$#D', $relative ) ) {
-			$extension = preg_replace( '/[^a-z0-9]/', '', strtolower( pathinfo( $relative, PATHINFO_EXTENSION ) ) );
-			$path = 'media/file-' . substr( hash( 'sha256', $relative ), 0, 24 ) . ( $extension ? '.' . $extension : '' );
-		}
+		$path = self::media_path( $relative );
 		if ( isset( $job['files'][ $path ] ) ) {
 			return $path;
 		}
@@ -253,6 +249,16 @@ final class Jobs {
 		++$job['counts']['media_files'];
 		$job['media_paths'][ $relative ] = $path;
 		return $path;
+	}
+
+	/** Where an upload is stored in the export; a name outside the safe set is hashed. */
+	public static function media_path( $relative ) {
+		$relative = preg_replace( '#^\./#', '', (string) $relative );
+		if ( preg_match( '#^[a-zA-Z0-9_.\-/]+$#D', $relative ) ) {
+			return 'media/' . $relative;
+		}
+		$extension = preg_replace( '/[^a-z0-9]/', '', strtolower( pathinfo( $relative, PATHINFO_EXTENSION ) ) );
+		return 'media/file-' . substr( hash( 'sha256', $relative ), 0, 24 ) . ( $extension ? '.' . $extension : '' );
 	}
 
 	private static function posts( &$job ) {
@@ -462,7 +468,7 @@ final class Jobs {
 	public static function summary( $job ) {
 		$result = array_intersect_key( $job, array_flip( array( 'id', 'phase', 'cursor', 'step', 'counts', 'created_at' ) ) ) + array( 'files' => count( $job['files'] ), 'models' => array_values( $job['models'] ), 'candidates' => count( $job['candidates'] ), 'unreviewed' => count( array_filter( $job['candidates'], static function ( $candidate ) { return 'review' === $candidate['decision']; } ) ) );
 		if ( isset( $job['github'] ) ) {
-			$result['github'] = array_intersect_key( $job['github'], array_flip( array( 'repository', 'branch', 'phase', 'cursor', 'commit', 'url' ) ) );
+			$result['github'] = array_intersect_key( $job['github'], array_flip( array( 'repository', 'branch', 'phase', 'cursor', 'commit', 'url', 'removed', 'conflicts', 'on_conflict' ) ) );
 		}
 		return $result;
 	}
