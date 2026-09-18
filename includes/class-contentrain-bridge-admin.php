@@ -74,6 +74,9 @@ final class Admin {
 			<section id="cr-delivery" hidden>
 				<h2><?php esc_html_e( '3. Get your content', 'contentrain-bridge' ); ?></h2>
 				<p><?php esc_html_e( 'Review the coverage report: copied media is included; missing or oversized files may still use WordPress URLs. Dynamic WordPress behavior needs a renderer.', 'contentrain-bridge' ); ?></p>
+				<h3><?php esc_html_e( 'Services to reconnect', 'contentrain-bridge' ); ?></h3>
+				<p><?php esc_html_e( 'Outside services this site is connected to. No keys or tokens were exported: connect each one again on the new site with its own credentials.', 'contentrain-bridge' ); ?></p>
+				<ul id="cr-integrations"></ul>
 				<h3><?php esc_html_e( 'Source coverage', 'contentrain-bridge' ); ?></h3>
 				<p><?php esc_html_e( 'Every place WordPress keeps content, counted in the database and split into what was exported, what was left out and why, and what this export cannot read. The same report is in the export as bridge/coverage.json.', 'contentrain-bridge' ); ?></p>
 				<div id="cr-coverage"></div>

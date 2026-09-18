@@ -48,6 +48,9 @@ export function prepareMigrate(source, destination) {
   const routing = json('bridge/routing.json', null)
   if (routing) raw.routing = routing
   // B-08: every interface-text candidate with its one outcome; not yet a RawIR field (proposed).
+  // B-07: services to reconnect; not yet a RawIR field (proposed).
+  const integrations = json('bridge/integrations.json', null)
+  if (integrations) raw.integrations = integrations.services
   const text = json('bridge/hardcoded-text.json', null)
   if (text) raw.hardcoded_text = text
   for (const post of raw.posts) {
@@ -60,6 +63,9 @@ export function prepareMigrate(source, destination) {
   const report = { source: raw.provenance, models: Object.fromEntries(models.map(m => [m.id, { kind: m.kind, domain: m.domain, fields: Object.keys(m.fields ?? {}).length }])), bridge_snapshot: manifest.snapshot }
   const warnings = values('bridge/warnings.json')
   const summary = { site: raw.site.url, generated_at: manifest.created_at, tool: 'contentrain-bridge', provenance: raw.provenance, locale: config.locales.default, langs: config.locales.supported, models: models.length, entries: Object.keys(entries).length, posts: raw.posts.length, attachments: raw.attachments.length, comments: commentSummary, truncated: [], warnings: warnings.map(w => `${w.source}: ${w.reason}`), requests: 0, ms: 0, bridge_snapshot: manifest.snapshot, complete_source_coverage: manifest.complete_source_coverage === true }
+  // Open items for the person running the migration, in Studio's handoff-issue shape ({ code, … }).
+  const reconnect = (raw.integrations ?? []).filter((s) => s.reconnect_required)
+  summary.issues = reconnect.length ? [{ code: 'integration_reconnect_required', services: reconnect.map((s) => ({ service: s.service, name: s.name, category: s.category, secret_present: s.secret_present })) }] : []
   const staging = target + '.tmp-' + randomUUID()
   const write = (path, content) => { const file = join(staging, path); mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, typeof content === 'string' ? content : JSON.stringify(content, null, 2) + '\n') }
   try {

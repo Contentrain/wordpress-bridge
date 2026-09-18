@@ -164,6 +164,18 @@ database table — is counted in the database and split into `exported`,
 up to its count is marked `balanced: false`; a table the export does not read is
 listed with its row count.
 
+## Services to reconnect
+
+`bridge/integrations.json` lists the outside services the site is connected to —
+analytics, CRM, newsletter, ads, comments, captcha, CDN — with the evidence for
+each: an active plugin, a settings option by name, a script host in the theme or
+on the rendered home page, a form wired to the service, or embedded content. Each
+says whether an account must be reconnected and whether a credential is set on
+WordPress. No key, token or password is exported: a credential is only checked
+for being set, in memory, and the export names the setting, never its value. The
+list is shown on the Bridge screen and reaches Migrate's intake as an
+`integration_reconnect_required` issue.
+
 ## Current coverage boundaries
 
 ACF shapes that cannot be fully represented use a reported structured fallback;

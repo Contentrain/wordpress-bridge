@@ -243,14 +243,47 @@ final class Source {
 		$hook = (string) current_filter();
 		if ( in_array( $hook, array( 'save_post', 'deleted_post' ), true ) && isset( $args[0] ) ) {
 			$type = get_post_type( (int) $args[0] ) ?: ( isset( $args[1] ) && is_object( $args[1] ) ? $args[1]->post_type : '' );
-			if ( in_array( $type, array( 'oembed_cache', 'revision', 'customize_changeset', 'user_request' ), true ) ) {
+			// The same list the coverage report calls "not content": caches, drafts of settings, design.
+			if ( isset( Coverage::NOT_CONTENT[ $type ] ) ) {
 				return;
 			}
+			$hook .= ':' . $type;
 		}
 		if ( preg_match( '/_post_meta$/', $hook ) && isset( $args[2] ) && preg_match( '/^(_oembed_|_edit_lock$|_edit_last$)/', (string) $args[2] ) ) {
 			return;
 		}
-		update_option( 'contentrain_bridge_revision', wp_generate_uuid4() . '|' . sanitize_key( $hook ), false );
+		self::mark( $hook );
+	}
+
+	/** Changes kept for an export in progress to judge; older ones are forgotten. */
+	const CHANGE_LOG = 200;
+
+	private static function mark( $label ) {
+		$revision = wp_generate_uuid4() . '|' . preg_replace( '/[^a-z0-9_:\-]/', '', strtolower( (string) $label ) );
+		$log = (array) get_option( 'contentrain_bridge_changes', array() );
+		$log[] = $revision;
+		update_option( 'contentrain_bridge_changes', array_slice( $log, -self::CHANGE_LOG ), false );
+		update_option( 'contentrain_bridge_revision', $revision, false );
+	}
+
+	/**
+	 * The labels of every change after `$revision`, oldest first; null when
+	 * `$revision` is no longer in the log and what happened since is unknown.
+	 */
+	public static function changes_since( $revision ) {
+		global $wpdb;
+		$raw = $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", 'contentrain_bridge_changes' ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Other requests write this log; the cached copy is stale by design.
+		$log = is_string( $raw ) && is_serialized( $raw ) ? (array) unserialize( $raw, array( 'allowed_classes' => false ) ) : array(); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_unserialize -- An array of strings this plugin wrote; classes disabled.
+		$at = array_search( $revision, $log, true );
+		if ( false === $at ) {
+			return '' === (string) $revision && $log ? array_map( array( self::class, 'label' ), $log ) : null;
+		}
+		return array_map( array( self::class, 'label' ), array_slice( $log, $at + 1 ) );
+	}
+
+	private static function label( $revision ) {
+		$parts = explode( '|', (string) $revision, 2 );
+		return $parts[1] ?? '';
 	}
 
 	/** The hook behind the current revision, when it was recorded. */
@@ -259,9 +292,44 @@ final class Source {
 		return $parts[1] ?? '';
 	}
 
-	public static function option_changed( $option ) {
-		if ( 0 !== strpos( $option, 'contentrain_bridge_' ) && ( preg_match( '/^(theme_mods_|widget_)/', $option ) || in_array( $option, array( 'blogname', 'blogdescription', 'permalink_structure', 'sidebars_widgets', 'active_plugins', 'page_on_front', 'page_for_posts', 'WPLANG' ), true ) ) ) {
-			self::changed();
+	/**
+	 * Site settings that change what an export contains. For theme and widget
+	 * options what the export takes is their text, so a write that changes no
+	 * text is bookkeeping: WordPress creates `theme_mods_<theme>` on a theme's
+	 * first front-end load, which Bridge's own render scan can be, and counting
+	 * that made the export refuse its own snapshot.
+	 */
+	public static function option_changed( $option, $first = null, $second = null ) {
+		if ( 0 === strpos( $option, 'contentrain_bridge_' ) ) {
+			return;
 		}
+		$hook = (string) current_filter();
+		if ( preg_match( '/^(theme_mods_|widget_)/', $option ) ) {
+			if ( 'added_option' === $hook && ! self::texts( $first ) ) {
+				return;
+			}
+			if ( 'updated_option' === $hook && self::texts( $first ) === self::texts( $second ) ) {
+				return;
+			}
+			self::mark( $hook . ':' . $option );
+		} elseif ( in_array( $option, array( 'blogname', 'blogdescription', 'permalink_structure', 'sidebars_widgets', 'active_plugins', 'page_on_front', 'page_for_posts', 'WPLANG' ), true ) ) {
+			self::mark( $hook . ':' . $option );
+		}
+	}
+
+	/** Every string in a value, in order: what an export would take from it. */
+	private static function texts( $value ) {
+		$out = array();
+		$walk = static function ( $node ) use ( &$walk, &$out ) {
+			if ( is_string( $node ) ) {
+				$out[] = $node;
+			} elseif ( is_array( $node ) || is_object( $node ) ) {
+				foreach ( (array) $node as $child ) {
+					$walk( $child );
+				}
+			}
+		};
+		$walk( $value );
+		return $out;
 	}
 }

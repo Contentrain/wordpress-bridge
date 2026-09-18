@@ -75,6 +75,9 @@ jobs:
       # echo, JS, widgets, menus, Customizer and five rendered pages. Every
       # occurrence is accounted for, one outcome per candidate, keys stable.
       - run: npm run test:text
+      # B-07: services the site is connected to, with evidence and a reconnect
+      # flag; fake credentials planted in their settings must not leave.
+      - run: npm run test:integrations
       - run: npm run test:secrets
       # Repeat delivery: deletions the delta proves are removed, unexplained ones
       # refused, a person's edit reported and resolved; replayed into real Git.

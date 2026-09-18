@@ -102,7 +102,7 @@ $cache = wp_insert_post( array( 'post_type' => 'oembed_cache', 'post_status' => 
 update_post_meta( $f['embed'], '_oembed_' . md5( $run ), '{{unknown}}' );
 check( $before === Source::revision(), 'an oEmbed cache post and an _oembed_ meta row do not count as a content change' );
 wp_update_post( array( 'ID' => $f['draft'], 'post_title' => 'Coverage draft retitled ' . $run ) );
-check( $before !== Source::revision() && 'save_post' === Source::changed_by(), 'a real edit does, and says which hook: ' . Source::changed_by() );
+check( $before !== Source::revision() && 'save_post:post' === Source::changed_by(), 'a real edit does, and says which hook and type: ' . Source::changed_by() );
 $previous = get_user_meta( $admin->ID, 'contentrain_bridge_job_1', true );
 $out = '/tmp/bridge-coverage';
 Files::remove( $out );

@@ -49,7 +49,7 @@
       }
     } finally { running = false; render(); }
     if (job.phase === 'review') await loadCandidates();
-    if (job.phase === 'ready') await loadCoverage();
+    if (job.phase === 'ready') { renderIntegrations(); await loadCoverage(); }
   }
   async function loadCandidates() {
     candidates = await api({ op: 'candidates', id: job.id, offset });
@@ -77,6 +77,16 @@
     }
     $('prev').disabled = offset === 0;
     $('next').disabled = offset + candidates.length >= job.candidates;
+  }
+  function renderIntegrations() {
+    const list = $('integrations');
+    if (!list) return;
+    const services = (job.integrations || []).filter(s => s.reconnect_required);
+    list.replaceChildren(...(services.length ? services.map(s => {
+      const item = document.createElement('li');
+      item.textContent = `${s.name} (${s.category})${s.secret_present ? ' — ' + __('a credential is set on WordPress', 'contentrain-bridge') : ''}`;
+      return item;
+    }) : [Object.assign(document.createElement('li'), { textContent: __('None found.', 'contentrain-bridge') })]));
   }
   async function loadCoverage() {
     const report = await api({ op: 'coverage', id: job.id });
@@ -164,7 +174,7 @@
         job = { id: inventory.active_job, phase: 'expired', counts: { posts: 0, warnings: 0 }, files: 0, unreviewed: 0, models: [] };
         job = await api({ op: 'status', id: inventory.active_job });
         if (job.phase === 'review') await loadCandidates();
-    if (job.phase === 'ready') await loadCoverage();
+    if (job.phase === 'ready') { renderIntegrations(); await loadCoverage(); }
       }
       render();
     } catch (err) { error(err); render(); }
