@@ -318,20 +318,27 @@ final class Jobs {
 
 	private static function terms( &$job ) {
 		global $wpdb;
-		$ids = $wpdb->get_col( $wpdb->prepare( "SELECT term_taxonomy_id FROM {$wpdb->term_taxonomy} WHERE term_taxonomy_id > %d ORDER BY term_taxonomy_id LIMIT 50", $job['cursor'] ) );
+		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT term_taxonomy_id, taxonomy FROM {$wpdb->term_taxonomy} WHERE term_taxonomy_id > %d ORDER BY term_taxonomy_id LIMIT 50", $job['cursor'] ) );
 		if ( $wpdb->last_error ) {
 			throw new \RuntimeException( 'Cannot enumerate taxonomies.' );
 		}
-		foreach ( $ids as $id ) {
+		foreach ( $rows as $row ) {
+			$id = (int) $row->term_taxonomy_id;
+			// A plugin that registers a taxonomy only while active (Polylang's
+			// `language`, `term_language`, `term_translations`) can leave its rows
+			// behind after deactivation; `get_term_by()` cannot resolve a term
+			// against a taxonomy nothing currently registers, so check first
+			// rather than let a stale row fail the safety check below.
+			if ( ! get_taxonomy( $row->taxonomy ) ) {
+				$job['cursor'] = $id;
+				continue;
+			}
 			$t = get_term_by( 'term_taxonomy_id', $id );
 			if ( ! $t || is_wp_error( $t ) ) {
 				throw new \RuntimeException( 'Cannot read taxonomy term.' );
 			}
-			// A multilingual plugin's own bookkeeping taxonomy (Polylang's `language`,
-			// `term_language`, `term_translations`) is not content; only a public
-			// taxonomy becomes a model, matching map_post()'s same filter.
-			$taxonomy = get_taxonomy( $t->taxonomy );
-			if ( $taxonomy && $taxonomy->public ) {
+			// A registered but non-public taxonomy (e.g. `nav_menu`) is not content.
+			if ( get_taxonomy( $t->taxonomy )->public ) {
 				Models::term( $job, $t, $job['default_locale'] );
 				Coverage::tally( $job, array( 'terms', $t->taxonomy ), 'exported' );
 				foreach ( get_term_meta( $t->term_id ) as $key => $values ) {
@@ -342,9 +349,9 @@ final class Jobs {
 					Models::row( $job, 'bridge/seo-entries.json', 'term:' . $t->taxonomy . ':' . $t->term_id, $seo );
 				}
 			}
-			$job['cursor'] = (int) $id;
+			$job['cursor'] = $id;
 		}
-		if ( count( $ids ) < 50 ) {
+		if ( count( $rows ) < 50 ) {
 			$job['phase'] = 'inventory';
 			$job['cursor'] = 0;
 			$job['inventory_cursor'] = Inventory::start();

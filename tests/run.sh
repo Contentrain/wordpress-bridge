@@ -68,3 +68,11 @@ if [ -n "$store" ]; then
   chmod -R a+rX "$out"
   echo "Store copied to $out/store"
 fi
+
+# Polylang filters WordPress's own term queries by "current language" once
+# active — a global behaviour change, not just new fields the way ACF adds
+# them. The store this run produced is already captured on disk; later CI
+# steps (test:seo, test:delta, test:e2e, ...) reuse this same KEEP=1 site and
+# know nothing about Polylang, so leaving it active would break their own
+# taxonomy lookups for terms nothing here ever tags with a language.
+"${cli[@]}" plugin deactivate polylang >/dev/null
