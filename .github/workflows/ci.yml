@@ -72,6 +72,17 @@ jobs:
       - run: npm run test:delta
       # Everything handed over — store and delta — scanned for planted secrets.
       - run: npm run test:secrets
+      # Repeat delivery: deletions the delta proves are removed, unexplained ones
+      # refused, a person's edit reported and resolved; replayed into real Git.
+      - run: npm run test:delivery-git
+      # B-11: export -> (GitHub) -> Astro build via @contentrain/query, three
+      # edits, second export, Git diff, rebuild. The GitHub leg runs only when
+      # the repository secrets exist; otherwise it is reported as skipped.
+      - run: npm run test:e2e
+        env:
+          BRIDGE_TEST_REPO: ${{ secrets.BRIDGE_TEST_REPO }}
+          BRIDGE_TEST_TOKEN: ${{ secrets.BRIDGE_TEST_TOKEN }}
+          BRIDGE_TEST_RESET: ${{ secrets.BRIDGE_TEST_RESET }}
       - run: npm run test:store
       # The reader gate: this writer's own output, read back with the pinned
       # @contentrain/types. It decides whether escape-bearing metadata survives,

@@ -117,6 +117,24 @@ Every export writes what the site tells search engines and how it builds address
 requests every exported redirect, and runs `@contentrain/verify` with the served
 pages as its baseline.
 
+## Repeat delivery
+
+A delivery is always a new branch; the default branch is never written. On a
+repository that already holds a Bridge export:
+
+- A record the delta proves was deleted in WordPress (trashed or purged) has its
+  document, metadata and media removed on the branch, and the commit lists each
+  one. A file that is missing from the new export for any other reason stops the
+  delivery with its name: nothing is removed without that proof.
+- A managed file someone edited in the repository since the last delivery stops
+  the delivery with the file, the person and the date. Deliver again choosing
+  "keep the repository version" or "use the WordPress version"; either choice is
+  listed in the commit.
+
+`npm run test:delivery-git` proves both against a repository with history and
+replays every state into real Git. `npm run test:e2e` runs the whole chain,
+WordPress to Astro, including a second delivery.
+
 ## Current coverage boundaries
 
 ACF shapes that cannot be fully represented use a reported structured fallback;

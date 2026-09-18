@@ -28,17 +28,32 @@ final class GitHub {
 		return $data;
 	}
 
-	public static function start( $id, $token, $repository ) {
+	/**
+	 * What to do when a managed file was edited in the repository since the last
+	 * delivery. `refuse` stops and says who changed it and when; the other two
+	 * are the person's decision, and every such file is named in the commit.
+	 * The default branch is never written either way: delivery is a new branch.
+	 */
+	const CONFLICT_CHOICES = array( 'refuse', 'keep-repository', 'use-wordpress' );
+
+	public static function start( $id, $token, $repository, $on_conflict = 'refuse' ) {
 		if ( ! preg_match( '#^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$#D', $repository ) ) {
 			throw new \RuntimeException( 'Use owner/repository, not a URL.' );
 		}
-		return Jobs::mutate( $id, static function ( &$job ) use ( $token, $repository ) {
+		if ( ! in_array( $on_conflict, self::CONFLICT_CHOICES, true ) ) {
+			throw new \RuntimeException( 'Unknown conflict choice.' );
+		}
+		return Jobs::mutate( $id, static function ( &$job ) use ( $token, $repository, $on_conflict ) {
 			if ( 'ready' !== $job['phase'] ) {
 				throw new \RuntimeException( 'Finalize the export before GitHub delivery.' );
 			}
 			if ( isset( $job['github'] ) ) {
 				if ( $job['github']['repository'] !== $repository ) {
 					throw new \RuntimeException( 'This export already has a delivery destination.' );
+				}
+				// A refused conflict is answered by choosing again; nothing has been committed yet.
+				if ( 'files' === $job['github']['phase'] ) {
+					$job['github']['on_conflict'] = $on_conflict;
 				}
 				return Jobs::summary( $job );
 			}
@@ -79,11 +94,83 @@ final class GitHub {
 				$after = json_decode( Files::read( Files::dir( $job['id'] ) . '/output', 'bridge/inventory.json' ), true );
 				// Edited in Git after delivery: not a cursor this export can trust.
 				$before = $trusted && ! hash_equals( $trusted, hash( 'sha256', $raw ) ) ? null : json_decode( $raw, true );
-				Models::file( $job, 'bridge/delta.json', Policy::json( Delta::compare( $before, $after ) ) );
+				$plan = Delta::compare( $before, $after );
+				Models::file( $job, 'bridge/delta.json', Policy::json( $plan ) );
 				Jobs::manifest( $job );
+				$removable = self::removable( $plan, $token, $prefix, $remote );
 			}
-			$job['github'] = array( 'repository' => $repository, 'base' => $base['object']['sha'], 'base_tree' => $commit['tree']['sha'], 'branch' => 'contentrain/bridge-' . $job['id'], 'phase' => 'files', 'cursor' => 0, 'nodes' => array(), 'remote' => $remote, 'previous' => $previous );
+			$job['github'] = array( 'repository' => $repository, 'base' => $base['object']['sha'], 'base_tree' => $commit['tree']['sha'], 'branch' => 'contentrain/bridge-' . $job['id'], 'phase' => 'files', 'cursor' => 0, 'nodes' => array(), 'remote' => $remote, 'previous' => $previous, 'on_conflict' => $on_conflict, 'removable' => $removable ?? array(), 'removed' => array(), 'conflicts' => array() );
 		} );
+	}
+
+	/**
+	 * Files of the previous export that belong to records the delta proves were
+	 * deleted: a post's document and metadata, an attachment's uploads. Read from
+	 * the repository's own entry map and attachment table, the T0 the delta was
+	 * measured against. Empty unless deletions are detectable.
+	 */
+	private static function removable( $plan, $token, $prefix, $remote ) {
+		if ( empty( $plan['deletions_detectable'] ) || ! empty( $plan['refused'] ) ) {
+			return array();
+		}
+		$read = static function ( $path ) use ( $token, $prefix, $remote ) {
+			if ( ! isset( $remote[ $path ] ) ) {
+				return array();
+			}
+			$blob = self::request( $token, 'GET', $prefix . '/git/blobs/' . $remote[ $path ] );
+			$data = json_decode( (string) base64_decode( str_replace( "\n", '', $blob['content'] ), true ), true );
+			return is_array( $data ) ? $data : array();
+		};
+		$entries = null;
+		$attachments = null;
+		$out = array();
+		foreach ( $plan['entries'] as $entry ) {
+			if ( 'deleted' !== $entry['op'] ) {
+				continue;
+			}
+			$reason = $entry['wp_type'] . ' ' . $entry['wp_id'] . ', ' . ( $entry['deleted_kind'] ?? 'deleted' );
+			if ( 'attachment' === $entry['wp_type'] ) {
+				$attachments = $attachments ?? $read( 'bridge/raw-attachments.json' );
+				$row = $attachments[ (string) $entry['wp_id'] ] ?? null;
+				if ( $row && ! empty( $row['file'] ) ) {
+					$files = array( $row['file'] );
+					foreach ( (array) ( $row['image_meta']['sizes'] ?? array() ) as $size ) {
+						if ( ! empty( $size['file'] ) ) {
+							$files[] = dirname( $row['file'] ) . '/' . $size['file'];
+						}
+					}
+					foreach ( $files as $file ) {
+						$out[ Jobs::media_path( ltrim( $file, '/' ) ) ] = $reason;
+					}
+				}
+				continue;
+			}
+			$entries = $entries ?? $read( 'bridge/entry-source-map.json' );
+			$address = $entries[ (string) $entry['wp_id'] ] ?? null;
+			if ( ! $address ) {
+				continue;
+			}
+			$model = preg_quote( $address['model_id'], '#' );
+			$id = preg_quote( $address['entry_id'], '#' );
+			foreach ( array_keys( $remote ) as $path ) {
+				// Document content ({id}.md or {id}/{locale}.md) and its metadata directory.
+				if ( preg_match( '#^\.contentrain/content/[^/]+/' . $model . '/' . $id . '(\.md|/[^/]+\.md)$#D', $path ) || preg_match( '#^\.contentrain/meta/' . $model . '/' . $id . '/[^/]+\.json$#D', $path ) ) {
+					$out[ $path ] = $reason;
+				}
+			}
+		}
+		return $out;
+	}
+
+	/** The last commit on the base branch that touched a path, for a conflict message. */
+	private static function last_change( $token, $prefix, $base, $path ) {
+		try {
+			$commits = self::request( $token, 'GET', $prefix . '/commits?sha=' . rawurlencode( $base ) . '&path=' . rawurlencode( $path ) . '&per_page=1' );
+		} catch ( \RuntimeException $error ) {
+			return null;
+		}
+		$commit = $commits[0] ?? null;
+		return $commit ? array( 'sha' => (string) $commit['sha'], 'author' => (string) ( $commit['commit']['author']['name'] ?? 'unknown' ), 'date' => (string) ( $commit['commit']['author']['date'] ?? '' ) ) : null;
 	}
 
 	public static function step( $id, $token, $expected ) {
@@ -110,21 +197,59 @@ final class GitHub {
 					$trusted = $g['previous'][ $path ]['sha256'] ?? null;
 					// The manifest identifies the previous snapshot; it is the only self-describing file.
 					if ( 'bridge/manifest.json' !== $path && ( ! $trusted || hash( 'sha256', $old_content ) !== $trusted ) ) {
-						throw new \RuntimeException( 'Git content conflict at ' . $path . '. Keep the repository edit and reconcile before exporting again.' ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Diagnostic data is escaped at the admin output boundary or JSON encoded.
+						$edit = self::last_change( $token, $prefix, $g['base'], $path );
+						$choice = $g['on_conflict'] ?? 'refuse';
+						if ( 'refuse' === $choice ) {
+							throw new \RuntimeException( 'Git content conflict at ' . $path . ': changed in the repository' . ( $edit ? ' by ' . $edit['author'] . ' on ' . $edit['date'] . ' (commit ' . substr( $edit['sha'], 0, 7 ) . ')' : '' ) . ' after the last Bridge delivery. Nothing was written. Choose "keep the repository version" to deliver everything else, or "use the WordPress version" to put this export\'s version on the delivery branch for review.' ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Diagnostic data is escaped at the admin output boundary or JSON encoded.
+						}
+						$g['conflicts'][] = array( 'path' => $path, 'resolution' => $choice ) + ( $edit ? $edit : array() );
+						if ( 'keep-repository' === $choice ) {
+							// The branch starts from the default branch, so leaving the path out keeps the edit.
+							++$g['cursor'];
+							return;
+						}
 					}
 				}
 				$blob = self::request( $token, 'POST', $prefix . '/git/blobs', array( 'content' => base64_encode( $content ), 'encoding' => 'base64' ) );
 				$g['nodes'][] = array( 'path' => $path, 'mode' => '100644', 'type' => 'blob', 'sha' => $blob['sha'] );
 				++$g['cursor'];
 			} elseif ( 'files' === $g['phase'] ) {
-				// Never leave stale managed records silently in an updated content store.
+				// A managed file the new export no longer has is removed only when the
+				// delta proves its record was deleted in WordPress. Anything else stops
+				// the delivery: silently leaving it is a stale page, silently removing
+				// it could be a person's work.
+				$unexplained = array();
 				foreach ( $g['previous'] as $path => $info ) {
-					if ( isset( $g['remote'][ $path ] ) && ! isset( $job['files'][ $path ] ) ) {
-						throw new \RuntimeException( 'Previous export contains ' . $path . ' outside the new scope. Reconcile removals in Git before delivery.' ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Diagnostic data is escaped at the admin output boundary or JSON encoded.
+					if ( ! isset( $g['remote'][ $path ] ) || isset( $job['files'][ $path ] ) ) {
+						continue;
+					}
+					if ( isset( $g['removable'][ $path ] ) ) {
+						$g['nodes'][] = array( 'path' => $path, 'mode' => '100644', 'type' => 'blob', 'sha' => null );
+						$g['removed'][ $path ] = $g['removable'][ $path ];
+					} else {
+						$unexplained[] = $path;
+					}
+				}
+				if ( $unexplained ) {
+					$g['nodes'] = array_values( array_filter( $g['nodes'], static function ( $node ) { return null !== $node['sha']; } ) );
+					$g['removed'] = array();
+					throw new \RuntimeException( count( $unexplained ) . ' file(s) from the previous export are not in this one and no verified deletion explains them (' . implode( ', ', array_slice( $unexplained, 0, 5 ) ) . ( count( $unexplained ) > 5 ? ', …' : '' ) . '). Nothing was written. Reconcile them in Git, or restore the records in WordPress.' ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Diagnostic data is escaped at the admin output boundary or JSON encoded.
+				}
+				$message = 'Export WordPress content with Contentrain Bridge';
+				if ( $g['removed'] ) {
+					$message .= "\n\nRemoved, deleted in WordPress:";
+					foreach ( $g['removed'] as $path => $reason ) {
+						$message .= "\n- " . $path . ' (' . $reason . ')';
+					}
+				}
+				if ( $g['conflicts'] ) {
+					$message .= "\n\nEdited in the repository since the last delivery:";
+					foreach ( $g['conflicts'] as $conflict ) {
+						$message .= "\n- " . $conflict['path'] . ': ' . ( 'keep-repository' === $conflict['resolution'] ? 'repository version kept' : 'WordPress version delivered' ) . ( isset( $conflict['author'] ) ? ' (edited by ' . $conflict['author'] . ', ' . $conflict['date'] . ')' : '' );
 					}
 				}
 				$tree = self::request( $token, 'POST', $prefix . '/git/trees', array( 'base_tree' => $g['base_tree'], 'tree' => $g['nodes'] ) );
-				$commit = self::request( $token, 'POST', $prefix . '/git/commits', array( 'message' => 'Export WordPress content with Contentrain Bridge', 'tree' => $tree['sha'], 'parents' => array( $g['base'] ), 'author' => array( 'name' => 'Contentrain Bridge', 'email' => 'bridge@users.noreply.github.com', 'date' => $job['created_at'] ), 'committer' => array( 'name' => 'Contentrain Bridge', 'email' => 'bridge@users.noreply.github.com', 'date' => $job['created_at'] ) ) );
+				$commit = self::request( $token, 'POST', $prefix . '/git/commits', array( 'message' => $message, 'tree' => $tree['sha'], 'parents' => array( $g['base'] ), 'author' => array( 'name' => 'Contentrain Bridge', 'email' => 'bridge@users.noreply.github.com', 'date' => $job['created_at'] ), 'committer' => array( 'name' => 'Contentrain Bridge', 'email' => 'bridge@users.noreply.github.com', 'date' => $job['created_at'] ) ) );
 				$g['commit'] = $commit['sha'];
 				$g['phase'] = 'ref';
 				++$g['cursor'];
@@ -140,7 +265,7 @@ final class GitHub {
 				}
 				$g['phase'] = 'done';
 				$g['url'] = 'https://github.com/' . $g['repository'] . '/commit/' . $g['commit'];
-				unset( $g['remote'], $g['previous'], $g['nodes'] );
+				unset( $g['remote'], $g['previous'], $g['nodes'], $g['removable'] );
 				++$g['cursor'];
 			}
 		} );
