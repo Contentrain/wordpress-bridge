@@ -792,6 +792,64 @@ check( false === strpos( Files::read( Files::dir( $id ), 'state.json' ), 'test-o
 $repeat = GitHub::step( $id, 'test-only-token-123456', 0 );
 check( 'done' === $repeat['github']['phase'], 'repeated delivery returns the existing receipt' );
 remove_filter( 'pre_http_request', $github_filter, 10 );
+
+// An empty repository (no commit at all): GitHub answers every Git data request
+// with 409 "Git Repository is empty.". Delivery must say what to do, write
+// nothing, and — like every GitHub failure — keep the token out of the trace.
+$reset_github = static function () use ( $id ) { Jobs::mutate( $id, static function ( &$job ) { unset( $job['github'] ); } ); };
+$github_token = 'github_pat_TESTONLY0000000000000000';
+$requests = array();
+$empty_filter = static function ( $pre, $args, $url ) use ( &$requests ) {
+	$requests[] = array( 'url' => $url, 'method' => $args['method'] );
+	$path = substr( $url, strlen( 'https://api.github.com/repos/test-owner/test-repo' ) );
+	if ( '' === $path ) {
+		return array( 'headers' => array(), 'body' => wp_json_encode( array( 'private' => true, 'default_branch' => 'main' ) ), 'response' => array( 'code' => 200, 'message' => 'OK' ), 'cookies' => array() );
+	}
+	return array( 'headers' => array(), 'body' => wp_json_encode( array( 'message' => 'Git Repository is empty.', 'status' => '409' ) ), 'response' => array( 'code' => 409, 'message' => 'Conflict' ), 'cookies' => array() );
+};
+$reset_github();
+add_filter( 'pre_http_request', $empty_filter, 10, 3 );
+$empty_error = null;
+try { GitHub::start( $id, $github_token, 'test-owner/test-repo' ); } catch ( RuntimeException $error ) { $empty_error = $error; }
+remove_filter( 'pre_http_request', $empty_filter, 10 );
+check( $empty_error && false !== strpos( $empty_error->getMessage(), 'repository is empty' ), 'an empty GitHub repository is reported with what to do, not as a bare HTTP 409' );
+check( ! array_filter( $requests, static function ( $r ) { return 'GET' !== $r['method']; } ), 'nothing is written to an empty repository, not even its first commit' );
+check( $empty_error && false === strpos( $empty_error->getTraceAsString(), 'github_pat_' ) && false === strpos( (string) $empty_error, 'github_pat_' ), 'a failed GitHub request\'s stack trace carries no part of the token' );
+check( '0' === ini_get( 'zend.exception_ignore_args' ) || '' === ini_get( 'zend.exception_ignore_args' ), 'the trace setting is restored after the GitHub call' );
+check( ! isset( Jobs::read( $id )['github'] ), 'an empty repository leaves no half-started delivery behind' );
+
+// A chosen base branch (here `e2e/run-1`, a name with a slash): read, compared
+// against, never written; the default branch is not even read.
+$requests = array();
+$base_filter = static function ( $pre, $args, $url ) use ( &$requests ) {
+	$requests[] = array( 'url' => $url, 'method' => $args['method'] );
+	$path = substr( $url, strlen( 'https://api.github.com/repos/test-owner/test-repo' ) );
+	$code = 200;
+	if ( '' === $path ) { $data = array( 'private' => true, 'default_branch' => 'main' ); }
+	elseif ( '/git/ref/heads/e2e/run-1' === $path ) { $data = array( 'object' => array( 'sha' => str_repeat( 'c', 40 ) ) ); }
+	elseif ( '/git/ref/heads/missing' === $path ) { $code = 404; $data = array( 'message' => 'Not Found' ); }
+	elseif ( 0 === strpos( $path, '/git/commits/' ) ) { $data = array( 'tree' => array( 'sha' => str_repeat( 'd', 40 ) ) ); }
+	elseif ( 0 === strpos( $path, '/git/trees/' ) ) { $data = array( 'truncated' => false, 'tree' => array() ); }
+	else { throw new RuntimeException( 'Unmocked GitHub endpoint: ' . $path ); }
+	return array( 'headers' => array(), 'body' => wp_json_encode( $data ), 'response' => array( 'code' => $code, 'message' => 'OK' ), 'cookies' => array() );
+};
+$reset_github();
+add_filter( 'pre_http_request', $base_filter, 10, 3 );
+$based = GitHub::start( $id, $github_token, 'test-owner/test-repo', 'refuse', 'e2e/run-1' );
+$based_state = Jobs::read( $id )['github'];
+check( 'e2e/run-1' === $based_state['base_branch'] && str_repeat( 'c', 40 ) === $based_state['base'], 'delivery starts from the chosen base branch' );
+check( 'contentrain/bridge-' . $id === $based_state['branch'], 'a chosen base branch still delivers to a new branch of its own' );
+check( ! array_filter( $requests, static function ( $r ) { return false !== strpos( $r['url'], '/heads/main' ) || 'GET' !== $r['method']; } ), 'the default branch is not read and nothing is written when a base branch is chosen' );
+rejects( static function () use ( $id, $github_token ) { GitHub::start( $id, $github_token, 'test-owner/test-repo', 'refuse', 'other-base' ); }, 'a started delivery cannot switch to another base branch' );
+$reset_github();
+foreach ( array( '../main', 'a..b', 'feature/', '-x', 'refs.lock', 'a b' ) as $bad_branch ) {
+	rejects( static function () use ( $id, $github_token, $bad_branch ) { GitHub::start( $id, $github_token, 'test-owner/test-repo', 'refuse', $bad_branch ); }, 'an unusable base branch name is refused: ' . $bad_branch );
+}
+$missing_error = null;
+try { GitHub::start( $id, $github_token, 'test-owner/test-repo', 'refuse', 'missing' ); } catch ( RuntimeException $error ) { $missing_error = $error; }
+remove_filter( 'pre_http_request', $base_filter, 10 );
+check( $missing_error && false !== strpos( $missing_error->getMessage(), 'base branch missing does not exist' ), 'a base branch that does not exist is named, not reported as a bare HTTP 404' );
+$reset_github();
 file_put_contents( '/tmp/bridge-test-output-path', $dir );
 // Authenticated media transfer must survive JSON encoding without corrupting PNG bytes.
 $request = new WP_REST_Request( 'GET', '/contentrain-bridge/v1/exports/' . $id );

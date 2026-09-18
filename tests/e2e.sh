@@ -6,18 +6,41 @@
 # The GitHub leg is the B-10 path and runs only when BRIDGE_TEST_REPO and
 # BRIDGE_TEST_TOKEN are set; without them it is reported as skipped, and the
 # delivered tree is the export itself, committed to a local Git repository.
-# The repository must be dedicated to this run: a default branch holding an
-# earlier run's content is refused, as a real user's would be. Set
-# BRIDGE_TEST_RESET=1 to let the run reset it first (repository names with
-# "test" or "e2e" only; this discards that branch's history).
+# The repository must be dedicated to these runs. Each run cuts its own base
+# branch, `e2e/<run>`, from the repository's first commit (creating that commit
+# if the repository is still empty), delivers and accepts against it, and
+# deletes every branch it made on exit, pass or fail. The default branch keeps
+# its first commit only, so no run inherits another's content and nothing is
+# ever reset. The output is checked for the token before the script exits.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 compose=(docker compose -f "$here/compose.yml")
 cli=("${compose[@]}" run --rm -T cli)
-php=("${compose[@]}" exec -T -e BRIDGE_TEST_REPO="${BRIDGE_TEST_REPO:-}" -e BRIDGE_TEST_TOKEN="${BRIDGE_TEST_TOKEN:-}" -e BRIDGE_TEST_RESET="${BRIDGE_TEST_RESET:-}" wordpress php /var/www/html/wp-content/plugins/contentrain-bridge/tests/e2e.php)
+run_id="${GITHUB_RUN_ID:-local-$(date -u +%Y%m%d-%H%M%S)}-${GITHUB_RUN_ATTEMPT:-1}-$RANDOM"
+php_cmd=("${compose[@]}" exec -T -e BRIDGE_TEST_REPO="${BRIDGE_TEST_REPO:-}" -e BRIDGE_TEST_TOKEN="${BRIDGE_TEST_TOKEN:-}" -e BRIDGE_E2E_RUN="$run_id" wordpress php /var/www/html/wp-content/plugins/contentrain-bridge/tests/e2e.php)
+log="$(mktemp)"
+# Every WordPress-side stage's output also goes to $log, so the exit check below
+# sees what CI prints, including an uncaught exception's stack trace.
+php() { "${php_cmd[@]}" "$@" 2>&1 | tee -a "$log"; return "${PIPESTATUS[0]}"; }
+github=0
+if [ -n "${BRIDGE_TEST_REPO:-}" ] && [ -n "${BRIDGE_TEST_TOKEN:-}" ]; then github=1; fi
+finish() {
+  status=$?
+  if [ "$github" = 1 ]; then php github-cleanup || status=1; fi
+  # No part of the token may reach the output: not the value, not its prefix.
+  if [ -n "${BRIDGE_TEST_TOKEN:-}" ] && grep -qF -- "${BRIDGE_TEST_TOKEN:0:12}" "$log"; then
+    echo "FAIL: the GitHub token appears in the e2e output"; status=1
+  fi
+  if grep -qE 'github_pat_|ghp_[A-Za-z0-9]' "$log"; then
+    echo "FAIL: a GitHub token prefix appears in the e2e output"; status=1
+  fi
+  rm -f "$log"
+  exit "$status"
+}
+trap finish EXIT
 out="$here/.out/e2e"
 
-if [ -z "${BRIDGE_TEST_REPO:-}" ] || [ -z "${BRIDGE_TEST_TOKEN:-}" ]; then
+if [ "$github" = 0 ]; then
   echo "SKIP: GitHub leg (BRIDGE_TEST_REPO/BRIDGE_TEST_TOKEN not set) — delivering to a local Git repository instead"
 fi
 
@@ -39,11 +62,12 @@ done
 "${cli[@]}" rewrite structure '/%postname%/' >/dev/null
 "${cli[@]}" option update show_on_front posts >/dev/null
 
-"${php[@]}" fixture
-"${php[@]}" export t0
-"${php[@]}" mutate
-"${php[@]}" export t1
-"${php[@]}" delta
+php fixture
+if [ "$github" = 1 ]; then php github-prepare; fi
+php export t0
+php mutate
+php export t1
+php delta
 
 rm -rf "$out"
 mkdir -p "$here/.out"

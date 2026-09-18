@@ -84,6 +84,8 @@ final class Admin {
 				<a id="cr-download" class="button" hidden><?php esc_html_e( 'Download JSON / Markdown ZIP', 'contentrain-bridge' ); ?></a>
 				<label for="cr-repo"><?php esc_html_e( 'GitHub repository (owner/repository, initialized with a README)', 'contentrain-bridge' ); ?></label>
 				<input id="cr-repo" type="text" class="regular-text" autocomplete="off" />
+				<label for="cr-base"><?php esc_html_e( 'Base branch (optional; empty uses the repository\'s default branch). Delivery reads it and never writes it.', 'contentrain-bridge' ); ?></label>
+				<input id="cr-base" type="text" class="regular-text" autocomplete="off" />
 				<label for="cr-token"><?php esc_html_e( 'Fine-grained GitHub token: Contents read/write for this repository only', 'contentrain-bridge' ); ?></label>
 				<input id="cr-token" type="password" class="regular-text" autocomplete="off" />
 				<p><?php esc_html_e( 'The token is used only for these requests and is not saved. Delivery creates a separate branch. Existing edited content is never silently overwritten.', 'contentrain-bridge' ); ?></p>
@@ -138,7 +140,7 @@ final class Admin {
 					if ( empty( $input['consent'] ) ) {
 						throw new \RuntimeException( 'Explicit GitHub transfer consent is required.' );
 					}
-					$result = GitHub::start( $id, $input['token'] ?? '', $input['repository'] ?? '', in_array( $input['on_conflict'] ?? 'refuse', GitHub::CONFLICT_CHOICES, true ) ? $input['on_conflict'] : 'refuse' );
+					$result = GitHub::start( $id, $input['token'] ?? '', $input['repository'] ?? '', in_array( $input['on_conflict'] ?? 'refuse', GitHub::CONFLICT_CHOICES, true ) ? $input['on_conflict'] : 'refuse', is_string( $input['base_branch'] ?? null ) ? $input['base_branch'] : '' );
 					break;
 				case 'github-step':
 					if ( ! is_ssl() && 'local' !== wp_get_environment_type() ) {

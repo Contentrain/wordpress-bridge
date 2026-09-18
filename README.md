@@ -119,7 +119,10 @@ pages as its baseline.
 
 ## Repeat delivery
 
-A delivery is always a new branch; the default branch is never written. On a
+A delivery is always a new branch; the default branch is never written. It
+starts from the repository's default branch, or from a base branch you name
+(read and compared against, never written). An empty repository is refused with
+what to do: give it a first commit, such as a README, and deliver again. On a
 repository that already holds a Bridge export:
 
 - A record the delta proves was deleted in WordPress (trashed or purged) has its
