@@ -273,11 +273,14 @@ final class Models {
 		return array( 'model' => 'wp-authors', 'id' => $ref );
 	}
 
-	public static function term( &$job, $term, $locale ) {
-		$mid = 'wp-tax-' . str_replace( '_', '-', sanitize_title( $term->taxonomy ) );
-		$id = substr( hash( 'sha256', 'term:' . $term->term_id ), 0, 12 );
-		self::model( $job, $mid, 'collection', 'site', $term->taxonomy, array( 'name' => array( 'type' => 'string' ), 'description' => array( 'type' => 'richtext' ), 'wp_id' => array( 'type' => 'integer' ), 'source_slug' => array( 'type' => 'string' ) ), 'name', false );
-		self::entry( $job, $mid, $locale, $id, array( 'name' => $term->name, 'description' => $term->description, 'wp_id' => (int) $term->term_id, 'source_slug' => $term->slug ) );
+	/**
+	 * Raw evidence for one term, independent of whether it becomes a model.
+	 * `RawTerm`'s own contract has no "public taxonomy only" carve-out — a
+	 * WXR export of the same site includes every taxonomy, bookkeeping ones
+	 * included, and Bridge's raw completeness claim has to match it. Content
+	 * modelling is a separate, narrower decision made by the caller.
+	 */
+	public static function term_raw( &$job, $term ) {
 		$parent = $term->parent ? get_term( $term->parent, $term->taxonomy ) : null;
 		// Term meta travels with the raw term; secret-like keys and values never do.
 		$meta = array();
@@ -290,6 +293,14 @@ final class Models {
 		}
 		ksort( $meta );
 		self::row( $job, 'bridge/raw-terms.json', $term->term_id, array( 'id' => (int) $term->term_id, 'taxonomy' => $term->taxonomy, 'slug' => $term->slug, 'name' => $term->name, 'description' => $term->description, 'parent' => $parent && ! is_wp_error( $parent ) ? $parent->slug : null, 'parent_resolved' => ! $term->parent || ( $parent && ! is_wp_error( $parent ) ), 'meta' => $meta ?: (object) array() ) );
+	}
+
+	public static function term( &$job, $term, $locale ) {
+		$mid = 'wp-tax-' . str_replace( '_', '-', sanitize_title( $term->taxonomy ) );
+		$id = substr( hash( 'sha256', 'term:' . $term->term_id ), 0, 12 );
+		self::model( $job, $mid, 'collection', 'site', $term->taxonomy, array( 'name' => array( 'type' => 'string' ), 'description' => array( 'type' => 'richtext' ), 'wp_id' => array( 'type' => 'integer' ), 'source_slug' => array( 'type' => 'string' ) ), 'name', false );
+		self::entry( $job, $mid, $locale, $id, array( 'name' => $term->name, 'description' => $term->description, 'wp_id' => (int) $term->term_id, 'source_slug' => $term->slug ) );
+		self::term_raw( $job, $term );
 		return array( 'model' => $mid, 'id' => $id );
 	}
 

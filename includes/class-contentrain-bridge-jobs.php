@@ -318,7 +318,7 @@ final class Jobs {
 
 	private static function terms( &$job ) {
 		global $wpdb;
-		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT term_taxonomy_id, taxonomy FROM {$wpdb->term_taxonomy} WHERE term_taxonomy_id > %d ORDER BY term_taxonomy_id LIMIT 50", $job['cursor'] ) );
+		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT tt.term_taxonomy_id, tt.taxonomy, tt.description, tt.parent, t.term_id, t.name, t.slug FROM {$wpdb->term_taxonomy} tt JOIN {$wpdb->terms} t ON t.term_id = tt.term_id WHERE tt.term_taxonomy_id > %d ORDER BY tt.term_taxonomy_id LIMIT 50", $job['cursor'] ) );
 		if ( $wpdb->last_error ) {
 			throw new \RuntimeException( 'Cannot enumerate taxonomies.' );
 		}
@@ -327,9 +327,12 @@ final class Jobs {
 			// A plugin that registers a taxonomy only while active (Polylang's
 			// `language`, `term_language`, `term_translations`) can leave its rows
 			// behind after deactivation; `get_term_by()` cannot resolve a term
-			// against a taxonomy nothing currently registers, so check first
-			// rather than let a stale row fail the safety check below.
+			// against a taxonomy nothing currently registers. WXR's own exporter
+			// does not require one either, so raw evidence is built from the
+			// columns already selected rather than skipped along with modelling.
 			if ( ! get_taxonomy( $row->taxonomy ) ) {
+				Models::term_raw( $job, (object) array( 'term_id' => (int) $row->term_id, 'taxonomy' => $row->taxonomy, 'slug' => $row->slug, 'name' => $row->name, 'description' => $row->description, 'parent' => (int) $row->parent ) );
+				Coverage::tally( $job, array( 'terms', $row->taxonomy ), 'excluded:taxonomy-not-registered' );
 				$job['cursor'] = $id;
 				continue;
 			}
@@ -337,7 +340,8 @@ final class Jobs {
 			if ( ! $t || is_wp_error( $t ) ) {
 				throw new \RuntimeException( 'Cannot read taxonomy term.' );
 			}
-			// A registered but non-public taxonomy (e.g. `nav_menu`) is not content.
+			// A registered but non-public taxonomy (e.g. `nav_menu`, or a
+			// multilingual plugin's own bookkeeping) is not content.
 			if ( get_taxonomy( $t->taxonomy )->public ) {
 				Models::term( $job, $t, $job['default_locale'] );
 				Coverage::tally( $job, array( 'terms', $t->taxonomy ), 'exported' );
@@ -348,6 +352,12 @@ final class Jobs {
 				if ( $seo ) {
 					Models::row( $job, 'bridge/seo-entries.json', 'term:' . $t->taxonomy . ':' . $t->term_id, $seo );
 				}
+			} else {
+				// Not a model, but still raw evidence: a WXR export of the same
+				// site includes every taxonomy, and Bridge's raw completeness
+				// claim has to match it even for content that is never modelled.
+				Models::term_raw( $job, $t );
+				Coverage::tally( $job, array( 'terms', $t->taxonomy ), 'excluded:non-public-taxonomy' );
 			}
 			$job['cursor'] = $id;
 		}
