@@ -182,7 +182,8 @@ check( '·' === $seo['settings']['seopress']['separator'] && 'Page: %%post_title
 check( ! isset( $post_of( 'custom_title', 'yoast' )['rendered'] ), 'Yoast is running: its resolved values stand, nothing re-rendered' );
 $rm = $post_of( 'custom_title', 'rank_math' );
 check( 'SEO custom title - ' . $site === $rm['rendered']['title'] && 'post' === $rm['template_source']['title'] && 'bridge' === $rm['rendered_by'] && array() === $rm['unresolved'], 'Rank Math: %title% %sep% %sitename% renders to "' . $rm['rendered']['title'] . '"' );
-check( array( 'index' => 'noindex', 'follow' => 'nofollow' ) === $rm['rendered']['robots'] && 'post' === $rm['template_source']['robots'] && get_permalink( $fixture['posts']['custom_title'] ) === $rm['rendered']['canonical'], 'Rank Math: robots from the record, canonical the source address' );
+check( array( 'index' => 'noindex', 'follow' => 'nofollow' ) === $rm['rendered']['robots'] && 'post' === $rm['template_source']['robots'], 'Rank Math: robots from the record: ' . wp_json_encode( $rm['rendered']['robots'] ) . ' from ' . $rm['template_source']['robots'] . ' (blog_public ' . get_option( 'blog_public' ) . ')' );
+check( get_permalink( $fixture['posts']['custom_title'] ) === $rm['rendered']['canonical'], 'Rank Math: canonical is the source address: ' . $rm['rendered']['canonical'] . ' / ' . get_permalink( $fixture['posts']['custom_title'] ) );
 check( $rm['rendered']['title'] === $rm['rendered']['schema']['graph'][0]['headline'] && ! isset( $rm['rendered']['schema']['graph'][0]['metadata'] ), 'Rank Math: %seo_title% inside the stored schema node renders too' );
 check( ! isset( $rm['schema']['graph'] ) && array( 'BlogPosting' ) === $rm['schema']['types'], 'Rank Math not running: the top-level schema has types only, never a graph with template tokens' );
 $rm_default = $post_of( 'defaults', 'rank_math' );
