@@ -179,6 +179,9 @@ check( 404 === $status, 'an unknown export is a 404' );
 // Export A's snapshot, for coverage-rawir.mjs to compare with what prepare-migrate builds.
 $keep = '/tmp/bridge-coverage/remote/store';
 Files::remove( dirname( $keep ) );
+// And its REST file list, published by CI as a contract fixture for the Migrate reader (test site only).
+wp_mkdir_p( dirname( $keep ) );
+file_put_contents( dirname( $keep ) . '/rest-export.json', wp_json_encode( call( 'GET', "/exports/$a" )[1], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ) . "\n" );
 foreach ( array_keys( Jobs::read( $a )['files'] ) as $path ) {
 	wp_mkdir_p( dirname( "$keep/$path" ) );
 	copy( Files::path( Files::dir( $a ) . '/output', $path ), "$keep/$path" );

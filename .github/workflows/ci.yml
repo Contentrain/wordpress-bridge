@@ -106,6 +106,14 @@ jobs:
         with:
           name: contentrain-bridge
           path: dist/contentrain-bridge.zip
+      # Contract fixtures from the throwaway test site, for the readers in Migrate and ai.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: contract-fixtures
+          path: |
+            tests/.out/coverage/remote/rest-export.json
+            tests/.out/seo/seo.json
+            tests/.out/seo/seo-entries.json
       - name: Remove acceptance containers
         if: always()
         run: docker compose -f tests/compose.yml down -v
