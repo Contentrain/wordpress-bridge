@@ -9,9 +9,11 @@ defined( 'ABSPATH' ) || exit;
  * person on the admin screen (BR-19). Same permission as the read API
  * (`export` + `manage_options`), same jobs, same snapshot.
  *
- *   POST /contentrain-bridge/v1/exports                { types?, private?, comments? }
+ *   POST /contentrain-bridge/v1/exports                { types?, private?, comments?, max_age?, fresh? }
  *        201 { export, reused: false } — a new export
- *        200 { export, reused: true }  — the caller's live export with the same scope
+ *        200 { export, reused: true }  — the caller's live export with the same scope,
+ *                                        started at most `max_age` seconds ago
+ *        409 bridge_export_busy        — a stale export to replace is running; retry
  *   GET  /contentrain-bridge/v1/exports                → { exports: [ export ] }
  *   POST /contentrain-bridge/v1/exports/{id}/advance   → { export, busy? }
  *
@@ -55,14 +57,27 @@ final class Remote {
 			if ( ! $scope['types'] ) {
 				return self::error( 'invalid_scope', 'Select at least one content type.', 400 );
 			}
-			return self::locked( static function () use ( $scope ) {
+			// How old a reused export may be: `fresh` always starts a new one; no limit keeps the 24-hour life.
+			$max_age = $request->get_param( 'max_age' );
+			if ( null !== $max_age && ! preg_match( '/^[0-9]{1,9}$/D', (string) $max_age ) ) {
+				return self::error( 'invalid_scope', 'max_age must be a number of seconds.', 400 );
+			}
+			$max_age = rest_sanitize_boolean( $request->get_param( 'fresh' ) ) ? 0 : ( null === $max_age ? null : (int) $max_age );
+			return self::locked( static function () use ( $scope, $max_age ) {
 				$live = 0;
 				foreach ( self::jobs() as $job ) {
 					if ( 'failed' === $job['phase'] ) {
 						continue;
 					}
-					++$live;
 					$same = self::sorted( $job['options']['types'] ) === $scope['types'] && $job['options']['private'] === $scope['private'] && $job['options']['comments'] === $scope['comments'];
+					if ( $same && null !== $max_age && ( 0 === $max_age || time() - strtotime( $job['created_at'] ) > $max_age ) ) {
+						// Too old to be the content the caller pays for: replaced, and no longer counted.
+						if ( ! self::discard( $job['id'] ) ) {
+							return self::error( 'export_busy', 'The export being replaced is running; retry in a few seconds.', 409 );
+						}
+						continue;
+					}
+					++$live;
 					if ( $same ) {
 						return new \WP_REST_Response( array( 'export' => Jobs::summary( $job ), 'reused' => true ), 200, self::headers() );
 					}
@@ -128,6 +143,26 @@ final class Remote {
 			}
 		}
 		return new \WP_REST_Response( array( 'export' => $summary ), 200, self::headers() );
+	}
+
+	/** Remove a remote export and its files; false when a request holds it. */
+	private static function discard( $id ) {
+		$dir = Files::dir( $id );
+		$lock = fopen( $dir . '/lock', 'c' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Native advisory lock; filesystem API has no locking primitive.
+		if ( ! $lock || ! flock( $lock, LOCK_EX | LOCK_NB ) ) {
+			if ( $lock ) {
+				fclose( $lock ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Native advisory lock handle.
+			}
+			return false;
+		}
+		try {
+			Files::remove( $dir );
+		} finally {
+			flock( $lock, LOCK_UN );
+			fclose( $lock ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Native advisory lock handle.
+		}
+		update_user_meta( get_current_user_id(), self::META . get_current_blog_id(), array_values( array_diff( self::ids(), array( $id ) ) ) );
+		return true;
 	}
 
 	/** A stable code for a step's failure; the message stays for people. */

@@ -84,7 +84,7 @@ export; every route needs `export` + `manage_options`, like the read API.
 
 | Route | Answer |
 |---|---|
-| `POST /wp-json/contentrain-bridge/v1/exports` `{ types?, private?, comments? }` | `201 { export, reused: false }`; the caller's live export with the same scope instead: `200 { export, reused: true }`. At most three live remote exports per user (`429`). |
+| `POST /wp-json/contentrain-bridge/v1/exports` `{ types?, private?, comments?, max_age?, fresh? }` | `201 { export, reused: false }`; the caller's live export with the same scope instead: `200 { export, reused: true }`. With `max_age` (seconds) only one started within it is reused; an older one is removed and replaced (`fresh=1`: always). `409 bridge_export_busy` while the one to replace is running. At most three live remote exports per user (`429`). |
 | `GET /wp-json/contentrain-bridge/v1/exports` | `{ exports: [export] }`, the caller's remote exports, oldest first. |
 | `POST /wp-json/contentrain-bridge/v1/exports/{id}/advance` | Runs steps for about 20 seconds: `{ export }`. While another request holds it: `{ export, busy: true }`, nothing run. |
 | `GET /wp-json/contentrain-bridge/v1/exports/{id}` | Once `ready`: the file list with sha256 and bytes. `?file=` one file up to 8 MiB; `?file=&offset=N&length=M` any file in base64 chunks of up to 8 MiB, with the whole file's `sha256` and `bytes`. |
