@@ -55,6 +55,10 @@ check( 200 === $status && true === $again['reused'] && $a === $again['export']['
 list( $status, $other ) = call( 'POST', '/exports', $scope + array( 'private' => true ) );
 check( 201 === $status && $a !== $other['export']['id'], 'a different scope (private) is a new export, never "yours"' );
 $b = $other['export']['id'];
+list( $status, $young ) = call( 'POST', '/exports', $scope + array( 'max_age' => 3600 ) );
+check( 200 === $status && $a === $young['export']['id'], 'max_age: an export started within it is reused' );
+list( $status ) = call( 'POST', '/exports', $scope + array( 'max_age' => 'soon' ) );
+check( 400 === $status, 'max_age that is not a number of seconds is refused (400)' );
 list( $status ) = call( 'POST', '/exports', array( 'types' => 'post' ) );
 check( 400 === $status, 'types that are not a list are refused (400)' );
 list( $status ) = call( 'POST', '/exports', array( 'types' => array( 'no_such_type' ) ) );
@@ -116,6 +120,27 @@ if ( $media ) {
 	list( , $m ) = call( 'GET', "/exports/$a", array( 'file' => $media, 'offset' => 0 ) );
 	check( hash( 'sha256', base64_decode( $m['content'] ) ) === $list['files'][ $media ]['sha256'], 'a media file reads the same way' );
 }
+
+// ---- Freshness: a same-scope export older than max_age is replaced, not reused. ----
+$lock = fopen( Files::dir( $b ) . '/lock', 'c' );
+flock( $lock, LOCK_EX );
+list( $status, $held ) = call( 'POST', '/exports', $scope + array( 'private' => true, 'fresh' => true ) );
+check( 409 === $status && 'bridge_export_busy' === $held['code'] && is_dir( Files::dir( $b ) ), 'fresh while the old export is running: 409 bridge_export_busy, the old one untouched' );
+flock( $lock, LOCK_UN );
+fclose( $lock );
+list( $status, $renewed ) = call( 'POST', '/exports', $scope + array( 'private' => true, 'fresh' => true ) );
+check( 201 === $status && $b !== $renewed['export']['id'] && ! is_dir( Files::dir( $b ) ), 'fresh: a new export, the stale one removed with its files' );
+list( , $listed ) = call( 'GET', '/exports' );
+check( ! in_array( $b, array_column( $listed['exports'], 'id' ), true ), 'and gone from the list, so it no longer counts toward the three' );
+$b = $renewed['export']['id'];
+$state = json_decode( Files::read( Files::dir( $b ), 'state.json' ), true );
+$state['created_at'] = gmdate( 'c', time() - 7200 );
+Files::put( Files::dir( $b ), 'state.json', wp_json_encode( $state ) );
+list( $status, $aged ) = call( 'POST', '/exports', $scope + array( 'private' => true, 'max_age' => 3600 ) );
+check( 201 === $status && $b !== $aged['export']['id'], 'max_age 3600: an export started two hours ago is replaced by a new one' );
+list( $status, $kept ) = call( 'POST', '/exports', $scope + array( 'private' => true ) );
+check( 200 === $status && $aged['export']['id'] === $kept['export']['id'], 'without max_age the (new) export is reused as before' );
+$b = $aged['export']['id'];
 
 // ---- Failure is terminal, with a code; the same scope then starts afresh. ----
 list( , $c ) = call( 'POST', '/exports', array( 'types' => array( 'post' ) ) );
