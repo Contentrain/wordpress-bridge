@@ -16,6 +16,8 @@ trap cleanup EXIT
 log="$(mktemp)"
 "${wp[@]}" php /var/www/html/wp-content/plugins/contentrain-bridge/tests/coverage.php | tee "$log"
 grep -q 'Coverage output: ' "$log"
+# BR-19: the same site started, advanced and read over REST.
+"${wp[@]}" php /var/www/html/wp-content/plugins/contentrain-bridge/tests/remote.php
 # The same site as WXR, the A-03 input.
 "${wp[@]}" sh -c "rm -rf $content/uploads/bridge-wxr && mkdir -p $content/uploads/bridge-wxr && chown www-data:www-data $content/uploads/bridge-wxr"
 "${cli[@]}" export --dir="$content/uploads/bridge-wxr" --filename_format=site.xml >/dev/null

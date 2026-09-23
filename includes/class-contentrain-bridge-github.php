@@ -252,7 +252,8 @@ final class GitHub {
 				return Jobs::summary( $job );
 			}
 			$prefix = '/repos/' . $g['repository'];
-			$paths = array_keys( $job['files'] );
+			// Never RawIR: a raw copy of every record does not belong in the site's repository.
+			$paths = array_values( array_diff( array_keys( $job['files'] ), array( Rawir::PATH ) ) );
 			if ( isset( $paths[ $g['cursor'] ] ) ) {
 				$path = $paths[ $g['cursor'] ];
 				$content = Files::read( Files::dir( $job['id'] ) . '/output', $path );

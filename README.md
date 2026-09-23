@@ -71,6 +71,31 @@ into the emitted project's public directory. Hosted Migrate onboarding and an
 Astro end-to-end acceptance are separate integration gates, not proven by this
 adapter test.
 
+An export started over REST (below) also carries its RawIR v1 as
+`bridge/rawir.json` (listed in the manifest with its sha256): the same document
+this adapter builds from the raw files, so its reader needs no assembler of its
+own. The admin screen's export, its ZIP and GitHub delivery never carry it: the
+site's repository holds the store, not a raw copy of every record.
+
+## REST export API (for Migrate)
+
+An administrator's application password is enough to start, advance and read an
+export; every route needs `export` + `manage_options`, like the read API.
+
+| Route | Answer |
+|---|---|
+| `POST /wp-json/contentrain-bridge/v1/exports` `{ types?, private?, comments? }` | `201 { export, reused: false }`; the caller's live export with the same scope instead: `200 { export, reused: true }`. At most three live remote exports per user (`429`). |
+| `GET /wp-json/contentrain-bridge/v1/exports` | `{ exports: [export] }`, the caller's remote exports, oldest first. |
+| `POST /wp-json/contentrain-bridge/v1/exports/{id}/advance` | Runs steps for about 20 seconds: `{ export }`. While another request holds it: `{ export, busy: true }`, nothing run. |
+| `GET /wp-json/contentrain-bridge/v1/exports/{id}` | Once `ready`: the file list with sha256 and bytes. `?file=` one file up to 8 MiB; `?file=&offset=N&length=M` any file in base64 chunks of up to 8 MiB, with the whole file's `sha256` and `bytes`. |
+
+`export` is `{ id, phase, step, cursor, counts, files, scope, created_at,
+expires_at }`. Poll `advance` until `phase` is terminal: `ready`, or `failed`
+with `error: { code, message }`: `content_changed` (WordPress changed under the
+snapshot; start again), `too_large`, `review_required` or `export_failed`. A
+remote export scans no theme or plugin source, so it has no interface text to
+review and never waits on a person. Exports expire 24 hours after they start.
+
 ## Delta cursor (what changed since the last delivery)
 
 Every export writes `bridge/inventory.json` (`contentrain-bridge-inventory@2`):

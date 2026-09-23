@@ -186,6 +186,7 @@ check( 'done' === $g['phase'] && array() === $g['removed'], 'first delivery: a b
 GitHub::request( $token, 'POST', '/repos/test-owner/content/merges', array( 'base' => 'main', 'head' => $g['branch'] ) );
 $t0_files = Jobs::read( $t0 )['files'];
 check( array() === array_diff_key( $t0_files, $repo->files( 'main' ) ) && isset( $repo->files( 'main' )['README.md'] ), 'main holds every exported file and keeps its README' );
+check( ! isset( $repo->files( 'main' )['bridge/rawir.json'] ) && ! isset( json_decode( $repo->files( 'main' )['bridge/manifest.json'], true )['files']['bridge/rawir.json'] ), 'no bridge/rawir.json in the delivery, nor in its manifest' );
 $map = json_decode( $repo->files( 'main' )['bridge/entry-source-map.json'], true );
 $doc = static function ( $id ) use ( $map ) { return '.contentrain/content/blog/wp-post/' . $map[ (string) $id ]['entry_id'] . '.md'; };
 $meta = static function ( $id ) use ( $map ) { return '.contentrain/meta/wp-post/' . $map[ (string) $id ]['entry_id'] . '/'; };

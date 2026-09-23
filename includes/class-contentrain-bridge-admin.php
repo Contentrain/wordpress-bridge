@@ -225,8 +225,15 @@ final class Admin {
 
 	public static function routes() {
 		register_rest_route( 'contentrain-bridge/v1', '/exports/(?P<id>[a-f0-9]{32})', array( 'methods' => 'GET', 'permission_callback' => array( self::class, 'permitted' ), 'callback' => array( self::class, 'read_export' ) ) );
+		Remote::routes();
 	}
 
+	/**
+	 * GET /exports/{id}: the file list. `?file=`: one file of up to 8 MiB, whole.
+	 * `?file=&offset=N[&length=M]`: any file, in chunks of at most 8 MiB, always
+	 * base64, with the whole file's `sha256` and `bytes` so the reader can
+	 * assemble and verify it against the manifest.
+	 */
 	public static function read_export( $request ) {
 		try {
 			$job = Jobs::read( $request['id'] );
@@ -237,6 +244,10 @@ final class Admin {
 			if ( null === $path ) {
 				return new \WP_REST_Response( array( 'format' => 'contentrain-bridge@1', 'snapshot' => $job['id'], 'files' => $job['files'] ), 200, array( 'Cache-Control' => 'private, no-store' ) );
 			}
+			$offset = $request->get_param( 'offset' );
+			if ( null !== $offset ) {
+				return self::read_chunk( $job, $path, $offset, $request->get_param( 'length' ) );
+			}
 			if ( ! is_string( $path ) || ! isset( $job['files'][ $path ] ) || $job['files'][ $path ]['bytes'] > 8 * MB_IN_BYTES ) {
 				throw new \RuntimeException( 'File unavailable through this endpoint.' );
 			}
@@ -246,6 +257,46 @@ final class Admin {
 		} catch ( \Throwable $error ) {
 			return new \WP_Error( 'bridge_export', $error->getMessage(), array( 'status' => 400 ) );
 		}
+	}
+
+	private static function read_chunk( $job, $path, $offset, $length ) {
+		$limit = 8 * MB_IN_BYTES;
+		$length = null === $length ? $limit : $length;
+		if ( ! is_string( $path ) || ! isset( $job['files'][ $path ] ) || ! preg_match( '/^[0-9]{1,12}$/D', (string) $offset ) || ! preg_match( '/^[0-9]{1,12}$/D', (string) $length ) ) {
+			throw new \RuntimeException( 'File unavailable through this endpoint.' );
+		}
+		$bytes = (int) $job['files'][ $path ]['bytes'];
+		$offset = (int) $offset;
+		$length = (int) $length;
+		if ( $offset > $bytes || $length > $limit ) {
+			throw new \RuntimeException( 'Chunk out of range: offset 0-' . $bytes . ', length 0-' . $limit . '.' ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Integers only; JSON encoded.
+		}
+		$length = min( $length, $bytes - $offset );
+		$content = '';
+		if ( $length > 0 ) {
+			$stream = fopen( Files::path( Files::dir( $job['id'] ) . '/output', $path ), 'rb' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Ranged read; WP_Filesystem reads whole files only.
+			if ( ! $stream ) {
+				throw new \RuntimeException( 'Cannot read export file.' );
+			}
+			try {
+				if ( 0 !== fseek( $stream, $offset ) ) {
+					throw new \RuntimeException( 'Cannot read export file.' );
+				}
+				while ( strlen( $content ) < $length && ! feof( $stream ) ) {
+					$part = fread( $stream, $length - strlen( $content ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fread -- Ranged read.
+					if ( false === $part ) {
+						throw new \RuntimeException( 'Cannot read export file.' );
+					}
+					$content .= $part;
+				}
+			} finally {
+				fclose( $stream ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Native stream handle.
+			}
+			if ( strlen( $content ) !== $length ) {
+				throw new \RuntimeException( 'Export file changed while being read.' );
+			}
+		}
+		return new \WP_REST_Response( array( 'path' => $path, 'sha256' => $job['files'][ $path ]['sha256'], 'bytes' => $bytes, 'offset' => $offset, 'length' => $length, 'encoding' => 'base64', 'content' => base64_encode( $content ) ), 200, array( 'Cache-Control' => 'private, no-store' ) );
 	}
 
 	public static function privacy() {
