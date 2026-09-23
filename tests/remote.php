@@ -29,7 +29,7 @@ function call( $method, $route, $params = array() ) {
 $admin = get_user_by( 'login', 'bridge-admin' );
 $meta = Remote::META . get_current_blog_id();
 $forget = static function () use ( $admin, $meta ) {
-	foreach ( (array) get_user_meta( $admin->ID, $meta, true ) as $id ) { if ( is_string( $id ) ) { Files::remove( Files::dir( $id ) ); } }
+	foreach ( (array) get_user_meta( $admin->ID, $meta, true ) as $id ) { if ( is_string( $id ) && preg_match( '/^[a-f0-9]{32}$/D', $id ) ) { Files::remove( Files::dir( $id ) ); } }
 	delete_user_meta( $admin->ID, $meta );
 };
 $forget();

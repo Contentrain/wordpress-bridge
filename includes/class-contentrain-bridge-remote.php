@@ -141,7 +141,7 @@ final class Remote {
 
 	private static function ids() {
 		$ids = get_user_meta( get_current_user_id(), self::META . get_current_blog_id(), true );
-		return is_array( $ids ) ? array_values( array_filter( $ids, 'is_string' ) ) : array();
+		return is_array( $ids ) ? array_values( array_filter( $ids, static function ( $id ) { return is_string( $id ) && preg_match( '/^[a-f0-9]{32}$/D', $id ); } ) ) : array();
 	}
 
 	/** Readable jobs only; an expired or deleted one leaves the list. */
