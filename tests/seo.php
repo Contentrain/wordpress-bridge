@@ -184,6 +184,7 @@ $rm = $post_of( 'custom_title', 'rank_math' );
 check( 'SEO custom title - ' . $site === $rm['rendered']['title'] && 'post' === $rm['template_source']['title'] && 'bridge' === $rm['rendered_by'] && array() === $rm['unresolved'], 'Rank Math: %title% %sep% %sitename% renders to "' . $rm['rendered']['title'] . '"' );
 check( array( 'index' => 'noindex', 'follow' => 'nofollow' ) === $rm['rendered']['robots'] && 'post' === $rm['template_source']['robots'] && get_permalink( $fixture['posts']['custom_title'] ) === $rm['rendered']['canonical'], 'Rank Math: robots from the record, canonical the source address' );
 check( $rm['rendered']['title'] === $rm['rendered']['schema']['graph'][0]['headline'] && ! isset( $rm['rendered']['schema']['graph'][0]['metadata'] ), 'Rank Math: %seo_title% inside the stored schema node renders too' );
+check( ! isset( $rm['schema']['graph'] ) && array( 'BlogPosting' ) === $rm['schema']['types'], 'Rank Math not running: the top-level schema has types only, never a graph with template tokens' );
 $rm_default = $post_of( 'defaults', 'rank_math' );
 check( 'SEO defaults only - ' . $site === $rm_default['rendered']['title'] && 'default' === $rm_default['template_source']['title'] && 0 === strpos( $rm_default['rendered']['description'], 'SEO defaults only body text.' ) && array( 'index' => 'index', 'follow' => 'follow' ) === $rm_default['rendered']['robots'], 'Rank Math: a post with nothing of its own gets the plugin\'s default title, excerpt and robots' );
 $unresolved = $post_of( 'unresolved', 'rank_math' );

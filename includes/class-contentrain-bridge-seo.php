@@ -346,7 +346,9 @@ final class Seo {
 				'open_graph'    => array_filter( array( 'title' => (string) ( $stored['facebook_title'] ?? '' ), 'description' => (string) ( $stored['facebook_description'] ?? '' ), 'image' => (string) ( $stored['facebook_image'] ?? '' ) ), array( self::class, 'filled' ) ),
 				'twitter'       => array_filter( array( 'card' => (string) ( $stored['twitter_card_type'] ?? '' ), 'title' => (string) ( $stored['twitter_title'] ?? '' ), 'description' => (string) ( $stored['twitter_description'] ?? '' ), 'image' => (string) ( $stored['twitter_image'] ?? '' ) ), array( self::class, 'filled' ) ),
 				'focus_keyword' => (string) ( $stored['focus_keyword'] ?? '' ),
-				'schema'        => $schema ? array( 'types' => self::schema_types( $schema ), 'graph' => $schema ) : null,
+				// Top-level `schema.graph` is only ever what a running plugin printed; the stored nodes carry
+				// template tokens, so they are in `stored`, and rendered in `rendered.schema.graph`.
+				'schema'        => $schema ? array( 'types' => self::schema_types( $schema ) ) : null,
 				'stored'        => Policy::clean( $stored, $excluded, 'seo/post/' . $post->ID ),
 			),
 			array( self::class, 'filled' )

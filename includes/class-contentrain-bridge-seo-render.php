@@ -239,10 +239,15 @@ final class SeoRender {
 		);
 		foreach ( array( 'open_graph' => 'og', 'twitter' => 'twitter' ) as $key => $name ) {
 			list( $title, $description, $image ) = ( $spec[ $name ] ?? array() ) + array( '', '', '' );
-			$social = array(
-				'title'       => '' !== trim( (string) $title ) ? self::render( $provider, $title, $values, $meta )['text'] : $text['title'],
-				'description' => '' !== trim( (string) $description ) ? self::render( $provider, $description, $values, $meta )['text'] : $text['description'],
-			) + self::image( $image );
+			$social = array( 'title' => $text['title'], 'description' => $text['description'] );
+			foreach ( array( 'title' => $title, 'description' => $description ) as $part => $own ) {
+				if ( '' !== trim( (string) $own ) ) {
+					$result = self::render( $provider, $own, $values, $meta );
+					$social[ $part ] = $result['text'];
+					$unresolved = array_merge( $unresolved, $result['unresolved'] );
+				}
+			}
+			$social += self::image( $image );
 			$rendered[ $key ] = array_filter( $social, static function ( $v ) { return '' !== $v; } );
 		}
 		if ( ! empty( $spec['schema'] ) ) {
