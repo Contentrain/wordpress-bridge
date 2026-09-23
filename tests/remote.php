@@ -120,11 +120,13 @@ if ( $media ) {
 // ---- Failure is terminal, with a code; the same scope then starts afresh. ----
 list( , $c ) = call( 'POST', '/exports', array( 'types' => array( 'post' ) ) );
 $c = $c['export']['id'];
-wp_insert_post( array( 'post_type' => 'post', 'post_status' => 'publish', 'post_title' => 'Changed under the snapshot ' . wp_generate_password( 6, false ) ) );
+$changed = wp_insert_post( array( 'post_type' => 'post', 'post_status' => 'publish', 'post_title' => 'Changed under the snapshot ' . wp_generate_password( 6, false ) ) );
 list( $status, $failed ) = call( 'POST', "/exports/$c/advance" );
 check( 200 === $status && 'failed' === $failed['export']['phase'] && 'content_changed' === $failed['export']['error']['code'], 'WordPress changing under the snapshot fails it: phase failed, error.code content_changed' );
 list( , $still ) = call( 'POST', "/exports/$c/advance" );
 check( 'failed' === $still['export']['phase'], 'failed stays failed' );
+// The site goes back as it was: coverage.sh compares the earlier export with a WXR taken after this.
+wp_delete_post( $changed, true );
 list( $status, $fresh ) = call( 'POST', '/exports', array( 'types' => array( 'post' ) ) );
 check( 201 === $status && $c !== $fresh['export']['id'], 'the same scope after a failure is a new export, not the failed one' );
 list( $status, $index ) = call( 'GET', '/exports' );
