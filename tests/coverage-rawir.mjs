@@ -8,6 +8,7 @@
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 import { parseWxr } from '@contentrain/wp-import'
 import { prepareMigrate } from '../tools/prepare-migrate.mjs'
 
@@ -21,6 +22,9 @@ const check = (ok, message) => {
 const target = join(mkdtempSync(join(tmpdir(), 'bridge-a03-')), 'intake')
 prepareMigrate(join(dir, 'private/store'), target)
 const bridge = JSON.parse(readFileSync(join(target, 'rawir.json'), 'utf8'))
+// BR-19: the snapshot carries its own RawIR, and it is the document the intake builds from its files.
+const snapshot = JSON.parse(readFileSync(join(dir, 'private/store/bridge/rawir.json'), 'utf8'))
+check(isDeepStrictEqual(snapshot, bridge), `the snapshot's bridge/rawir.json equals the RawIR prepare-migrate builds (${snapshot.posts.length} posts, ${snapshot.comments.length} comments)`)
 const { raw: wxr } = await parseWxr(readFileSync(wxrFile, 'utf8'))
 check(bridge.version === wxr.version && bridge.provenance.kind === 'bridge' && wxr.provenance.kind === 'wxr', `both are RawIR v${bridge.version} (bridge / wxr provenance)`)
 

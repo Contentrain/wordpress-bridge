@@ -5,14 +5,22 @@ namespace Contentrain\Bridge;
 defined( 'ABSPATH' ) || exit;
 
 final class Jobs {
-	public static function create( $input ) {
+	/**
+	 * `$remote`: started over REST (`Remote`), listed there rather than as the
+	 * admin screen's one export, and never waiting on a person: no source scan,
+	 * so no text candidates to review.
+	 */
+	public static function create( $input, $remote = false ) {
 		Files::cleanup();
+		if ( $remote ) {
+			$input = array_merge( $input, array( 'scan_plugins' => false, 'scan_sources' => false, 'scan_render' => false, 'selected_meta' => array(), 'labels' => array() ) );
+		}
 		$inventory = Source::inventory();
 		$types = array_values( array_intersect( array_keys( $inventory['post_types'] ), (array) ( $input['types'] ?? array_keys( $inventory['post_types'] ) ) ) );
 		if ( ! $types ) {
 			throw new \RuntimeException( 'Select at least one content type.' );
 		}
-		$old = get_user_meta( get_current_user_id(), 'contentrain_bridge_job_' . get_current_blog_id(), true );
+		$old = $remote ? null : get_user_meta( get_current_user_id(), 'contentrain_bridge_job_' . get_current_blog_id(), true );
 		if ( $old && is_dir( Files::dir( $old ) ) ) {
 			throw new \RuntimeException( 'Resume or delete your previous export before starting another.' );
 		}
@@ -26,7 +34,7 @@ final class Jobs {
 		// taken here because it selects the paths every later step writes to.
 		$languages = array_values( array_unique( array_map( array( Source::class, 'locale' ), (array) $inventory['languages'] ) ) );
 		$job = array(
-			'id' => $id, 'owner' => get_current_user_id(), 'blog' => get_current_blog_id(), 'created_at' => gmdate( 'c' ),
+			'id' => $id, 'remote' => (bool) $remote, 'owner' => get_current_user_id(), 'blog' => get_current_blog_id(), 'created_at' => gmdate( 'c' ),
 			'revision' => Source::revision(), 'phase' => 'media', 'cursor' => 0, 'step' => 0,
 			'inventory' => $inventory, 'default_locale' => $locale, 'locales' => array( $locale => true ), 'i18n' => count( $languages ) > 1,
 			'options' => array( 'types' => $types, 'private' => ! empty( $input['private'] ), 'comments' => ! empty( $input['comments'] ), 'scan_plugins' => ! empty( $input['scan_plugins'] ), 'scan_sources' => ! empty( $input['scan_sources'] ), 'scan_render' => ! empty( $input['scan_render'] ), 'selected_meta' => array_values( array_filter( array_map( 'sanitize_text_field', (array) ( $input['selected_meta'] ?? array() ) ) ) ), 'labels' => array_map( 'sanitize_text_field', (array) ( $input['labels'] ?? array() ) ) ),
@@ -54,7 +62,9 @@ final class Jobs {
 		}
 		self::warning( $job, array( 'source' => 'rendered-states', 'reason' => 'Source scan does not execute dynamic WordPress/plugin states. Rendered coverage requires the Migrate capture adapter.' ) );
 		self::save( $job );
-		update_user_meta( get_current_user_id(), 'contentrain_bridge_job_' . get_current_blog_id(), $id );
+		if ( ! $remote ) {
+			update_user_meta( get_current_user_id(), 'contentrain_bridge_job_' . get_current_blog_id(), $id );
+		}
 		return self::summary( $job );
 	}
 
@@ -110,10 +120,14 @@ final class Jobs {
 			if ( $lock ) {
 				fclose( $lock ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Native stream required for bounded output or advisory locking; WP_Filesystem has no equivalent.
 			}
-			throw new \RuntimeException( 'Export is busy. Retry this step.' );
+			// 409: another request holds this export; nothing failed, retry.
+			throw new \RuntimeException( 'Export is busy. Retry this step.', 409 );
 		}
 		try {
 			$job = self::read( $id );
+			if ( 'failed' === $job['phase'] ) {
+				throw new \RuntimeException( 'Export failed: ' . $job['error']['message'] ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Diagnostic data is escaped at the admin output boundary or JSON encoded.
+			}
 			$result = $callback( $job );
 			self::save( $job );
 			return $result ?? self::summary( $job );
@@ -580,6 +594,7 @@ final class Jobs {
 		$coverage = Coverage::report( $job );
 		Models::file( $job, 'bridge/coverage.json', Policy::json( $coverage ) );
 		$job['coverage_summary'] = $coverage['totals'] + array( 'complete' => $coverage['complete'] );
+		Rawir::write( $job );
 		self::manifest( $job );
 		$job['phase'] = 'ready';
 		$job['cursor'] = 0;
@@ -597,8 +612,19 @@ final class Jobs {
 		++$job['counts']['warnings'];
 	}
 
+	/**
+	 * A remote export stops for good: `phase` becomes `failed` with a stable
+	 * `error.code`, and every later step refuses. Its files stay until it expires.
+	 */
+	public static function fail( $id, $code, $message ) {
+		return self::mutate( $id, static function ( &$job ) use ( $code, $message ) {
+			$job['phase'] = 'failed';
+			$job['error'] = array( 'code' => $code, 'message' => $message );
+		} );
+	}
+
 	public static function summary( $job ) {
-		$result = array_intersect_key( $job, array_flip( array( 'id', 'phase', 'cursor', 'step', 'counts', 'created_at' ) ) ) + array( 'files' => count( $job['files'] ), 'models' => array_values( $job['models'] ), 'candidates' => count( $job['candidates'] ), 'unreviewed' => count( array_filter( $job['candidates'], static function ( $candidate ) { return 'review' === $candidate['decision']; } ) ) );
+		$result = array_intersect_key( $job, array_flip( array( 'id', 'phase', 'cursor', 'step', 'counts', 'created_at', 'error' ) ) ) + array( 'expires_at' => gmdate( 'c', strtotime( $job['created_at'] ) + DAY_IN_SECONDS ), 'scope' => array_intersect_key( $job['options'], array_flip( array( 'types', 'private', 'comments' ) ) ), 'files' => count( $job['files'] ), 'models' => array_values( $job['models'] ), 'candidates' => count( $job['candidates'] ), 'unreviewed' => count( array_filter( $job['candidates'], static function ( $candidate ) { return 'review' === $candidate['decision']; } ) ) );
 		if ( isset( $job['coverage_summary'] ) ) {
 			$result['coverage'] = $job['coverage_summary'];
 		}
