@@ -183,5 +183,12 @@ foreach ( array_keys( Jobs::read( $a )['files'] ) as $path ) {
 	wp_mkdir_p( dirname( "$keep/$path" ) );
 	copy( Files::path( Files::dir( $a ) . '/output', $path ), "$keep/$path" );
 }
+// ---- A snapshot being downloaded is not replaced under its reader. ----
+list( $status, $held ) = call( 'POST', '/exports', $scope + array( 'fresh' => true ) );
+check( 409 === $status && 'bridge_export_busy' === $held['code'] && is_dir( Files::dir( $a ) ), 'fresh on an export read within the last 10 minutes: 409 bridge_export_busy, its files kept' );
+touch( Files::dir( $a ) . '/' . Remote::READ_MARK, time() - Remote::READ_GUARD - 1 );
+list( $status, $replaced ) = call( 'POST', '/exports', $scope + array( 'fresh' => true ) );
+check( 201 === $status && $a !== $replaced['export']['id'] && ! is_dir( Files::dir( $a ) ), 'once no one has read it for 10 minutes, fresh replaces it' );
+
 $forget();
 echo "\n$checks checks passed.\n";
