@@ -268,8 +268,8 @@ final class Admin {
 		$bytes = (int) $job['files'][ $path ]['bytes'];
 		$offset = (int) $offset;
 		$length = (int) $length;
-		if ( $offset > $bytes || $length < 1 || $length > $limit ) {
-			throw new \RuntimeException( 'Chunk out of range: offset 0-' . $bytes . ', length 1-' . $limit . '.' ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Integers only; JSON encoded.
+		if ( $offset > $bytes || $length > $limit ) {
+			throw new \RuntimeException( 'Chunk out of range: offset 0-' . $bytes . ', length 0-' . $limit . '.' ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Integers only; JSON encoded.
 		}
 		$length = min( $length, $bytes - $offset );
 		$content = '';

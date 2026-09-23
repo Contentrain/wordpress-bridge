@@ -102,6 +102,10 @@ for ( $offset = 0; $offset < $info['bytes']; ) {
 check( hash( 'sha256', $assembled ) === $info['sha256'] && $assembled === $whole['content'], 'read in 1000-byte chunks (offset, length, total bytes), it assembles to the manifest hash' );
 list( $status, $end ) = call( 'GET', "/exports/$a", array( 'file' => 'bridge/rawir.json', 'offset' => $info['bytes'] ) );
 check( 200 === $status && 0 === $end['length'] && '' === $end['content'], 'a chunk at the end is empty, not an error' );
+list( $status, $zero ) = call( 'GET', "/exports/$a", array( 'file' => 'bridge/rawir.json', 'offset' => 0, 'length' => 0 ) );
+check( 200 === $status && 0 === $zero['length'] && $info['bytes'] === $zero['bytes'], 'length 0 is an empty chunk (how a 0-byte file is read), with the total size' );
+list( $status, $tail ) = call( 'GET', "/exports/$a", array( 'file' => 'bridge/rawir.json', 'offset' => $info['bytes'] - 10, 'length' => 10 ) );
+check( 200 === $status && 10 === $tail['length'] && 10 === strlen( base64_decode( $tail['content'] ) ), 'the last chunk returns exactly the length asked when it fits' );
 list( $s1 ) = call( 'GET', "/exports/$a", array( 'file' => 'bridge/rawir.json', 'offset' => $info['bytes'] + 1 ) );
 list( $s2 ) = call( 'GET', "/exports/$a", array( 'file' => 'bridge/rawir.json', 'offset' => 0, 'length' => 8 * MB_IN_BYTES + 1 ) );
 list( $s3 ) = call( 'GET', "/exports/$a", array( 'file' => 'bridge/rawir.json', 'offset' => '-1' ) );
