@@ -240,6 +240,8 @@ final class Admin {
 			if ( 'ready' !== $job['phase'] ) {
 				throw new \RuntimeException( 'Export is not ready.' );
 			}
+			// A reader is downloading this snapshot: a fresh start must not remove it under them (Remote::discard).
+			Files::fs()->touch( Files::dir( $job['id'] ) . '/' . Remote::READ_MARK );
 			$path = $request->get_param( 'file' );
 			if ( null === $path ) {
 				return new \WP_REST_Response( array( 'format' => 'contentrain-bridge@1', 'snapshot' => $job['id'], 'files' => $job['files'] ), 200, array( 'Cache-Control' => 'private, no-store' ) );

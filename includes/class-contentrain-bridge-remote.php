@@ -32,6 +32,9 @@ final class Remote {
 	const META = 'contentrain_bridge_remote_jobs_';
 	const BUDGET = 20;
 	const LIVE_LIMIT = 3;
+	/** Touched on every read of a snapshot; one read within READ_GUARD seconds keeps it from being replaced. */
+	const READ_MARK = 'read';
+	const READ_GUARD = 600;
 
 	public static function routes() {
 		register_rest_route( 'contentrain-bridge/v1', '/exports', array(
@@ -145,9 +148,17 @@ final class Remote {
 		return new \WP_REST_Response( array( 'export' => $summary ), 200, self::headers() );
 	}
 
-	/** Remove a remote export and its files; false when a request holds it. */
+	/**
+	 * Remove a remote export and its files; false when a request holds it, or
+	 * when it was read within READ_GUARD seconds: a download is many requests,
+	 * and a lock held by one of them does not cover the gaps between them.
+	 */
 	private static function discard( $id ) {
 		$dir = Files::dir( $id );
+		$read = @filemtime( $dir . '/' . self::READ_MARK ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- A missing marker means never read.
+		if ( false !== $read && time() - $read < self::READ_GUARD ) {
+			return false;
+		}
 		$lock = fopen( $dir . '/lock', 'c' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Native advisory lock; filesystem API has no locking primitive.
 		if ( ! $lock || ! flock( $lock, LOCK_EX | LOCK_NB ) ) {
 			if ( $lock ) {
