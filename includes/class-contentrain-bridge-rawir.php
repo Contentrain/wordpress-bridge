@@ -14,6 +14,9 @@ defined( 'ABSPATH' ) || exit;
  *
  * Streamed like a content table, one row in memory at a time: a large site's
  * RawIR is well past the 8 MiB limit of a single written file.
+ *
+ * Written for remote (REST) exports only, and never delivered to GitHub: the
+ * site's repository holds the store, not a raw copy of every record.
  */
 final class Rawir {
 	const PATH = 'bridge/rawir.json';

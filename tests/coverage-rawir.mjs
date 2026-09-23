@@ -5,7 +5,7 @@
 // Bridge withholds (passwords, trash) is named, not ignored.
 //
 //   node tests/coverage-rawir.mjs <coverageDir> <site.wxr>
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
@@ -22,9 +22,14 @@ const check = (ok, message) => {
 const target = join(mkdtempSync(join(tmpdir(), 'bridge-a03-')), 'intake')
 prepareMigrate(join(dir, 'private/store'), target)
 const bridge = JSON.parse(readFileSync(join(target, 'rawir.json'), 'utf8'))
-// BR-19: the snapshot carries its own RawIR, and it is the document the intake builds from its files.
-const snapshot = JSON.parse(readFileSync(join(dir, 'private/store/bridge/rawir.json'), 'utf8'))
-check(isDeepStrictEqual(snapshot, bridge), `the snapshot's bridge/rawir.json equals the RawIR prepare-migrate builds (${snapshot.posts.length} posts, ${snapshot.comments.length} comments)`)
+// BR-19: a REST export's snapshot carries its own RawIR, the document the intake builds from its files;
+// the admin screen's export does not (it is not delivered to GitHub either).
+const remoteTarget = join(mkdtempSync(join(tmpdir(), 'bridge-br19-')), 'intake')
+prepareMigrate(join(dir, 'remote/store'), remoteTarget)
+const built = JSON.parse(readFileSync(join(remoteTarget, 'rawir.json'), 'utf8'))
+const snapshot = JSON.parse(readFileSync(join(dir, 'remote/store/bridge/rawir.json'), 'utf8'))
+check(isDeepStrictEqual(snapshot, built), `a REST export's bridge/rawir.json equals the RawIR prepare-migrate builds (${snapshot.posts.length} posts, ${snapshot.comments.length} comments)`)
+check(!existsSync(join(dir, 'private/store/bridge/rawir.json')), 'the admin screen\'s export carries no bridge/rawir.json')
 const { raw: wxr } = await parseWxr(readFileSync(wxrFile, 'utf8'))
 check(bridge.version === wxr.version && bridge.provenance.kind === 'bridge' && wxr.provenance.kind === 'wxr', `both are RawIR v${bridge.version} (bridge / wxr provenance)`)
 

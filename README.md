@@ -71,9 +71,11 @@ into the emitted project's public directory. Hosted Migrate onboarding and an
 Astro end-to-end acceptance are separate integration gates, not proven by this
 adapter test.
 
-Every snapshot also carries its RawIR v1 as `bridge/rawir.json` (listed in the
-manifest with its sha256): the same document this adapter builds from the raw
-files, so a reader of the snapshot needs no assembler of its own.
+An export started over REST (below) also carries its RawIR v1 as
+`bridge/rawir.json` (listed in the manifest with its sha256): the same document
+this adapter builds from the raw files, so its reader needs no assembler of its
+own. The admin screen's export, its ZIP and GitHub delivery never carry it: the
+site's repository holds the store, not a raw copy of every record.
 
 ## REST export API (for Migrate)
 

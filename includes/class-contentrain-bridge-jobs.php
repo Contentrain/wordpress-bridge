@@ -594,7 +594,11 @@ final class Jobs {
 		$coverage = Coverage::report( $job );
 		Models::file( $job, 'bridge/coverage.json', Policy::json( $coverage ) );
 		$job['coverage_summary'] = $coverage['totals'] + array( 'complete' => $coverage['complete'] );
-		Rawir::write( $job );
+		// RawIR is for the program that asked over REST; the admin screen's ZIP and GitHub delivery
+		// carry the store, not a second raw copy of every record.
+		if ( ! empty( $job['remote'] ) ) {
+			Rawir::write( $job );
+		}
 		self::manifest( $job );
 		$job['phase'] = 'ready';
 		$job['cursor'] = 0;

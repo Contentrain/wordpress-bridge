@@ -141,10 +141,22 @@ delete_user_meta( $admin->ID, $key );
 $screen = Jobs::create( array( 'types' => array( 'post' ), 'scan_sources' => false ) );
 list( $status ) = call( 'POST', '/exports/' . $screen['id'] . '/advance' );
 check( 409 === $status, 'the admin screen\'s export is not advanced over REST (409)' );
+for ( $i = 0; $i < 2000 && 'review' !== $screen['phase']; ++$i ) { $screen = Jobs::step( $screen['id'], $screen['step'] ); }
+$screen = Jobs::review( $screen['id'], array(), true );
+for ( $i = 0; $i < 2000 && 'ready' !== $screen['phase']; ++$i ) { $screen = Jobs::step( $screen['id'], $screen['step'] ); }
+$screen_files = Jobs::read( $screen['id'] )['files'];
+check( 'ready' === $screen['phase'] && ! isset( $screen_files['bridge/rawir.json'] ) && isset( $screen_files['bridge/raw-posts.json'] ), 'the admin screen\'s export carries no rawir.json: RawIR is for REST exports only' );
 Jobs::delete( $screen['id'] );
 if ( $previous ) { update_user_meta( $admin->ID, $key, $previous ); }
 list( $status ) = call( 'POST', '/exports/' . str_repeat( '0', 32 ) . '/advance' );
 check( 404 === $status, 'an unknown export is a 404' );
 
+// Export A's snapshot, for coverage-rawir.mjs to compare with what prepare-migrate builds.
+$keep = '/tmp/bridge-coverage/remote/store';
+Files::remove( dirname( $keep ) );
+foreach ( array_keys( Jobs::read( $a )['files'] ) as $path ) {
+	wp_mkdir_p( dirname( "$keep/$path" ) );
+	copy( Files::path( Files::dir( $a ) . '/output', $path ), "$keep/$path" );
+}
 $forget();
 echo "\n$checks checks passed.\n";
