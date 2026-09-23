@@ -77,7 +77,8 @@ final class Remote {
 				return new \WP_REST_Response( array( 'export' => $summary, 'reused' => false ), 201, self::headers() );
 			} );
 		} catch ( \Throwable $error ) {
-			return self::error( 'export_failed', $error->getMessage(), 400 );
+			// Input is checked above; what is left is the server's fault, not "not ready".
+			return self::error( 'export_failed', $error->getMessage(), 500 );
 		}
 	}
 
@@ -86,7 +87,8 @@ final class Remote {
 		try {
 			return new \WP_REST_Response( array( 'exports' => array_map( array( Jobs::class, 'summary' ), self::jobs() ) ), 200, self::headers() );
 		} catch ( \Throwable $error ) {
-			return self::error( 'export_failed', $error->getMessage(), 400 );
+			// Input is checked above; what is left is the server's fault, not "not ready".
+			return self::error( 'export_failed', $error->getMessage(), 500 );
 		}
 	}
 
