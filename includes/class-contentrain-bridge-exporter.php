@@ -1,6 +1,6 @@
 <?php
 /**
- * RawIR v1 exporter.
+ * RawIR v1 record mappers.
  *
  * @package ContentrainBridge
  * @license GPL-2.0-or-later
@@ -12,88 +12,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-/** Builds the MIT-defined RawIR JSON contract without depending on service code. */
+/** Maps WordPress records to their RawIR v1 shape; the export pipeline assembles them. */
 final class Exporter {
-	/** Build a complete RawIR v1 document. */
-	public static function build( $include_comments = false ) {
-		$posts       = array();
-		$attachments = array();
-		$post_types  = get_post_types( array( 'public' => true ), 'names' );
-
-		foreach ( $post_types as $post_type ) {
-			if ( 'attachment' === $post_type ) {
-				continue;
-			}
-
-			foreach ( self::all_posts( $post_type ) as $post ) {
-				$posts[] = self::map_post( $post );
-			}
-		}
-
-		foreach ( self::all_posts( 'attachment' ) as $attachment ) {
-			$attachments[] = self::map_attachment( $attachment );
-		}
-
-		$document = array(
-			'version'     => 1,
-			'provenance'  => array(
-				'kind'       => 'bridge',
-				'fetched_at' => gmdate( 'c' ),
-				'tool'       => 'contentrain-bridge/' . CONTENTRAIN_BRIDGE_VERSION,
-			),
-			'site'        => array(
-				'url'           => home_url( '/' ),
-				'title'         => get_bloginfo( 'name' ),
-				'description'   => get_bloginfo( 'description' ),
-				'base_site_url' => site_url( '/' ),
-				'base_blog_url' => home_url( '/' ),
-				'language'      => get_locale(),
-				'generator'     => 'WordPress/' . get_bloginfo( 'version' ),
-				'export_date'   => gmdate( 'c' ),
-				'wxr_version'   => null,
-			),
-			'authors'     => self::authors(),
-			'terms'       => self::terms(),
-			'posts'       => $posts,
-			'attachments' => $attachments,
-			'menus'       => self::menus(),
-			'options'     => self::options(),
-			'redirects'   => Redirects::document()['redirects'],
-			// Not yet in @contentrain/types RawIR; proposed in the B-04 contract note.
-			'seo'         => Seo::document(),
-			'routing'     => Routing::document(),
-		);
-
-		if ( $include_comments ) {
-			$document['comments'] = self::comments();
-		}
-
-		return $document;
-	}
-
-	/** Load posts in bounded database pages while preserving every status. */
-	public static function all_posts( $post_type ) {
-		$results = array();
-		$page    = 1;
-
-		do {
-			$batch = get_posts(
-				array(
-					'post_type'      => $post_type,
-					'post_status'    => 'attachment' === $post_type ? 'inherit' : 'any',
-					'posts_per_page' => 200,
-					'paged'          => $page,
-					'orderby'        => 'ID',
-					'order'          => 'ASC',
-				)
-			);
-			$results = array_merge( $results, $batch );
-			++$page;
-		} while ( 200 === count( $batch ) );
-
-		return $results;
-	}
-
 	/** Map a WordPress post without interpreting or rewriting its HTML. */
 	public static function map_post( $post, $selected = array(), &$excluded = array() ) {
 		$author = get_userdata( $post->post_author );
@@ -164,46 +84,6 @@ final class Exporter {
 		);
 	}
 
-	/** Return authors without email addresses; the contract permits omission. */
-	public static function authors() {
-		return array_map(
-			static function ( $user ) {
-				return array(
-					'id'           => (int) $user->ID,
-					'login'        => $user->user_login,
-					'display_name' => $user->display_name,
-					'first_name'   => $user->first_name ?: null,
-					'last_name'    => $user->last_name ?: null,
-				);
-			},
-			get_users( array( 'fields' => 'all' ) )
-		);
-	}
-
-	/** Export public taxonomy terms with parent slugs. */
-	public static function terms() {
-		$results = array();
-		foreach ( get_taxonomies( array( 'public' => true ), 'names' ) as $taxonomy ) {
-			$terms = get_terms( array( 'taxonomy' => $taxonomy, 'hide_empty' => false ) );
-			if ( is_wp_error( $terms ) ) {
-				continue;
-			}
-			foreach ( $terms as $term ) {
-				$parent = $term->parent ? get_term( $term->parent, $taxonomy ) : null;
-				$results[] = array(
-					'id'              => (int) $term->term_id,
-					'taxonomy'        => $taxonomy,
-					'slug'            => $term->slug,
-					'name'            => $term->name,
-					'parent'          => $parent && ! is_wp_error( $parent ) ? $parent->slug : null,
-					'parent_resolved' => ! $term->parent || ( $parent && ! is_wp_error( $parent ) ),
-					'description'     => $term->description,
-				);
-			}
-		}
-		return $results;
-	}
-
 	/** Export registered navigation menus and resolved target metadata. */
 	public static function menus() {
 		$results = array();
@@ -264,31 +144,6 @@ final class Exporter {
 			'classes'     => array_values( array_filter( (array) $item->classes ) ),
 			'description' => $item->description,
 			'status'      => $item->post_status,
-		);
-	}
-
-	/** Export comments without email, IP, or user-agent fields. */
-	public static function comments() {
-		return array_map(
-			static function ( $comment ) {
-				$post = get_post( $comment->comment_post_ID );
-				return array(
-					'id'              => (int) $comment->comment_ID,
-					'post'            => (int) $comment->comment_post_ID,
-					'post_type'       => $post ? $post->post_type : null,
-					'parent'          => (int) $comment->comment_parent ?: null,
-					'parent_resolved' => 0 === (int) $comment->comment_parent || null !== get_comment( $comment->comment_parent ),
-					'author'          => $comment->comment_author,
-					'url'             => $comment->comment_author_url ?: null,
-					'date'            => self::utc_date( $comment->comment_date_gmt ),
-					'content'         => $comment->comment_content,
-					'approved'        => (string) $comment->comment_approved,
-					'type'            => $comment->comment_type,
-					'user_id'         => (int) $comment->user_id ?: null,
-					'meta'            => (object) array(),
-				);
-			},
-			get_comments( array( 'status' => 'all', 'number' => 0, 'orderby' => 'comment_ID', 'order' => 'ASC' ) )
 		);
 	}
 

@@ -87,6 +87,18 @@ $aioseo = $wpdb->prefix . 'aioseo_posts';
 $wpdb->query( "CREATE TABLE IF NOT EXISTS {$aioseo} (id bigint(20) unsigned NOT NULL AUTO_INCREMENT, post_id bigint(20) unsigned NOT NULL, title text, description text, keyphrases longtext, canonical_url text, og_title text, og_description text, og_object_type varchar(64) DEFAULT 'default', twitter_title text, twitter_card varchar(64) DEFAULT 'default', robots_default tinyint(1) NOT NULL DEFAULT 1, robots_noindex tinyint(1) NOT NULL DEFAULT 0, robots_nofollow tinyint(1) NOT NULL DEFAULT 0, schema longtext, schema_type varchar(20) DEFAULT 'default', created datetime NOT NULL, updated datetime NOT NULL, PRIMARY KEY (id))" );
 $wpdb->insert( $aioseo, array( 'post_id' => $a, 'title' => '#post_title #separator_sa #site_title', 'description' => 'AIOSEO description', 'keyphrases' => wp_json_encode( array( 'focus' => array( 'keyphrase' => 'aioseo keyword' ) ) ), 'robots_default' => 0, 'robots_noindex' => 1, 'schema' => wp_json_encode( array( 'graphs' => array( array( 'graphName' => 'FAQPage' ) ) ) ), 'schema_type' => 'WebPage', 'created' => current_time( 'mysql', true ), 'updated' => current_time( 'mysql', true ) ) );
 
+// BR-16: what SEOPress left behind, and templates Bridge has to render without any of these plugins.
+update_option( 'seopress_titles_option_name', array(
+	'seopress_titles_sep'           => '·',
+	'seopress_titles_single_titles' => array( 'page' => array( 'title' => 'Page: %%post_title%% %%sep%% %%sitetitle%%' ) ),
+	'seopress_titles_tax_titles'    => array( 'category' => array( 'title' => 'Topic %%term_title%%', 'noindex' => '1' ) ),
+) );
+update_post_meta( $a, '_seopress_titles_title', '%%post_title%% %%sep%% %%sitetitle%%' );
+update_post_meta( $a, '_seopress_titles_desc', 'SEOPress description' );
+update_post_meta( $a, '_seopress_robots_index', 'yes' );
+update_term_meta( $f['terms']['topic'], 'rank_math_title', 'Topic %term% %sep% %sitename%' );
+$make( 'unresolved', 'SEO unresolved', array( 'rank_math_title' => '%title% %unknownvar% %sep% %sitename%', 'rank_math_description' => '%customfield(seo_subtitle)%', 'seo_subtitle' => 'Subtitle from a field' ) );
+
 // ---- Redirects: eight in Redirection, covering served, disabled, gone and conditional. ----
 $path = static function ( $id ) { return wp_make_link_relative( get_permalink( $id ) ); };
 $red = static function ( $args ) {

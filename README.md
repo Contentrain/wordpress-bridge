@@ -123,13 +123,22 @@ KEEP=1 npm run test:wordpress && npm run test:delta && npm run test:secrets
 
 Every export writes what the site tells search engines and how it builds addresses:
 
-- `bridge/seo.json` / `bridge/seo-entries.json`: Yoast SEO, Rank Math and AIOSEO.
+- `bridge/seo.json` / `bridge/seo-entries.json`: Yoast SEO, Rank Math, AIOSEO and SEOPress.
   Per post and term: title, description, canonical, robots, Open Graph, Twitter,
   focus keyword and the JSON-LD graph. Site-wide: separator, title and description
   templates, social defaults, verification codes. With Yoast active, the values
   are the ones the page renders (`resolved: true`), and the robots directives are
   the ones `wp_robots()` prints. A deactivated plugin's stored data is still
   exported, marked unresolved. With no SEO plugin the file says `status: "none"`.
+  Where a plugin is not running to resolve its values, Bridge renders its templates
+  (`%title% %sep% %sitename%`, `#post_title #separator_sa #site_title`,
+  `%%post_title%%`, `%%title%%`) from the record: `rendered` holds the title,
+  description, canonical, robots, Open Graph and Twitter text, `template_source`
+  says whether each came from the record, its type's template or the plugin's
+  default, and `unresolved` names any variable left out (never guessed). URLs
+  stay at the source origin. Entries are keyed `post:<ID>` (the
+  `bridge/entry-source-map.json` key) and `term:<taxonomy>:<term_id>`; a home
+  page that lists posts has its head under `home` in `bridge/seo.json`.
   Integration tokens (SEMrush, Wincher, MyYoast) never leave.
 - `bridge/redirects.json`: Redirection, Yoast Premium, Rank Math, Safe Redirect
   Manager and WordPress's own old-slug redirects, as one `RawRedirect` list. Every
