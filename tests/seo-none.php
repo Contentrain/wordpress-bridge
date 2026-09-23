@@ -28,7 +28,7 @@ $sample = get_posts( array( 'post_type' => 'post', 'post_status' => 'publish', '
 if ( 'none' === $mode ) {
 	check( ! defined( 'WPSEO_VERSION' ) && ! defined( 'REDIRECTION_VERSION' ), 'no SEO or redirect plugin is loaded' );
 	check( 'none' === $seo['status'] && 'wordpress-core' === $seo['serving'], 'the SEO document says none: WordPress core serves the head' );
-	check( array( 'absent' ) === array_values( array_unique( array_column( $seo['providers'], 'status' ) ) ) && 3 === count( $seo['providers'] ), 'every known provider is reported absent, by name' );
+	check( array( 'absent' ) === array_values( array_unique( array_column( $seo['providers'], 'status' ) ) ) && 4 === count( $seo['providers'] ), 'every known provider is reported absent, by name' );
 	check( '{}' === wp_json_encode( $seo['settings'] ), 'settings are an empty object, not null' );
 	check( null === Seo::post( $sample ), 'a post has no SEO entry to write' );
 	foreach ( array( 'redirection', 'yoast_premium', 'rank_math', 'safe_redirect_manager' ) as $source ) {
@@ -43,7 +43,26 @@ if ( 'none' === $mode ) {
 	check( '|' === $seo['settings']['yoast']['separator'], 'the separator resolves from the stored key without Yoast running' );
 	$fixture = json_decode( file_get_contents( '/tmp/bridge-seo/fixture.json' ), true );
 	$entry = Seo::post( get_post( $fixture['posts']['custom_title'] ) )['yoast'];
-	check( ! isset( $entry['resolved'] ) && 'Custom %%title%% %%sep%% %%sitename%%' === $entry['stored']['title'] && 'custom title keyword' === $entry['focus_keyword'], 'stored Yoast values are still exported, without claiming rendered ones' );
+	check( ! isset( $entry['resolved'] ) && 'Custom %%title%% %%sep%% %%sitename%%' === $entry['stored']['title'] && 'custom title keyword' === $entry['focus_keyword'] && 'bridge' === $entry['rendered_by'], 'stored Yoast values are still exported, rendered by Bridge and not claimed as resolved' );
+	// BR-16 parity: what Bridge renders from Yoast's templates equals what Yoast itself served while active.
+	$served = json_decode( file_get_contents( '/tmp/bridge-seo/seo-entries.json' ), true );
+	$diffs = array();
+	foreach ( $fixture['posts'] as $key => $id ) {
+		// A static front page and posts page render as the home and blog pages: Yoast's own rules, not the page's.
+		if ( in_array( $key, array( 'front', 'blog' ), true ) ) { continue; }
+		$yoast = $served[ 'post:' . $id ]['yoast'];
+		$rendered = Seo::post( get_post( $id ) )['yoast']['rendered'];
+		$want = array( 'title' => $yoast['title'] ?? '', 'description' => $yoast['description'] ?? '', 'index' => $yoast['robots']['index'] ?? 'index', 'follow' => $yoast['robots']['follow'] ?? 'follow' );
+		$got = array( 'title' => $rendered['title'], 'description' => $rendered['description'], 'index' => $rendered['robots']['index'], 'follow' => $rendered['robots']['follow'] );
+		if ( $want !== $got ) { $diffs[] = $key . ': yoast ' . wp_json_encode( $want ) . ' / bridge ' . wp_json_encode( $got ); }
+	}
+	foreach ( $diffs as $diff ) { echo "  $diff\n"; }
+	check( ! $diffs, 'Bridge renders Yoast\'s templates to what Yoast served, title, description and robots, for ' . ( count( $fixture['posts'] ) - 2 ) . ' posts and pages' );
+	$show = get_option( 'show_on_front' );
+	update_option( 'show_on_front', 'posts' );
+	$home = Seo::document()['home']['yoast'] ?? null;
+	update_option( 'show_on_front', $show );
+	check( $home && 0 === strpos( $home['rendered']['title'], get_bloginfo( 'name' ) ) && false === strpos( $home['rendered']['title'], '%%' ) && home_url( '/' ) === $home['rendered']['canonical'], 'a home page that lists posts gets its own rendered head in seo.json: ' . ( $home['rendered']['title'] ?? '' ) );
 	$served = array_filter( $redirects['redirects'], static function ( $r ) { return 'redirection' === $r['source']; } );
 	$inactive = array_filter( $redirects['excluded'], static function ( $r ) { return 'redirection' === $r['source'] && 'source-inactive' === $r['reason']; } );
 	check( ! $served && count( $inactive ) >= 5 && 'inactive-with-data' === $redirects['sources']['redirection']['status'], 'Redirection rules are kept, and no longer listed as served' );

@@ -174,6 +174,46 @@ check( false === $rm['resolved'] && '%title% %sep% %sitename%' === $rm['title'] 
 $aio = $entries[ 'post:' . $fixture['posts']['custom_title'] ]['aioseo'];
 check( false === $aio['resolved'] && 'AIOSEO description' === $aio['description'] && 'noindex' === $aio['robots']['index'] && 'aioseo keyword' === $aio['focus_keyword'] && array( 'FAQPage', 'WebPage' ) === $aio['schema']['types'], 'AIOSEO table row is normalized, marked unresolved' );
 
+// ---- BR-16: templates rendered to text, for the providers not running. ----
+$site = get_bloginfo( 'name' );
+$post_of = static function ( $key, $provider ) use ( $entries, $fixture ) { return $entries[ 'post:' . $fixture['posts'][ $key ] ][ $provider ] ?? null; };
+check( 'inactive-with-data' === $seo['providers']['seopress']['status'] && 4 === count( $seo['providers'] ), 'SEOPress data is detected, a fourth provider' );
+check( '·' === $seo['settings']['seopress']['separator'] && 'Page: %%post_title%% %%sep%% %%sitetitle%%' === $seo['settings']['seopress']['title_templates']['page'], 'SEOPress settings: separator and templates keyed by content type' );
+check( ! isset( $post_of( 'custom_title', 'yoast' )['rendered'] ), 'Yoast is running: its resolved values stand, nothing re-rendered' );
+$rm = $post_of( 'custom_title', 'rank_math' );
+check( 'SEO custom title - ' . $site === $rm['rendered']['title'] && 'post' === $rm['template_source']['title'] && 'bridge' === $rm['rendered_by'] && array() === $rm['unresolved'], 'Rank Math: %title% %sep% %sitename% renders to "' . $rm['rendered']['title'] . '"' );
+check( array( 'index' => 'noindex', 'follow' => 'nofollow' ) == $rm['rendered']['robots'] && 'post' === $rm['template_source']['robots'], 'Rank Math: robots from the record: ' . wp_json_encode( $rm['rendered']['robots'] ) . ' from ' . $rm['template_source']['robots'] . ' (blog_public ' . get_option( 'blog_public' ) . ')' );
+check( get_permalink( $fixture['posts']['custom_title'] ) === $rm['rendered']['canonical'], 'Rank Math: canonical is the source address: ' . $rm['rendered']['canonical'] . ' / ' . get_permalink( $fixture['posts']['custom_title'] ) );
+check( $rm['rendered']['title'] === $rm['rendered']['schema']['graph'][0]['headline'] && ! isset( $rm['rendered']['schema']['graph'][0]['metadata'] ), 'Rank Math: %seo_title% inside the stored schema node renders too' );
+check( ! isset( $rm['schema']['graph'] ) && array( 'BlogPosting' ) === $rm['schema']['types'], 'Rank Math not running: the top-level schema has types only, never a graph with template tokens' );
+$rm_default = $post_of( 'defaults', 'rank_math' );
+check( 'SEO defaults only - ' . $site === $rm_default['rendered']['title'] && 'default' === $rm_default['template_source']['title'] && 0 === strpos( $rm_default['rendered']['description'], 'SEO defaults only body text.' ) && array( 'index' => 'index', 'follow' => 'follow' ) == $rm_default['rendered']['robots'], 'Rank Math: a post with nothing of its own gets the plugin\'s default title, excerpt and robots' );
+$unresolved = $post_of( 'unresolved', 'rank_math' );
+check( 'SEO unresolved - ' . $site === $unresolved['rendered']['title'] && array( '%unknownvar%' ) === $unresolved['unresolved'] && 'Subtitle from a field' === $unresolved['rendered']['description'], 'an unknown variable is left out and named; a custom field variable reads the field' );
+$aio = $post_of( 'custom_title', 'aioseo' );
+check( 'SEO custom title - ' . $site === $aio['rendered']['title'] && 'AIOSEO description' === $aio['rendered']['description'] && 'noindex' === $aio['rendered']['robots']['index'] && 'post' === $aio['template_source']['robots'], 'AIOSEO: #post_title #separator_sa #site_title renders, robots from its row' );
+$sp = $post_of( 'custom_title', 'seopress' );
+check( 'SEO custom title · ' . $site === $sp['rendered']['title'] && 'SEOPress description' === $sp['rendered']['description'] && 'noindex' === $sp['rendered']['robots']['index'] && 'post' === $sp['template_source']['robots'], 'SEOPress: its own title and robots, rendered with its separator' );
+$sp_page = $post_of( 'canonical', 'seopress' );
+check( 'Page: SEO canonical page · ' . $site === $sp_page['rendered']['title'] && 'post_type' === $sp_page['template_source']['title'], 'SEOPress: a page with no title of its own uses the page template' );
+$topic = $entries[ 'term:category:' . $fixture['terms']['topic'] ];
+$term_name = get_term( $fixture['terms']['topic'] )->name;
+check( 'Topic ' . $term_name . ' - ' . $site === $topic['rank_math']['rendered']['title'] && 'post' === $topic['rank_math']['template_source']['title'], 'term: Rank Math term meta renders' );
+check( 'Topic ' . $term_name === $topic['seopress']['rendered']['title'] && 'noindex' === $topic['seopress']['rendered']['robots']['index'] && 'post_type' === $topic['seopress']['template_source']['robots'], 'term: the SEOPress taxonomy template and its noindex apply' );
+check( $term_name . ' - ' . $site === $topic['aioseo']['rendered']['title'] && 'default' === $topic['aioseo']['template_source']['title'], 'term: AIOSEO falls back to its default taxonomy title' );
+$dirty = array();
+foreach ( $entries as $key => $entry ) {
+	foreach ( $entry as $provider => $block ) {
+		foreach ( array( 'title', 'description' ) as $field ) {
+			$text = $block['rendered'][ $field ] ?? '';
+			if ( preg_match( '/%%?[a-z_]+(\([^)]*\))?%%?|#(post_title|site_title|separator_sa|tagline|taxonomy_title)/', $text ) ) {
+				$dirty[] = "$key/$provider/$field: $text";
+			}
+		}
+	}
+}
+check( ! $dirty, 'no rendered title or description carries a template variable' . ( $dirty ? ': ' . implode( '; ', array_slice( $dirty, 0, 3 ) ) : '' ) );
+
 // ---- Redirects: accounting, then the live site. ----
 global $wpdb;
 $by_source = array();
