@@ -1,0 +1,16 @@
+{
+  "about": "QA-23: a post's Contentrain status and visibility, one row per WordPress status. Bridge (Models::meta / Models::visibility, checked in tests/remote.php) and wp-import (rawToContentrain, checked in tests/status-parity.test.mjs) must both give these. Source of the rules: wp-import mapStatus, Contentrain/ai packages/wp-import/src/contentrain.ts (#259).",
+  "scheduled": "2030-01-02T03:04:05Z",
+  "rows": [
+    { "name": "published", "status": "publish", "protected": false, "meta": { "status": "published" }, "visibility": "public" },
+    { "name": "published-protected", "status": "publish", "protected": true, "meta": { "status": "draft" }, "visibility": "password" },
+    { "name": "scheduled", "status": "future", "protected": false, "meta": { "status": "published", "publish_at": "2030-01-02T03:04:05Z" }, "visibility": "public" },
+    { "name": "scheduled-protected", "status": "future", "protected": true, "meta": { "status": "draft" }, "visibility": "password" },
+    { "name": "pending", "status": "pending", "protected": false, "meta": { "status": "in_review" }, "visibility": "public" },
+    { "name": "private", "status": "private", "protected": false, "meta": { "status": "draft" }, "visibility": "private" },
+    { "name": "draft", "status": "draft", "protected": false, "meta": { "status": "draft" }, "visibility": "public" },
+    { "name": "draft-protected", "status": "draft", "protected": true, "meta": { "status": "draft" }, "visibility": "password" },
+    { "name": "trash", "status": "trash", "protected": false, "meta": { "status": "archived" }, "visibility": "public", "exported": false },
+    { "name": "trash-protected", "status": "trash", "protected": true, "meta": { "status": "archived" }, "visibility": "password", "exported": false }
+  ]
+}

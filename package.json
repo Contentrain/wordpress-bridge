@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test tests/handoff.test.mjs",
+    "test": "node --test tests/handoff.test.mjs tests/status-parity.test.mjs",
     "test:wordpress": "tests/run.sh",
     "test:store": "node tests/verify-store.mjs",
     "package": "python3 tools/package.py",

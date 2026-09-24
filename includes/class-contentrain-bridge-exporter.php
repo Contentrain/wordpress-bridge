@@ -14,6 +14,13 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 /** Maps WordPress records to their RawIR v1 shape; the export pipeline assembles them. */
 final class Exporter {
+	/**
+	 * What a password-protected post carries instead of its password (QA-23): that it is protected, never the
+	 * password itself. A reader needs the first — wp-import keeps such a post out of the public site — and must
+	 * never get the second.
+	 */
+	const PROTECTED_PASSWORD = '[protected]';
+
 	/** Map a WordPress post without interpreting or rewriting its HTML. */
 	public static function map_post( $post, $selected = array(), &$excluded = array() ) {
 		$author = get_userdata( $post->post_author );
@@ -43,7 +50,7 @@ final class Exporter {
 			'parent'         => (int) $post->post_parent ?: null,
 			'menu_order'     => (int) $post->menu_order,
 			'sticky'         => is_sticky( $post->ID ),
-			'password'       => null,
+			'password'       => '' !== (string) $post->post_password ? self::PROTECTED_PASSWORD : null,
 			'comment_status' => $post->comment_status,
 			'ping_status'    => $post->ping_status,
 			'terms'          => is_wp_error( $terms ) ? array() : array_map(

@@ -141,7 +141,7 @@ foreach ( array( 'public' => false, 'private' => true ) as $scope => $private ) 
 		check( ! $exported( $f['password'] ) && ( $post['outcomes']['excluded:password-protected'] ?? 0 ) >= 1, 'public: a password-protected post is excluded as such' );
 	} else {
 		check( $exported( $f['future'] ) && $exported( $f['private'] ) && $exported( $f['pending'] ) && $exported( $f['draft'] ) && $exported( $f['password'] ), 'private: future, private, pending, draft and password-protected posts are exported' );
-		check( null === $raw[ (string) $f['password'] ]['password'], 'private: the password itself is never exported' );
+		check( '[protected]' === $raw[ (string) $f['password'] ]['password'] && null === $raw[ (string) $f['draft'] ]['password'], 'private: a password-protected post says it is protected ("[protected]"), never its password; others carry none' );
 	}
 	check( $raw[ (string) $f['sticky'] ]['sticky'] && ( $source_of( $report, 'sticky' )['outcomes']['exported:flag'] ?? 0 ) >= 1, "$scope: the sticky flag is exported" );
 	check( 'templates/wide.php' === $raw[ (string) $f['template'] ]['meta']['_wp_page_template'] && ( $source_of( $report, 'page_templates' )['outcomes']['exported:meta'] ?? 0 ) >= 1, "$scope: the page template is exported" );
