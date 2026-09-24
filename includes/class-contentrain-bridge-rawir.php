@@ -89,7 +89,7 @@ final class Rawir {
 			throw new \RuntimeException( 'Cannot finalize RawIR.' );
 		}
 		Files::fs()->chmod( $target, 0600 );
-		$job['files'][ self::PATH ] = array( 'sha256' => hash_file( 'sha256', $target ), 'bytes' => filesize( $target ) );
+		$job['files'][ self::PATH ] = array( 'bytes' => filesize( $target ), 'sha256' => hash_file( 'sha256', $target ) );
 	}
 
 	/**

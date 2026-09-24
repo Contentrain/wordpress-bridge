@@ -10,13 +10,13 @@ final class Models {
 			throw new \RuntimeException( 'One content file exceeds the 8 MiB export safety limit: ' . $path ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Diagnostic data is escaped at the admin output boundary or JSON encoded.
 		}
 		Files::put( Files::dir( $job['id'] ) . '/output', $path, $content );
-		$job['files'][ $path ] = array( 'sha256' => hash( 'sha256', $content ), 'bytes' => strlen( $content ) );
+		$job['files'][ $path ] = array( 'bytes' => strlen( $content ), 'sha256' => hash( 'sha256', $content ) );
 	}
 
 	/** Copy a source file into the export and record it like any other output. */
 	public static function binary( &$job, $path, $source ) {
 		$bytes = Files::copy( Files::dir( $job['id'] ) . '/output', $path, $source );
-		$job['files'][ $path ] = array( 'sha256' => hash_file( 'sha256', Files::path( Files::dir( $job['id'] ) . '/output', $path ), false ), 'bytes' => $bytes );
+		$job['files'][ $path ] = array( 'bytes' => $bytes, 'sha256' => hash_file( 'sha256', Files::path( Files::dir( $job['id'] ) . '/output', $path ), false ) );
 		return $bytes;
 	}
 
@@ -504,6 +504,6 @@ final class Models {
 			throw new \RuntimeException( 'Cannot finalize content table.' );
 		}
 		Files::fs()->chmod( $target, 0600 );
-		$job['files'][ $path ] = array( 'sha256' => hash_file( 'sha256', $target ), 'bytes' => filesize( $target ) );
+		$job['files'][ $path ] = array( 'bytes' => filesize( $target ), 'sha256' => hash_file( 'sha256', $target ) );
 	}
 }

@@ -216,7 +216,7 @@ final class Inventory {
 			throw new \RuntimeException( 'Cannot finalize the inventory.' );
 		}
 		Files::fs()->chmod( $target, 0600 );
-		$job['files'][ $path ] = array( 'sha256' => hash_file( 'sha256', $target ), 'bytes' => filesize( $target ) );
+		$job['files'][ $path ] = array( 'bytes' => filesize( $target ), 'sha256' => hash_file( 'sha256', $target ) );
 	}
 
 	/**
