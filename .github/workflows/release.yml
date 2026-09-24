@@ -1,0 +1,40 @@
+name: release
+# A `v*` tag publishes a GitHub Release carrying the archive CI built and tested
+# in the same run: every gate in ci.yml first, the tag checked against the plugin
+# version, then dist/contentrain-bridge.zip attached. Nothing is rebuilt after
+# the gates, so what users install is what was tested. Tags are pushed by people
+# (the founder's decision, RELEASING.md), never by this workflow.
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  gates:
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+  publish:
+    needs: gates
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: The tag is the plugin's version
+        run: |
+          version=$(sed -n "s/.*CONTENTRAIN_BRIDGE_VERSION', *'\([^']*\)'.*/\1/p" contentrain-bridge.php)
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "Tag $GITHUB_REF_NAME does not match plugin version $version"; exit 1; }
+          grep -q "^= $version =" readme.txt || { echo "readme.txt has no changelog entry for $version"; exit 1; }
+      - uses: actions/download-artifact@v4
+        with:
+          name: contentrain-bridge
+          path: dist
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '$0 == "= " v " =" {on=1; next} /^= / {on=0} on' readme.txt > notes.md
+          printf '\nInstall: download contentrain-bridge.zip below, then Plugins > Add New > Upload Plugin. Updating: upload the new ZIP over the installed plugin.\n' >> notes.md
+          (cd dist && sha256sum contentrain-bridge.zip > contentrain-bridge.zip.sha256)
+          gh release create "$GITHUB_REF_NAME" dist/contentrain-bridge.zip dist/contentrain-bridge.zip.sha256 --title "Contentrain Bridge $version" --notes-file notes.md --verify-tag

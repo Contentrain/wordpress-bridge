@@ -21,6 +21,15 @@ Free, local-first WordPress bridge: models site content and interface text as Co
 
 The JSON contract is defined by the MIT-licensed `@contentrain/types` package in `Contentrain/ai`; the plugin does not import or embed private Migrate or proprietary Studio code.
 
+## Install and update
+
+Download `contentrain-bridge.zip` from the
+[latest release](https://github.com/Contentrain/wordpress-bridge/releases/latest)
+and install it in **Plugins > Add New > Upload Plugin**. Updates are manual while
+the plugin is distributed outside WordPress.org: upload the new release ZIP the
+same way and WordPress replaces the installed version. Each release is the exact
+archive CI built and tested ([RELEASING.md](RELEASING.md)).
+
 ## Development
 
 This repository intentionally has no runtime dependency or build step. Run PHP syntax checks with:
