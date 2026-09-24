@@ -27,20 +27,22 @@ Media travels with the content: uploads are copied into `media/` and the content
 
 = External services =
 
-The plugin makes no network request unless you choose GitHub delivery.
+The plugin contacts no host other than this site unless you choose GitHub delivery. Two options read this site's own pages over HTTP, the way a visitor would, and send nothing elsewhere: "Also read the text your pages render" (the home page, a post, a page, search and not-found) and, with it, the connected-services check (the home page's script hosts).
 
 **GitHub** — used only when you enter a repository and a token in step 3 and start the delivery. The plugin then calls the GitHub REST API at api.github.com to read the target repository's default branch (or the base branch you name) and file list, upload the exported files, and create one new branch holding them. What is sent: the exported content files you reviewed, a commit message, and the token you supplied. Nothing is sent to Contentrain or to any other host, and no analytics or telemetry is collected. The token is used for those requests only and is never stored in the database or in the export. Delivery never writes to your default branch and never overwrites a file you edited in Git. GitHub's terms: https://docs.github.com/site-policy/github-terms/github-terms-of-service — privacy policy: https://docs.github.com/site-policy/privacy-policies/github-privacy-statement
 
+**REST export API (inbound)** — the plugin adds routes under `/wp-json/contentrain-bridge/v1/` that let a program you authorize start an export and read its files. The plugin sends nothing by itself: the program asks, with an application password of an administrator who has the export and manage_options capabilities. Contentrain Migrate uses these routes when you give it such a password to migrate this site; what Migrate then does with the content is governed by its own terms. Revoke the application password in your profile to end that access; exports expire after a day.
+
 == Installation ==
 
-1. Download `contentrain-bridge.zip` from the latest release (https://github.com/Contentrain/wordpress-bridge/releases/latest) and install it in Plugins > Add New > Upload Plugin, or upload the `contentrain-bridge` folder to `/wp-content/plugins/`.
+1. Install Contentrain Bridge from Plugins > Add New, or install `contentrain-bridge.zip` from the latest GitHub release (https://github.com/Contentrain/wordpress-bridge/releases/latest) with Plugins > Add New > Upload Plugin.
 2. Activate Contentrain Bridge in WordPress.
 3. Open Tools > Contentrain Bridge.
 4. Step 1: choose content types and options, then prepare the content.
 5. Step 2: review the generated models and the interface-text candidates, then validate and finalize.
 6. Step 3: download the ZIP, or deliver to a branch in your own GitHub repository.
 
-Updates are manual while the plugin is distributed outside WordPress.org: download the new release ZIP and upload it the same way; WordPress replaces the installed version. Export snapshots are temporary and are not affected.
+Installed from WordPress.org, the plugin updates like any other. A ZIP installed from a GitHub release is updated by uploading the newer release ZIP the same way; WordPress replaces the installed version. Export snapshots are temporary and are not affected.
 
 == Frequently Asked Questions ==
 
@@ -50,7 +52,7 @@ No. Modelling, validation, the ZIP download and GitHub delivery are all local an
 
 = Does the plugin send telemetry? =
 
-No. It collects no analytics and contacts no Contentrain server. The only external requests are to the GitHub API, only when you start a GitHub delivery yourself.
+No. It collects no analytics and contacts no Contentrain server. The only request to another host is to the GitHub API, when you start a GitHub delivery yourself.
 
 = Are media files exported? =
 
@@ -66,7 +68,7 @@ The active theme and child theme, and optionally the source files of active plug
 
 == Privacy ==
 
-The plugin stores export ownership and a source revision marker. It sends nothing anywhere on its own. Export files are written to a private, per-administrator directory, are removed on uninstall, and expire after a day. An export can contain site content, author display names, selected post metadata and, if you chose it, privacy-minimized comments. Treat a downloaded export as you would a WordPress export file. If you deliver to GitHub, the exported content is sent to GitHub under the account whose token you provide; choose a private repository when the export includes draft or private content.
+The plugin stores export ownership and a source revision marker. It sends nothing anywhere on its own; an export leaves the site only when you download it, deliver it to GitHub, or authorize a program to read it through the REST export API with an administrator's application password. Export files are written to a private, per-administrator directory, are removed on uninstall, and expire after a day. An export can contain site content, author display names, selected post metadata and, if you chose it, privacy-minimized comments. Treat a downloaded export as you would a WordPress export file. If you deliver to GitHub, the exported content is sent to GitHub under the account whose token you provide; choose a private repository when the export includes draft or private content.
 
 == Changelog ==
 

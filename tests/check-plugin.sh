@@ -23,5 +23,7 @@ if (!Array.isArray(findings) || Number(process.argv[3]) > 1) throw new Error('Pl
 const errors = findings.filter(row => row.type === 'ERROR');
 const warnings = findings.filter(row => row.type === 'WARNING');
 console.log(`Plugin Check: ${errors.length} errors, ${warnings.length} warnings`);
+// Every warning by code and place: what a directory reviewer will ask about, answered in RELEASING.md.
+for (const w of warnings) console.log(`  WARNING ${w.code} ${w.file}:${w.line} ${String(w.message).replace(/\s+/g, ' ').slice(0, 160)}`);
 if (errors.length) { console.error(errors); process.exit(1); }
 JS
