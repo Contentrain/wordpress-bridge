@@ -60,7 +60,7 @@ Yes, when you include the Media type. Each upload and its generated sizes are co
 
 = What is the Contentrain Migrate connection key? =
 
-A way for Contentrain Migrate to read this site's content when your host blocks application passwords (some hosts strip the Authorization header they travel in). Create it under Tools > Contentrain Bridge and paste it into Migrate. It lets Migrate start and read content exports as you, nothing else: it does not open the rest of the WordPress REST API. It is shown once, only a fingerprint of it is stored, and it stops working an hour after its last use, 14 days after it was created, or when you revoke it or create a new one. It can only be created and used over HTTPS. Nothing is sent from your site to Contentrain when you create it.
+A way for Contentrain Migrate to read this site's content when your host blocks application passwords (some hosts strip the Authorization header they travel in). Create it under Tools > Contentrain Bridge and paste it into Migrate. It lets Migrate start and read content exports as you, nothing else: it does not open the rest of the WordPress REST API. It is shown once and only a fingerprint of it is stored. Paste it into Migrate within an hour; once Migrate has used it, it works for that one move until 14 days after it was created, until Migrate closes it when the move is done, or until you revoke it or create a new one. It can only be created and used over HTTPS. Nothing is sent from your site to Contentrain when you create it.
 
 = Which comment data is exported? =
 
@@ -78,8 +78,8 @@ The plugin stores export ownership and a source revision marker. It sends nothin
 
 = 0.4.0 =
 
-* Contentrain Migrate connection key: Migrate can start and read exports on hosts that strip the Authorization header, without an application password. Shown once, HTTPS only, bound to one Migrate order, expires an hour after its last use or after 14 days, revocable.
-* REST: `GET /about` says which sign-in a reader can use; `POST /exports/{id}/read` reads a snapshot for a caller whose key travels in the request body.
+* Contentrain Migrate connection key: Migrate can start and read exports on hosts that strip the Authorization header, without an application password. Shown once, HTTPS only, bound to one Migrate order: an hour to paste it, then valid for that order up to 14 days; revocable by you or closed by Migrate.
+* REST: `GET /about` says which sign-in a reader can use; `POST /exports/{id}/read` reads a snapshot for a caller whose key travels in the request body; `DELETE /key` lets Migrate close its own key.
 
 = 0.3.1 =
 

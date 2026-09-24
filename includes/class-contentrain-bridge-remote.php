@@ -23,6 +23,7 @@ defined( 'ABSPATH' ) || exit;
  *   GET  /contentrain-bridge/v1/exports                → { exports: [ export ] }
  *   POST /contentrain-bridge/v1/exports/{id}/advance   → { export, busy? }
  *   POST /contentrain-bridge/v1/exports/{id}/read      { file?, offset?, length? } — GET /exports/{id}, for a body-signed caller
+ *   DELETE /contentrain-bridge/v1/key                  → { revoked: true } — with the key only: Migrate closes it
  *
  * With a key every call carries `X-Contentrain-Key` (and, in a POST body,
  * `contentrain_key`) and `contentrain_pairing`; its refusals are `bridge_key_*`.
@@ -53,6 +54,8 @@ final class Remote {
 			array( 'methods' => 'POST', 'permission_callback' => array( self::class, 'permitted' ), 'callback' => array( self::class, 'start' ) ),
 			array( 'methods' => 'GET', 'permission_callback' => array( self::class, 'permitted' ), 'callback' => array( self::class, 'index' ) ),
 		) );
+		// Migrate closes its own key when the order is done (BR-27).
+		register_rest_route( 'contentrain-bridge/v1', '/key', array( 'methods' => 'DELETE', 'permission_callback' => array( Key::class, 'permitted_self' ), 'callback' => array( Key::class, 'revoke_self' ) ) );
 		register_rest_route( 'contentrain-bridge/v1', '/exports/(?P<id>[a-f0-9]{32})/advance', array( 'methods' => 'POST', 'permission_callback' => array( self::class, 'permitted' ), 'callback' => array( self::class, 'advance' ) ) );
 	}
 

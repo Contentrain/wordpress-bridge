@@ -79,6 +79,9 @@ list( $status ) = call( 'POST', '/exports', $scope );
 check( in_array( $status, array( 401, 403 ), true ), "without a key or a sign-in: refused ($status)" );
 list( $status, $body ) = call( 'POST', '/exports', array( 'types' => array( 'post' ) ), $key );
 check( 400 === $status && 'bridge_key_pairing_required' === code( $body ), 'a key without contentrain_pairing: 400 bridge_key_pairing_required' );
+check( null === get_option( Key::OPTION )['pairing'], 'and it does not pair the key' );
+list( $status, $body ) = call( 'POST', '/exports/' . str_repeat( '0', 32 ) . '/read', array( 'contentrain_pairing' => $pair ), $key, 'json' );
+check( 404 === $status && 'bridge_not_found' === code( $body ) && $pair === get_option( Key::OPTION )['pairing'], 'Migrate\'s access check (a read of no export): 404 bridge_not_found, and the key is now paired with the order' );
 list( $status, $started ) = call( 'POST', '/exports', $scope, $key );
 check( 201 === $status && false === $started['reused'], 'the header key starts an export: 201' );
 $a = $started['export']['id'];
@@ -129,15 +132,14 @@ $seen = get_option( Key::SEEN );
 check( '203.0.113.7' === $seen['ip'] && time() - $seen['at'] < 60 && true === Key::status()['used'], 'the last use is recorded: when, and from where' );
 
 // ---- Every refusal. ----
-$saved = get_option( Key::SEEN );
-update_option( Key::SEEN, array( 'at' => time() - Key::IDLE - 1, 'ip' => $saved['ip'] ), false );
-list( $status, $body ) = call( 'GET', '/exports', array( 'contentrain_pairing' => $pair ), $key );
-check( 401 === $status && 'bridge_key_expired' === code( $body ), 'an hour unused: 401 bridge_key_expired' );
-update_option( Key::SEEN, $saved, false );
 $record = get_option( Key::OPTION );
+update_option( Key::OPTION, array( 'created_at' => time() - 3 * HOUR_IN_SECONDS ) + $record, false );
+update_option( Key::SEEN, array( 'at' => time() - 2 * HOUR_IN_SECONDS - 1, 'ip' => '203.0.113.7' ), false );
+list( $status ) = call( 'GET', '/exports', array( 'contentrain_pairing' => $pair ), $key );
+check( 200 === $status, 'paired, three hours old and unused for two: still works (a rerun can come days later)' );
 update_option( Key::OPTION, array( 'created_at' => time() - Key::LIFETIME - 1 ) + $record, false );
 list( $status, $body ) = call( 'GET', '/exports', array( 'contentrain_pairing' => $pair ), $key );
-check( 401 === $status && 'bridge_key_expired' === code( $body ), 'used, but 14 days old: 401 bridge_key_expired' );
+check( 401 === $status && 'bridge_key_expired' === code( $body ), 'paired, but 14 days old: 401 bridge_key_expired' );
 update_option( Key::OPTION, $record, false );
 $demote = static function ( $caps ) { $caps['export'] = false; return $caps; };
 add_filter( 'user_has_cap', $demote );
@@ -157,25 +159,44 @@ wp_set_current_user( $admin->ID );
 $replacement = Key::create();
 list( $status, $body ) = call( 'GET', '/exports', array( 'contentrain_pairing' => $pair ), $key );
 check( 401 === $status && 'bridge_key_revoked' === code( $body ), 'a new key retires the old one: 401 bridge_key_revoked' );
-list( $status ) = call( 'GET', '/exports', array( 'contentrain_pairing' => 'order_test_0003' ), $replacement );
-check( 200 === $status && array() === Key::exports(), 'the new key works, for a new order, with none of the old key\'s exports' );
-wp_set_current_user( $admin->ID );
-Key::revoke();
+$record = get_option( Key::OPTION );
+update_option( Key::OPTION, array( 'created_at' => time() - Key::UNPAIRED - 1 ) + $record, false );
 list( $status, $body ) = call( 'GET', '/exports', array( 'contentrain_pairing' => 'order_test_0003' ), $replacement );
-check( 401 === $status && 'bridge_key_revoked' === code( $body ) && false === Key::status()['active'], 'revoked on the screen: 401 bridge_key_revoked, and the screen says no key' );
+check( 401 === $status && 'bridge_key_expired' === code( $body ) && null === get_option( Key::OPTION )['pairing'], 'unpaired an hour after it was created: 401 bridge_key_expired, and not paired by the refused call' );
+update_option( Key::OPTION, $record, false );
+list( $status ) = call( 'GET', '/exports', array( 'contentrain_pairing' => 'order_test_0003' ), $replacement );
+check( 200 === $status && array() === Key::exports(), 'within the hour the new key works, for a new order, with none of the old key\'s exports' );
+check( false !== strpos( Key::status()['expires_at'], gmdate( 'Y-m-d', $record['created_at'] + Key::LIFETIME ) ), 'the screen shows when the paired key stops working: 14 days after it was created' );
+
+// Migrate closes the key itself when the order is done.
+list( $status, $body ) = call( 'DELETE', '/key', array( 'contentrain_pairing' => 'order_test_0003' ) );
+check( 401 === $status && 'bridge_key_required' === code( $body ), 'DELETE /key without the key: 401 bridge_key_required' );
+list( $status, $body ) = call( 'DELETE', '/key', array( 'contentrain_pairing' => 'order_other_0009' ), $replacement );
+check( 403 === $status && 'bridge_key_paired_elsewhere' === code( $body ), 'nor for another order' );
+list( $status, $body ) = call( 'DELETE', '/key', array( 'contentrain_pairing' => 'order_test_0003' ), $replacement );
+check( 200 === $status && true === $body['revoked'], 'DELETE /key with the key and its order: revoked' );
+list( $status, $body ) = call( 'GET', '/exports', array( 'contentrain_pairing' => 'order_test_0003' ), $replacement );
+check( 401 === $status && 'bridge_key_revoked' === code( $body ) && false === Key::status()['active'], 'then the key is answered as revoked, and the screen says no key' );
+wp_set_current_user( $admin->ID );
+$screen = Key::create();
+Key::revoke();
+list( $status, $body ) = call( 'GET', '/exports', array( 'contentrain_pairing' => 'order_test_0005' ), $screen );
+check( 401 === $status && 'bridge_key_revoked' === code( $body ), 'revoked on the Bridge screen: 401 bridge_key_revoked' );
 
 for ( $i = 0; $i < Key::FAILURES; ++$i ) {
 	list( $status, $body ) = call( 'GET', '/exports', array( 'contentrain_pairing' => $pair ), str_repeat( 'A', 43 ) );
 	if ( 'bridge_key_invalid' !== code( $body ) ) { break; }
 }
 check( Key::FAILURES === $i, 'a wrong key: 401 bridge_key_invalid, ten times' );
+list( $status, $body ) = call( 'GET', '/exports', array( 'contentrain_pairing' => $pair ), str_repeat( 'B', 43 ) );
+check( 429 === $status && 'bridge_key_rate_limited' === code( $body ) && Key::WINDOW === $body['data']['retry_after'], 'the eleventh wrong key from that address: 429 bridge_key_rate_limited, retry after 15 minutes' );
 wp_set_current_user( $admin->ID );
 $fresh = Key::create();
-list( $status, $body ) = call( 'GET', '/exports', array( 'contentrain_pairing' => 'order_test_0004' ), $fresh );
-check( 429 === $status && 'bridge_key_rate_limited' === code( $body ) && Key::WINDOW === $body['data']['retry_after'], 'the eleventh try from that address, even with a good key: 429 bridge_key_rate_limited, retry after 15 minutes' );
-$_SERVER['REMOTE_ADDR'] = '203.0.113.8';
 list( $status ) = call( 'GET', '/exports', array( 'contentrain_pairing' => 'order_test_0004' ), $fresh );
-check( 200 === $status, 'another address is not held back' );
+check( 200 === $status, 'the right key from the same address still works: it is compared before the address is held back (a shared proxy cannot lock Migrate out)' );
+$_SERVER['REMOTE_ADDR'] = '203.0.113.8';
+list( $status, $body ) = call( 'GET', '/exports', array( 'contentrain_pairing' => 'order_test_0004' ), str_repeat( 'A', 43 ) );
+check( 401 === $status && 'bridge_key_invalid' === code( $body ), 'a wrong key from another address is not held back: 401, not 429' );
 $_SERVER['REMOTE_ADDR'] = '203.0.113.7';
 
 // ---- The application-password path is unchanged. ----

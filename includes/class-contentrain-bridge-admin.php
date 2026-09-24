@@ -44,7 +44,7 @@ final class Admin {
 			<section id="cr-connect">
 				<h2><?php esc_html_e( 'Connect to Contentrain Migrate', 'contentrain-bridge' ); ?></h2>
 				<p><?php esc_html_e( 'Moving this site with Contentrain Migrate? Create a connection key and paste it into Migrate. It lets Migrate start and read content exports of this site as you, nothing else, and works where your host blocks application passwords.', 'contentrain-bridge' ); ?></p>
-				<p><?php esc_html_e( 'The key is shown once. It stops working an hour after its last use, 14 days after it was created, or when you revoke it or create a new one. Only a fingerprint of it is stored.', 'contentrain-bridge' ); ?></p>
+				<p><?php esc_html_e( 'The key is shown once; only a fingerprint of it is stored. Paste it into Migrate within an hour. Once Migrate has used it, it works for that one move until 14 days after it was created, until Migrate closes it when the move is done, or until you revoke it or create a new one.', 'contentrain-bridge' ); ?></p>
 				<p id="cr-key-state" role="status" aria-live="polite"></p>
 				<div id="cr-key-new" hidden>
 					<label for="cr-key"><?php esc_html_e( 'Your connection key — copy it now, it will not be shown again', 'contentrain-bridge' ); ?></label>

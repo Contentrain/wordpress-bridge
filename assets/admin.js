@@ -168,9 +168,9 @@
     $('key-revoke').hidden = !state.active;
     if (!secure) { $('key-state').textContent = __('Open this site over HTTPS to create a connection key.', 'contentrain-bridge'); return; }
     if (!state.active) { $('key-state').textContent = __('No active connection key.', 'contentrain-bridge'); return; }
-    $('key-state').textContent = state.used
-      ? sprintf(__('Active key, paired with Migrate order %1$s. Last used %2$s from %3$s. Stops working %4$s unless used again.', 'contentrain-bridge'), state.pairing || '—', when(state.last_used_at), state.last_used_ip, when(state.expires_at))
-      : sprintf(__('Active key, not used yet. Stops working %s unless used.', 'contentrain-bridge'), when(state.expires_at));
+    $('key-state').textContent = state.pairing
+      ? sprintf(__('Connected to Migrate order %1$s. Last used %2$s from %3$s. Stops working %4$s; revoke it once the move is done.', 'contentrain-bridge'), state.pairing, when(state.last_used_at), state.last_used_ip, when(state.expires_at))
+      : sprintf(__('Active key, not used yet: paste it into Migrate before %s.', 'contentrain-bridge'), when(state.expires_at));
   }
   action('key-create', async () => {
     const created = await api({ op: 'key-create' });

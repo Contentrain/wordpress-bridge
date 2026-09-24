@@ -17,10 +17,15 @@ defined( 'ABSPATH' ) || exit;
  * - It opens the `contentrain-bridge/v1` routes only, acting as the administrator
  *   who created it, and only while that user still has `export` + `manage_options`.
  *   WordPress's own REST API is not opened by it.
- * - It lives an hour after its last use and 14 days at most, until revoked.
- * - The first request binds it to a pairing (`contentrain_pairing`: Migrate's order
- *   id); from then on it reads only the exports it started, one running at a time.
- * - Ten wrong keys from one address in 15 minutes and that address waits.
+ * - Unpaired, it lives an hour: the time to paste it into Migrate. The first
+ *   request that carries a `contentrain_pairing` (Migrate's order id) pairs it;
+ *   paired, it works for that order until 14 days after it was created, with no
+ *   idle limit (reruns can be days apart), until it is revoked or replaced —
+ *   by the administrator, or by Migrate itself (`DELETE /key`) when the order closes.
+ * - It reads only the exports it started, one running at a time.
+ * - A wrong key counts against its address: after ten in 15 minutes, wrong keys
+ *   from there are answered 429. The right key is always compared first, so a
+ *   shared address (a proxy, a CDN) cannot lock Migrate out.
  * - Created and accepted over HTTPS only (or on a `local` site), like WordPress's
  *   application passwords.
  */
@@ -31,7 +36,7 @@ final class Key {
 	const HEADER = 'x_contentrain_key';
 	const FIELD = 'contentrain_key';
 	const PAIRING = 'contentrain_pairing';
-	const IDLE = 3600;
+	const UNPAIRED = 3600;
 	const LIFETIME = 1209600;
 	const FAILURES = 10;
 	const WINDOW = 900;
@@ -75,7 +80,7 @@ final class Key {
 		return $key;
 	}
 
-	/** Stop the current key. A retired key is answered as revoked, not as unknown. */
+	/** Stop the current key — the administrator on the Bridge screen, or Migrate with the key itself. A retired key is answered as revoked, not as unknown. */
 	public static function revoke() {
 		if ( ! Admin::permitted() ) {
 			throw new \RuntimeException( 'Export and administrator permissions are required.' );
@@ -94,10 +99,10 @@ final class Key {
 		$seen = self::seen( $record );
 		$user = get_userdata( (int) $record['user'] );
 		return array(
-			'active' => ! self::expired( $record, $seen ),
+			'active' => time() <= self::ends( $record ),
 			'secure' => self::secure(),
 			'created_at' => gmdate( 'c', (int) $record['created_at'] ),
-			'expires_at' => gmdate( 'c', min( $seen['at'] + self::IDLE, (int) $record['created_at'] + self::LIFETIME ) ),
+			'expires_at' => gmdate( 'c', self::ends( $record ) ),
 			'used' => '' !== $seen['ip'],
 			'last_used_at' => gmdate( 'c', $seen['at'] ),
 			'last_used_ip' => $seen['ip'],
@@ -127,25 +132,29 @@ final class Key {
 
 	/** Accept the key for this request, as its administrator, or say why not. */
 	public static function authorize( $request, $key ) {
-		$ip = self::ip();
-		$failures = (int) get_transient( self::failures( $ip ) );
-		if ( $failures >= self::FAILURES ) {
-			return self::error( 'rate_limited', 'Too many wrong connection keys from this address; wait 15 minutes.', 429, array( 'retry_after' => self::WINDOW ) );
-		}
 		if ( ! self::secure() ) {
 			return self::error( 'insecure', 'This site is not served over HTTPS, so a connection key cannot be used.', 403 );
 		}
+		$ip = self::ip();
 		$hash = hash( 'sha256', $key );
 		$record = self::record();
+		// The key is compared before the address is held back: behind a shared address (a proxy, a CDN)
+		// someone else's wrong keys must not lock out the right one.
 		if ( ! $record || ! hash_equals( $record['hash'], $hash ) ) {
 			if ( isset( self::retired()[ $hash ] ) ) {
 				return self::error( 'revoked', 'This connection key was revoked or replaced in WordPress. Create a new one on the Contentrain Bridge screen.', 401 );
 			}
+			$failures = (int) get_transient( self::failures( $ip ) );
+			if ( $failures >= self::FAILURES ) {
+				return self::error( 'rate_limited', 'Too many wrong connection keys from this address; wait 15 minutes.', 429, array( 'retry_after' => self::WINDOW ) );
+			}
 			set_transient( self::failures( $ip ), $failures + 1, self::WINDOW );
 			return self::error( 'invalid', 'The connection key is not valid. Copy it again from the Contentrain Bridge screen.', 401 );
 		}
-		if ( self::expired( $record, self::seen( $record ) ) ) {
-			return self::error( 'expired', 'The connection key expired (an hour unused, or 14 days old). Create a new one on the Contentrain Bridge screen.', 401 );
+		if ( time() > self::ends( $record ) ) {
+			return null === $record['pairing']
+				? self::error( 'expired', 'The connection key was not used within an hour of being created. Create a new one on the Contentrain Bridge screen.', 401 )
+				: self::error( 'expired', 'The connection key is 14 days old. Create a new one on the Contentrain Bridge screen.', 401 );
 		}
 		wp_set_current_user( (int) $record['user'] );
 		if ( ! Admin::permitted() ) {
@@ -161,19 +170,39 @@ final class Key {
 			wp_set_current_user( 0 );
 			return self::error( 'paired_elsewhere', 'This connection key belongs to another Migrate order. Create a new one for this order.', 403 );
 		}
+		// Paired by the first accepted request of any route — Migrate's access check included, which reads an
+		// export that does not exist — so a queue before the run cannot outlast the unpaired hour.
+		if ( null === $record['pairing'] ) {
+			$record['pairing'] = $pairing;
+			update_option( self::OPTION, $record, false );
+		}
+		update_option( self::SEEN, array( 'at' => time(), 'ip' => $ip ), false );
 		// The export in the route itself, never a body or query field of the same name.
 		$id = $request->get_url_params()['id'] ?? null;
 		if ( null !== $id && ! in_array( $id, self::exports(), true ) ) {
 			wp_set_current_user( 0 );
 			return new \WP_Error( 'bridge_not_found', 'No such export for this connection key.', array( 'status' => 404 ) );
 		}
-		if ( null === $record['pairing'] ) {
-			$record['pairing'] = $pairing;
-			update_option( self::OPTION, $record, false );
-		}
-		update_option( self::SEEN, array( 'at' => time(), 'ip' => $ip ), false );
 		self::$active = true;
 		return true;
+	}
+
+	/** DELETE /key: Migrate closes its own key when the order is done. Only the key itself can ask. */
+	public static function permitted_self( $request ) {
+		self::clear();
+		$key = self::presented( $request );
+		if ( is_wp_error( $key ) ) {
+			return $key;
+		}
+		if ( null === $key ) {
+			return self::error( 'required', 'Send the connection key to revoke it.', 401 );
+		}
+		return self::authorize( $request, $key );
+	}
+
+	public static function revoke_self() {
+		self::revoke();
+		return new \WP_REST_Response( array( 'revoked' => true ), 200, array( 'Cache-Control' => 'private, no-store' ) );
 	}
 
 	/** The exports this key started or reused, newest last. */
@@ -211,9 +240,9 @@ final class Key {
 		return array( 'at' => $at, 'ip' => $ip );
 	}
 
-	private static function expired( $record, $seen ) {
-		$now = time();
-		return $now - $seen['at'] > self::IDLE || $now - (int) $record['created_at'] > self::LIFETIME;
+	/** When the key stops working: an hour after creation while unpaired, 14 days after creation once paired. */
+	private static function ends( $record ) {
+		return (int) $record['created_at'] + ( null === $record['pairing'] ? self::UNPAIRED : self::LIFETIME );
 	}
 
 	private static function ip() {
