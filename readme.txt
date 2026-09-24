@@ -4,7 +4,7 @@ Tags: export, migration, headless, astro, content
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 0.3.1
+Stable tag: 0.4.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -58,6 +58,10 @@ No. It collects no analytics and contacts no Contentrain server. The only reques
 
 Yes, when you include the Media type. Each upload and its generated sizes are copied into `media/` in the export, and content that pointed at a WordPress upload URL is rewritten to that path, so images keep working after this site is gone. Media records also keep the original URL. Files larger than 8 MB, files missing from disk, and anything past the export's total media budget keep their WordPress URL instead of being half-copied; the coverage report lists them. The 8 MB ceiling exists because GitHub delivery has to hold a file in memory to upload it.
 
+= What is the Contentrain Migrate connection key? =
+
+A way for Contentrain Migrate to read this site's content when your host blocks application passwords (some hosts strip the Authorization header they travel in). Create it under Tools > Contentrain Bridge and paste it into Migrate. It lets Migrate start and read content exports as you, nothing else: it does not open the rest of the WordPress REST API. It is shown once and only a fingerprint of it is stored. Paste it into Migrate within an hour; once Migrate has used it, it works for that one move until 14 days after it was created, until Migrate closes it when the move is done, or until you revoke it or create a new one. It can only be created and used over HTTPS. Nothing is sent from your site to Contentrain when you create it.
+
 = Which comment data is exported? =
 
 Only when explicitly selected: author name, URL, content, status, dates and relationships. Email addresses, IP addresses, user-agent values and comment metadata are excluded.
@@ -68,9 +72,14 @@ The active theme and child theme, and optionally the source files of active plug
 
 == Privacy ==
 
-The plugin stores export ownership and a source revision marker. It sends nothing anywhere on its own; an export leaves the site only when you download it, deliver it to GitHub, or authorize a program to read it through the REST export API with an administrator's application password. Export files are written to a private, per-administrator directory, are removed on uninstall, and expire after a day. An export can contain site content, author display names, selected post metadata and, if you chose it, privacy-minimized comments. Treat a downloaded export as you would a WordPress export file. If you deliver to GitHub, the exported content is sent to GitHub under the account whose token you provide; choose a private repository when the export includes draft or private content.
+The plugin stores export ownership and a source revision marker. It sends nothing anywhere on its own; an export leaves the site only when you download it, deliver it to GitHub, or authorize a program to read it through the REST export API with an administrator's application password or a Contentrain Migrate connection key. For a connection key the plugin stores a fingerprint of the key (never the key), the Migrate order it is paired with, and the time and IP address of its last use; creating a new key or revoking it, and uninstalling the plugin, removes them. Export files are written to a private, per-administrator directory, are removed on uninstall, and expire after a day. An export can contain site content, author display names, selected post metadata and, if you chose it, privacy-minimized comments. Treat a downloaded export as you would a WordPress export file. If you deliver to GitHub, the exported content is sent to GitHub under the account whose token you provide; choose a private repository when the export includes draft or private content.
 
 == Changelog ==
+
+= 0.4.0 =
+
+* Contentrain Migrate connection key: Migrate can start and read exports on hosts that strip the Authorization header, without an application password. Shown once, HTTPS only, bound to one Migrate order: an hour to paste it, then valid for that order up to 14 days; revocable by you or closed by Migrate.
+* REST: `GET /about` says which sign-in a reader can use; `POST /exports/{id}/read` reads a snapshot for a caller whose key travels in the request body; `DELETE /key` lets Migrate close its own key.
 
 = 0.3.1 =
 

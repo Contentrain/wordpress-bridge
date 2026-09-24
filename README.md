@@ -89,14 +89,19 @@ site's repository holds the store, not a raw copy of every record.
 ## REST export API (for Migrate)
 
 An administrator's application password is enough to start, advance and read an
-export; every route needs `export` + `manage_options`, like the read API.
+export; every route needs `export` + `manage_options`, like the read API. Where
+the host strips the Authorization header, the Contentrain Migrate connection key
+does the same job (below).
 
 | Route | Answer |
 |---|---|
+| `GET /wp-json/contentrain-bridge/v1/about` | No sign-in: `{ version, auth: ["app_password", "key"] }`. A 404 is a Bridge older than 0.4.0 (application password only). |
 | `POST /wp-json/contentrain-bridge/v1/exports` `{ types?, private?, comments?, media_files?, max_age?, fresh? }` | `201 { export, reused: false }`; the caller's live export with the same scope instead: `200 { export, reused: true }`. With `max_age` (seconds) only one started within it is reused; an older one is removed and replaced (`fresh=1`: always). `409 bridge_export_busy` while the one to replace is running, or was read in the last 10 minutes (a download in progress). At most three live remote exports per user (`429`). |
 | `GET /wp-json/contentrain-bridge/v1/exports` | `{ exports: [export] }`, the caller's remote exports, oldest first. |
 | `POST /wp-json/contentrain-bridge/v1/exports/{id}/advance` | Runs steps for about 20 seconds: `{ export }`. While another request holds it: `{ export, busy: true }`, nothing run. |
 | `GET /wp-json/contentrain-bridge/v1/exports/{id}` | Once `ready`: the file list with sha256 and bytes. `?file=` one file up to 8 MiB; `?file=&offset=N&length=M` any file in base64 chunks of up to 8 MiB, with the whole file's `sha256` and `bytes`. |
+| `POST /wp-json/contentrain-bridge/v1/exports/{id}/read` `{ file?, offset?, length? }` | The same answers as `GET /exports/{id}`, for a caller whose key travels in the body. |
+| `DELETE /wp-json/contentrain-bridge/v1/key` | With the key only (and its pairing): `{ revoked: true }`. Migrate closes the key when the order is done. |
 
 `media_files: false` keeps every attachment record but copies no file: nothing
 under `media/`, and the store keeps the WordPress upload URLs (a reader that
@@ -108,6 +113,43 @@ with `error: { code, message }`: `content_changed` (WordPress changed under the
 snapshot; start again), `too_large`, `review_required` or `export_failed`. A
 remote export scans no theme or plugin source, so it has no interface text to
 review and never waits on a person. Exports expire 24 hours after they start.
+
+### Connection key (BR-27)
+
+An administrator creates it under Tools > Contentrain Bridge ("Connect to
+Contentrain Migrate") and pastes it into Migrate. It is shown once; only its
+SHA-256 is stored.
+
+- Send it as the `X-Contentrain-Key` header **and**, in every POST, as the
+  `contentrain_key` body field (either may be stripped on the way; both are
+  compared when both arrive). It is never read from the query string.
+- Every call also carries `contentrain_pairing` (Migrate's order id,
+  `[A-Za-z0-9_-]{8,64}`): in the JSON body of a POST or DELETE, in the query of a
+  GET. The first accepted call of any route pairs the key with it — an access
+  check that reads a non-existent export (`404 bridge_not_found`) included;
+  another pairing is refused.
+- It acts as the administrator who created it, while they still have `export`
+  + `manage_options`, and opens these routes only. It sees only the exports it
+  started, and runs one at a time: another scope while one runs is
+  `409 bridge_export_live`; once that one is `ready` or `failed`, a rerun starts.
+- Unpaired, it stops working an hour after it was created. Paired, it has no
+  idle limit (reruns can be days apart) and works until 14 days after it was
+  created, or until it is revoked (the Bridge screen, or `DELETE /key`) or
+  replaced. HTTPS only (or `local` sites), like WordPress's application passwords.
+
+| Code | Status | Meaning |
+|---|---|---|
+| `bridge_key_invalid` | 401 | Unknown key. |
+| `bridge_key_expired` | 401 | Unpaired an hour after creation, or 14 days old. |
+| `bridge_key_required` | 401 | `DELETE /key` without the key. |
+| `bridge_key_revoked` | 401 | Revoked, or replaced by a newer key. |
+| `bridge_key_mismatch` | 400 | Header and body carry different keys. |
+| `bridge_key_pairing_required` | 400 | No valid `contentrain_pairing`. |
+| `bridge_key_forbidden` | 403 | Its administrator can no longer export. |
+| `bridge_key_paired_elsewhere` | 403 | The key belongs to another order. |
+| `bridge_key_insecure` | 403 | The site is not served over HTTPS. |
+| `bridge_key_rate_limited` | 429 | A wrong key after ten from this address in 15 minutes; `data.retry_after` seconds. The right key is compared first and never held back. |
+| `bridge_not_found` | 404 | Not this key's export. |
 
 ## Delta cursor (what changed since the last delivery)
 
