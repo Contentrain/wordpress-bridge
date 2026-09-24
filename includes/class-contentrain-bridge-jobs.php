@@ -39,7 +39,7 @@ final class Jobs {
 			'inventory' => $inventory, 'default_locale' => $locale, 'locales' => array( $locale => true ), 'i18n' => count( $languages ) > 1,
 			'options' => array( 'types' => $types, 'private' => ! empty( $input['private'] ), 'comments' => ! empty( $input['comments'] ), 'media_files' => ! array_key_exists( 'media_files', $input ) || ! empty( $input['media_files'] ), 'scan_plugins' => ! empty( $input['scan_plugins'] ), 'scan_sources' => ! empty( $input['scan_sources'] ), 'scan_render' => ! empty( $input['scan_render'] ), 'selected_meta' => array_values( array_filter( array_map( 'sanitize_text_field', (array) ( $input['selected_meta'] ?? array() ) ) ) ), 'labels' => array_map( 'sanitize_text_field', (array) ( $input['labels'] ?? array() ) ) ),
 			'uploads' => array_intersect_key( (array) wp_get_upload_dir(), array_flip( array( 'basedir', 'baseurl' ) ) ),
-			'record_scope' => Inventory::scope( $types, array_filter( array_map( 'sanitize_text_field', (array) ( $input['selected_meta'] ?? array() ) ) ), ! empty( $input['private'] ) ), 'records' => array(),
+			'record_scope' => Inventory::scope( $types, array_filter( array_map( 'sanitize_text_field', (array) ( $input['selected_meta'] ?? array() ) ) ), ! empty( $input['private'] ) ),
 			'models' => array(), 'tables' => array(), 'files' => array(), 'candidates' => array(), 'counts' => array( 'posts' => 0, 'media' => 0, 'media_files' => 0, 'media_bytes' => 0, 'media_kept_remote' => 0, 'comments' => 0, 'warnings' => 0 ),
 		);
 		$site = array( 'url' => home_url( '/' ), 'title' => get_bloginfo( 'name' ), 'description' => get_bloginfo( 'description' ), 'language' => $locale, 'base_site_url' => site_url( '/' ), 'base_blog_url' => home_url( '/' ), 'generator' => 'WordPress/' . get_bloginfo( 'version' ), 'export_date' => $job['created_at'] );
@@ -83,7 +83,20 @@ final class Jobs {
 		if ( count( $job['files'] ) > 50000 ) {
 			throw new \RuntimeException( 'Export exceeds 50,000 files; reduce its scope.' );
 		}
-		Files::put( Files::dir( $job['id'] ), 'state.json', Policy::json( $job ) );
+		// Internal state, not a delivered file: compact, and without Policy's recursive canonical sort
+		// over the table index, whose copies were what exhausted memory (BR-24). Everything else keeps
+		// the canonical order every step has always read back; the file list is sorted in place.
+		foreach ( array_keys( $job ) as $key ) {
+			if ( 'tables' !== $key && 'files' !== $key ) {
+				$job[ $key ] = Policy::canonical( $job[ $key ] );
+			}
+		}
+		ksort( $job['files'], SORT_STRING );
+		$json = wp_json_encode( $job, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
+		if ( false === $json ) {
+			throw new \RuntimeException( 'Export state cannot be encoded as UTF-8 JSON.' );
+		}
+		Files::put( Files::dir( $job['id'] ), 'state.json', $json );
 	}
 
 	/** Also permits deleting an expired job, but never races an active writer. */
@@ -142,30 +155,95 @@ final class Jobs {
 			if ( (int) $expected !== $job['step'] ) {
 				return self::summary( $job );
 			}
-			self::snapshot( $job );
-			if ( 'media' === $job['phase'] ) {
-				self::media( $job );
-			} elseif ( 'posts' === $job['phase'] ) {
-				self::posts( $job );
-			} elseif ( 'terms' === $job['phase'] ) {
-				self::terms( $job );
-			} elseif ( 'inventory' === $job['phase'] ) {
-				self::inventory( $job );
-			} elseif ( 'comments' === $job['phase'] ) {
-				self::comments( $job );
-			} elseif ( 'sources' === $job['phase'] ) {
-				self::sources( $job );
-			} elseif ( 'tables' === $job['phase'] ) {
-				$paths = array_keys( $job['tables'] );
-				if ( isset( $paths[ $job['cursor'] ] ) ) {
-					Models::table( $job, $paths[ $job['cursor']++ ] );
-				} else {
-					self::finish( $job );
+			self::tick( $job );
+		} );
+	}
+
+	/** Seconds between intermediate saves in `run()`: what a killed request can lose. */
+	const SAVE_EVERY = 2;
+
+	/**
+	 * When this request must stop stepping: PHP's max_execution_time (30 s on many shared
+	 * hosts) less a margin for the last save and the response, counted from the request's start.
+	 */
+	public static function time_limit() {
+		$max = (int) ini_get( 'max_execution_time' );
+		if ( $max <= 0 ) {
+			return INF;
+		}
+		$start = isset( $_SERVER['REQUEST_TIME_FLOAT'] ) ? (float) $_SERVER['REQUEST_TIME_FLOAT'] : microtime( true );
+		return $start + $max - 5;
+	}
+
+	/**
+	 * Steps until `$deadline` (microtime) or a phase that waits (review) or ends, under one
+	 * lock and with one read of the state: a large site's export is thousands of steps, and
+	 * re-reading the state for each made it slower the further it got (BR-24). The state is
+	 * saved every SAVE_EVERY seconds too, so a request PHP kills loses seconds, not the call.
+	 * A step starts only when the slowest step so far still fits before the deadline (or
+	 * max_execution_time); a table or the finish, whose length does not follow from the
+	 * steps before it, only while half of the run's time is left. `$first`: this run begins
+	 * the call, so its first step always runs and every call makes progress.
+	 */
+	public static function run( $id, $deadline, $first = true ) {
+		$limit = wp_convert_hr_to_bytes( (string) ini_get( 'memory_limit' ) );
+		$deadline = min( $deadline, self::time_limit() );
+		return self::mutate( $id, static function ( &$job ) use ( $deadline, $limit, $first ) {
+			$saved = microtime( true );
+			$half = ( $deadline - $saved ) / 2;
+			$slowest = 0.0;
+			$taken = 0;
+			while ( ! in_array( $job['phase'], array( 'review', 'ready', 'failed' ), true ) ) {
+				if ( ! $first || $taken > 0 ) {
+					// Stop early rather than die: what is done is saved, and the next call continues.
+					$needs = 'tables' === $job['phase'] ? max( $slowest, $half ) : $slowest;
+					if ( microtime( true ) + $needs >= $deadline || ( $limit > 0 && memory_get_usage() > 0.7 * $limit ) ) {
+						break;
+					}
+				}
+				$started = microtime( true );
+				self::tick( $job );
+				++$taken;
+				// Every post, term and meta row read stays in WordPress's in-request cache; over
+				// thousands of steps that alone exhausts a 64 MB host. A persistent cache is left alone.
+				if ( ! wp_using_ext_object_cache() ) {
+					function_exists( 'wp_cache_flush_runtime' ) ? wp_cache_flush_runtime() : wp_cache_flush();
+				}
+				$now = microtime( true );
+				$slowest = max( $slowest, $now - $started );
+				if ( $now - $saved >= self::SAVE_EVERY ) {
+					self::save( $job );
+					$saved = microtime( true );
 				}
 			}
-			self::snapshot( $job );
-			++$job['step'];
 		} );
+	}
+
+	/** One step of the current phase. */
+	private static function tick( &$job ) {
+		self::snapshot( $job );
+		if ( 'media' === $job['phase'] ) {
+			self::media( $job );
+		} elseif ( 'posts' === $job['phase'] ) {
+			self::posts( $job );
+		} elseif ( 'terms' === $job['phase'] ) {
+			self::terms( $job );
+		} elseif ( 'inventory' === $job['phase'] ) {
+			self::inventory( $job );
+		} elseif ( 'comments' === $job['phase'] ) {
+			self::comments( $job );
+		} elseif ( 'sources' === $job['phase'] ) {
+			self::sources( $job );
+		} elseif ( 'tables' === $job['phase'] ) {
+			$paths = array_keys( $job['tables'] );
+			if ( isset( $paths[ $job['cursor'] ] ) ) {
+				Models::table( $job, $paths[ $job['cursor']++ ] );
+			} else {
+				self::finish( $job );
+			}
+		}
+		self::snapshot( $job );
+		++$job['step'];
 	}
 
 	/**
@@ -312,7 +390,14 @@ final class Jobs {
 
 	private static function posts( &$job ) {
 		global $wpdb;
-		$types = $job['options']['types'];
+		// Attachments were read, and counted, in the media phase: walking them again only to skip them
+		// cost minutes on a site with tens of thousands of uploads (BR-23).
+		$types = array_values( array_diff( $job['options']['types'], array( 'attachment' ) ) );
+		if ( ! $types ) {
+			$job['phase'] = 'terms';
+			$job['cursor'] = 0;
+			return;
+		}
 		$placeholders = implode( ',', array_fill( 0, count( $types ), '%s' ) );
 		$args = array_merge( array( $job['cursor'] ), $types );
 		$sql = "SELECT ID FROM {$wpdb->posts} WHERE ID > %d AND post_type IN ($placeholders) ORDER BY ID ASC LIMIT 25";
@@ -416,9 +501,14 @@ final class Jobs {
 	 */
 	private static function inventory( &$job ) {
 		list( $records, $job['inventory_cursor'] ) = Inventory::page( $job['record_scope'], $job['inventory_cursor'] );
-		foreach ( $records as $record ) {
-			$job['records'][ Inventory::key( $record ) ] = $record;
-		}
+		// Beside the state, one JSON line per record: a large site's inventory would not fit in the state
+		// that every step reads and writes (BR-24). Pages are disjoint, and a request that died after
+		// appending but before saving left lines the saved cursor does not know: they are cut off
+		// first, so the page is written again exactly once.
+		$journal = Files::dir( $job['id'] ) . '/inventory.jsonl';
+		Inventory::truncate( $journal, $job['journal_bytes'] ?? 0 );
+		Inventory::append( $journal, $records );
+		$job['journal_bytes'] = Inventory::bytes( $journal );
 		if ( 'done' === $job['inventory_cursor']['stage'] ) {
 			unset( $job['inventory_cursor'] );
 			$job['phase'] = 'comments';
@@ -583,7 +673,15 @@ final class Jobs {
 	private static function finish( &$job ) {
 		Models::file( $job, 'bridge/validation.json', Policy::json( Validator::run( $job ) ) );
 		Models::file( $job, 'CONTENTRAIN-EXPORT.md', "# Contentrain WordPress export\n\nFree, editable JSON and Markdown content. Models live in `.contentrain/models`.\n\nMarkdown bodies preserve the original WordPress HTML; shortcodes and dynamic blocks require a renderer. Source files and the live WordPress theme have not been rewritten. Transferred media lives under `media/` and content links to it; anything too large or unreadable kept its WordPress URL and is listed in the warnings. Review `bridge/warnings.json` and `bridge/string-sources.json` for scope and text decisions.\n\nUse Contentrain Studio or the query SDK to edit/read this store. For an Astro website, choose the optional Migrate handoff from WordPress after delivery.\n" );
-		Models::file( $job, 'bridge/inventory.json', Policy::json( Inventory::document( $job['record_scope'], $job['records'], $job['created_at'], true, $job['inventory'] ) ) );
+		$journal = Files::dir( $job['id'] ) . '/inventory.jsonl';
+		if ( ! empty( $job['records'] ) ) {
+			// An export started before the inventory moved out of the state.
+			Inventory::truncate( $journal, $job['journal_bytes'] ?? 0 );
+			Inventory::append( $journal, array_values( $job['records'] ) );
+			unset( $job['records'] );
+			$job['journal_bytes'] = Inventory::bytes( $journal );
+		}
+		Inventory::write( $job, $journal, 'bridge/inventory.json' );
 		// Services the site is connected to. The home page is read for script hosts only when the
 		// person chose to scan rendered pages; no credential is written, only names and hosts.
 		$home = '';

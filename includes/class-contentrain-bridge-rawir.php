@@ -89,7 +89,7 @@ final class Rawir {
 			throw new \RuntimeException( 'Cannot finalize RawIR.' );
 		}
 		Files::fs()->chmod( $target, 0600 );
-		$job['files'][ self::PATH ] = array( 'sha256' => hash_file( 'sha256', $target ), 'bytes' => filesize( $target ) );
+		$job['files'][ self::PATH ] = array( 'bytes' => filesize( $target ), 'sha256' => hash_file( 'sha256', $target ) );
 	}
 
 	/**
@@ -112,11 +112,10 @@ final class Rawir {
 		}
 		uksort( $index, static function ( $a, $b ) { return (float) $a <=> (float) $b; } );
 		$dir = Files::dir( $job['id'] );
-		$bucket = hash( 'sha256', $path );
 		self::put( $stream, $keyed ? '{' : '[' );
 		$first = true;
-		foreach ( $index + $named as $key => $row ) {
-			$json = trim( Files::read( $dir, 'rows/' . $bucket . '/' . $row . '.json' ) );
+		foreach ( array_keys( $index + $named ) as $key ) {
+			$json = trim( Files::read( $dir, Models::row_file( $path, $key ) ) );
 			self::put( $stream, ( $first ? "\n" : ",\n" ) . ( $keyed ? wp_json_encode( (string) $key ) . ': ' : '' ) . $json );
 			$first = false;
 		}

@@ -10,13 +10,13 @@ final class Models {
 			throw new \RuntimeException( 'One content file exceeds the 8 MiB export safety limit: ' . $path ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Diagnostic data is escaped at the admin output boundary or JSON encoded.
 		}
 		Files::put( Files::dir( $job['id'] ) . '/output', $path, $content );
-		$job['files'][ $path ] = array( 'sha256' => hash( 'sha256', $content ), 'bytes' => strlen( $content ) );
+		$job['files'][ $path ] = array( 'bytes' => strlen( $content ), 'sha256' => hash( 'sha256', $content ) );
 	}
 
 	/** Copy a source file into the export and record it like any other output. */
 	public static function binary( &$job, $path, $source ) {
 		$bytes = Files::copy( Files::dir( $job['id'] ) . '/output', $path, $source );
-		$job['files'][ $path ] = array( 'sha256' => hash_file( 'sha256', Files::path( Files::dir( $job['id'] ) . '/output', $path ), false ), 'bytes' => $bytes );
+		$job['files'][ $path ] = array( 'bytes' => $bytes, 'sha256' => hash_file( 'sha256', Files::path( Files::dir( $job['id'] ) . '/output', $path ), false ) );
 		return $bytes;
 	}
 
@@ -44,11 +44,19 @@ final class Models {
 		);
 	}
 
+	/**
+	 * One row of a table, on disk. The job state keeps only the table's keys (value 1): the
+	 * row's file name is derived from the key, and a large site's state stays small enough to
+	 * read and write on every step (BR-24).
+	 */
 	public static function row( &$job, $path, $key, $value ) {
-		$bucket = hash( 'sha256', $path );
-		$row = hash( 'sha256', (string) $key );
-		Files::put( Files::dir( $job['id'] ), 'rows/' . $bucket . '/' . $row . '.json', Policy::json( $value ) );
-		$job['tables'][ $path ][ (string) $key ] = $row;
+		Files::put( Files::dir( $job['id'] ), self::row_file( $path, $key ), Policy::json( $value ) );
+		$job['tables'][ $path ][ (string) $key ] = 1;
+	}
+
+	/** Where a table row is stored, relative to the job directory. */
+	public static function row_file( $path, $key ) {
+		return 'rows/' . hash( 'sha256', $path ) . '/' . hash( 'sha256', (string) $key ) . '.json';
 	}
 
 	/**
@@ -483,8 +491,8 @@ final class Models {
 		try {
 			self::write_stream( $stream, "{\n" );
 			$first = true;
-			foreach ( $rows as $key => $row ) {
-				$json = trim( Files::read( $dir, 'rows/' . hash( 'sha256', $path ) . '/' . $row . '.json' ) );
+			foreach ( array_keys( $rows ) as $key ) {
+				$json = trim( Files::read( $dir, self::row_file( $path, $key ) ) );
 				self::write_stream( $stream, ( $first ? '' : ",\n" ) . '  ' . wp_json_encode( (string) $key ) . ': ' . str_replace( "\n", "\n  ", $json ) );
 				$first = false;
 			}
@@ -496,6 +504,6 @@ final class Models {
 			throw new \RuntimeException( 'Cannot finalize content table.' );
 		}
 		Files::fs()->chmod( $target, 0600 );
-		$job['files'][ $path ] = array( 'sha256' => hash_file( 'sha256', $target ), 'bytes' => filesize( $target ) );
+		$job['files'][ $path ] = array( 'bytes' => filesize( $target ), 'sha256' => hash_file( 'sha256', $target ) );
 	}
 }

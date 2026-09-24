@@ -142,6 +142,101 @@ final class Inventory {
 		return $document;
 	}
 
+	/** Add a page of records to the job's inventory file, one compact JSON line each. */
+	public static function append( $file, $records ) {
+		if ( ! $records ) {
+			return;
+		}
+		$lines = '';
+		foreach ( $records as $record ) {
+			$lines .= wp_json_encode( $record, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) . "\n";
+		}
+		if ( false === file_put_contents( $file, $lines, FILE_APPEND | LOCK_EX ) ) { // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- Append-only journal; WP_Filesystem cannot append.
+			throw new \RuntimeException( 'Cannot write the inventory.' );
+		}
+	}
+
+	/** The inventory file's length, 0 when there is none yet. */
+	public static function bytes( $file ) {
+		clearstatcache( true, $file );
+		return file_exists( $file ) ? (int) filesize( $file ) : 0;
+	}
+
+	/** Cut the inventory file back to `$bytes`: what the saved state accounts for. */
+	public static function truncate( $file, $bytes ) {
+		if ( self::bytes( $file ) <= $bytes ) {
+			return;
+		}
+		$handle = fopen( $file, 'r+b' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Truncating a journal; WP_Filesystem cannot.
+		if ( ! $handle || ! ftruncate( $handle, $bytes ) ) {
+			throw new \RuntimeException( 'Cannot write the inventory.' );
+		}
+		fclose( $handle ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Native stream opened above.
+	}
+
+	/**
+	 * `bridge/inventory.json` from the job's inventory file, the same document `document()`
+	 * builds, without holding the records in memory: an index of short sort keys, one pass
+	 * for the hash (which sorts before `records` in the file), and the records streamed in.
+	 */
+	public static function write( &$job, $journal, $path ) {
+		$index = array();
+		$in = file_exists( $journal ) ? fopen( $journal, 'rb' ) : null; // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Streamed read of a large journal.
+		if ( $in ) {
+			for ( $offset = ftell( $in ); false !== ( $line = fgets( $in ) ); $offset = ftell( $in ) ) {
+				if ( preg_match( '/^\{"wp_type":"((?:[^"\\\\]|\\\\.)*)","wp_id":(\d+)/', $line, $m ) ) {
+					$index[] = stripcslashes( $m[1] ) . "\0" . str_pad( $m[2], 20, '0', STR_PAD_LEFT ) . "\0" . $offset;
+				} else {
+					$record = json_decode( $line, true );
+					$index[] = $record['wp_type'] . "\0" . str_pad( (string) (int) $record['wp_id'], 20, '0', STR_PAD_LEFT ) . "\0" . $offset;
+				}
+			}
+		}
+		// (wp_type, wp_id): the type by strcmp, then the zero-padded id; exactly `compare()`.
+		sort( $index, SORT_STRING );
+		$read = static function ( $entry ) use ( $in ) {
+			fseek( $in, (int) substr( $entry, strrpos( $entry, "\0" ) + 1 ) );
+			return json_decode( fgets( $in ), true );
+		};
+		$hash = hash_init( 'sha256' );
+		foreach ( $index as $n => $entry ) {
+			$r = $read( $entry );
+			hash_update( $hash, ( $n ? "\n" : '' ) . wp_json_encode( array( (string) $r['wp_type'], (int) $r['wp_id'], (string) $r['fingerprint'], $r['path'] ?? null, $r['status'] ?? null ), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) );
+		}
+		$marker = '@@contentrain-bridge-records@@';
+		$document = self::document( $job['record_scope'], array(), $job['created_at'], true, $job['inventory'] );
+		$document['records'] = $marker;
+		$document['inventory_hash'] = hash_final( $hash );
+		list( $head, $tail ) = explode( '"' . $marker . '"', Policy::json( $document ), 2 );
+		$target = Files::path( Files::dir( $job['id'] ) . '/output', $path );
+		if ( ! Files::mkdir( dirname( $target ) ) ) {
+			throw new \RuntimeException( 'Cannot create content directory.' );
+		}
+		$out = fopen( $target . '.tmp', 'wb' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Streamed write of a large document.
+		if ( ! $out ) {
+			throw new \RuntimeException( 'Cannot write the inventory.' );
+		}
+		try {
+			fwrite( $out, $head . ( $index ? "[\n" : '[]' ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- Streamed write.
+			foreach ( $index as $n => $entry ) {
+				// The record exactly as Policy::json would place it, two levels in.
+				$json = rtrim( Policy::json( $read( $entry ) ), "\n" );
+				fwrite( $out, ( $n ? ",\n" : '' ) . '    ' . str_replace( "\n", "\n    ", $json ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- Streamed write.
+			}
+			fwrite( $out, ( $index ? "\n  ]" : '' ) . $tail ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- Streamed write.
+		} finally {
+			fclose( $out ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Streamed write.
+			if ( $in ) {
+				fclose( $in ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Streamed read.
+			}
+		}
+		if ( ! Files::fs()->move( $target . '.tmp', $target, true ) ) {
+			throw new \RuntimeException( 'Cannot finalize the inventory.' );
+		}
+		Files::fs()->chmod( $target, 0600 );
+		$job['files'][ $path ] = array( 'bytes' => filesize( $target ), 'sha256' => hash_file( 'sha256', $target ) );
+	}
+
 	/**
 	 * sha256 over one JSON line per record, `[wp_type, wp_id, fingerprint, path, status]`,
 	 * in (wp_type, wp_id) order. JSON lines, not a PHP serialization, so a

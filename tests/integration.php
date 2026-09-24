@@ -454,8 +454,7 @@ check( ! isset( $job['tables']['bridge/raw-posts.json'][ $draft ] ), 'draft excl
 // raw shape it had before this plugin knew how to read ACF at all: an
 // inventory fingerprint must not change for every non-ACF record just
 // because ACF support exists now.
-$post_raw_row = $job['tables']['bridge/raw-posts.json'][ $post ];
-$post_raw = json_decode( Files::read( Files::dir( $id ), 'rows/' . hash( 'sha256', 'bridge/raw-posts.json' ) . '/' . $post_raw_row . '.json' ), true );
+$post_raw = json_decode( Files::read( Files::dir( $id ), \Contentrain\Bridge\Models::row_file( 'bridge/raw-posts.json', $post ) ), true );
 check( ! array_key_exists( 'acf', $post_raw ), 'a post outside every ACF field group carries no acf key at all, so its inventory fingerprint is unchanged by ACF support' );
 check( ! isset( $job['models']['wp-post']['fields']['slug'] ), 'document system slug is not declared as a field' );
 check( isset( $job['models']['wp-structured-values'] ), 'nested content becomes editable related records' );

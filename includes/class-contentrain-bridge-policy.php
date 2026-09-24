@@ -140,6 +140,11 @@ final class Policy {
 		return $data;
 	}
 
+	/** Keys in canonical order, recursively: what `json()` writes, as a value. */
+	public static function canonical( $value ) {
+		return self::sort( $value );
+	}
+
 	private static function sort( $value, $order = array() ) {
 		if ( is_object( $value ) ) {
 			$vars = self::sort( get_object_vars( $value ), $order );

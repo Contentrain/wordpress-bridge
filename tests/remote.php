@@ -10,6 +10,7 @@ if ( 'local' !== wp_get_environment_type() || 'Bridge Acceptance' !== get_option
 }
 require_once WP_PLUGIN_DIR . '/contentrain-bridge/contentrain-bridge.php';
 use Contentrain\Bridge\Files;
+use Contentrain\Bridge\Inventory;
 use Contentrain\Bridge\Jobs;
 use Contentrain\Bridge\Remote;
 
@@ -220,6 +221,48 @@ list( $status, $again ) = call( 'POST', '/exports', $lean );
 check( 200 === $status && $m === $again['export']['id'], 'the same scope again reuses it' );
 list( $status, $full ) = call( 'POST', '/exports', array( 'types' => array( 'post', 'page', 'attachment' ), 'comments' => true ) );
 check( 201 === $status && $m !== $full['export']['id'] && true === $full['export']['scope']['media_files'], 'an export with media files is a different scope: never reused for the other' );
+
+// ---- A request PHP kills mid-call (max_execution_time, memory): nothing is written twice. ----
+$forget();
+list( , $started ) = call( 'POST', '/exports', $lean );
+$k = $started['export']['id'];
+$state = Files::dir( $k ) . '/state.json';
+$journal = Files::dir( $k ) . '/inventory.jsonl';
+for ( $i = 0; $i < 5000 && 'inventory' !== Jobs::read( $k )['phase']; ++$i ) { Jobs::step( $k, Jobs::read( $k )['step'] ); }
+check( 'inventory' === Jobs::read( $k )['phase'], 'an export stepped to its inventory phase' );
+$saved = file_get_contents( $state );
+Jobs::step( $k, Jobs::read( $k )['step'] );
+clearstatcache();
+$written = filesize( $journal );
+file_put_contents( $state, $saved ); // The request died after appending the page, before saving the state.
+Jobs::step( $k, Jobs::read( $k )['step'] );
+clearstatcache();
+check( $written > 0 && filesize( $journal ) === $written, "the page a killed request appended is written again exactly once ($written bytes)" );
+for ( $i = 0; $i < 400; ++$i ) {
+	list( , $body ) = call( 'POST', "/exports/$k/advance" );
+	if ( in_array( $body['export']['phase'], array( 'ready', 'failed' ), true ) ) { break; }
+}
+$inventory = json_decode( Files::read( Files::dir( $k ) . '/output', 'bridge/inventory.json' ), true );
+$keys = array_map( array( Inventory::class, 'key' ), $inventory['records'] ?? array() );
+check( 'ready' === $body['export']['phase'] && Inventory::verify( $inventory ) && count( $keys ) === count( array_unique( $keys ) ) && Inventory::build( Jobs::read( $k )['record_scope'] )['inventory_hash'] === $inventory['inventory_hash'], 'and inventory.json has no duplicate record: its hash is a clean walk\'s (' . count( $keys ) . ' records)' );
+
+// Past max_execution_time (less its margin) every advance still takes one step, and only one.
+$forget();
+list( , $started ) = call( 'POST', '/exports', $lean );
+$k = $started['export']['id'];
+$request_time = $_SERVER['REQUEST_TIME_FLOAT'];
+$_SERVER['REQUEST_TIME_FLOAT'] = microtime( true ) - 3600;
+ini_set( 'max_execution_time', '3000' );
+$steps = array();
+for ( $i = 0; $i < 5000; ++$i ) {
+	$before = Jobs::read( $k )['step'];
+	list( , $body ) = call( 'POST', "/exports/$k/advance" );
+	$steps[] = $body['export']['step'] - $before;
+	if ( in_array( $body['export']['phase'], array( 'ready', 'failed' ), true ) ) { break; }
+}
+ini_set( 'max_execution_time', '0' );
+$_SERVER['REQUEST_TIME_FLOAT'] = $request_time;
+check( 'ready' === $body['export']['phase'] && array( 1 ) === array_values( array_unique( array_filter( $steps ) ) ) && count( array_filter( $steps ) ) >= count( $steps ) - 1, 'with no time left before max_execution_time, each advance takes exactly one step and the export still reaches ready (' . count( $steps ) . ' calls)' );
 
 $forget();
 echo "\n$checks checks passed.\n";
