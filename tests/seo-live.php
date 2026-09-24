@@ -42,6 +42,10 @@ if ( 'aioseo' === $provider ) {
 	check( '' === $wpdb->last_error, 'the fixture row is in AIOSEO\'s own aioseo_posts table' );
 	wp_cache_flush();
 }
+if ( 'rank_math' === $provider ) {
+	// Rank Math keeps its front end off until registration is connected or skipped; skipping is the wizard's own choice.
+	update_option( 'rank_math_registration_skip', true );
+}
 if ( 'seopress' === $provider ) {
 	// SEOPress prints titles and meta only with its Titles module on.
 	update_option( 'seopress_toggle', array_merge( (array) get_option( 'seopress_toggle', array() ), array( 'toggle-titles' => '1', 'toggle-social' => '1' ) ) );
