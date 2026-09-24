@@ -21,9 +21,21 @@ function check( $value, $message ) {
 $tree = array(
 	array( 'id' => 'a1', 'elType' => 'container', 'settings' => array( 'flex_direction' => 'row' ), 'elements' => array(
 		array( 'id' => 'b1', 'elType' => 'widget', 'widgetType' => 'heading', 'settings' => array( 'title' => 'Welcome', 'header_size' => 'h1' ), 'elements' => array() ),
-		array( 'id' => 'b2', 'elType' => 'widget', 'widgetType' => 'form', 'settings' => array( 'form_name' => 'Contact', 'email_to' => 'owner@example.test', 'mailchimp_api_key' => 'abc123-us1' ), 'elements' => array() ),
+		array( 'id' => 'b2', 'elType' => 'widget', 'widgetType' => 'form', 'settings' => array(
+			'form_name' => 'Contact', 'email_to' => 'owner@example.test', 'mailchimp_api_key' => 'abc123-us1',
+			'webhooks' => 'https://hooks.zapier.com/hooks/catch/123/planted-zap/',
+			'discord_webhook' => 'https://discord.com/api/webhooks/1/planted-discord',
+			'submit_actions' => array( 'webhook', 'email' ),
+			'redirect_to' => 'https://hooks.slack.com/services/T0/B0/planted-slack',
+		), 'elements' => array() ),
 	) ),
 );
+// A widget six containers deep keeps its settings (Elementor: two levels per step).
+$deep = array( 'id' => 'd6', 'elType' => 'widget', 'widgetType' => 'heading', 'settings' => array( 'title' => 'Deep', 'typography' => array( 'size' => 20 ) ), 'elements' => array() );
+for ( $i = 0; $i < 6; $i++ ) {
+	$deep = array( 'id' => 'c' . $i, 'elType' => 'container', 'settings' => array(), 'elements' => array( $deep ) );
+}
+$tree[] = $deep;
 $created = array();
 $open = wp_insert_post( array( 'post_type' => 'page', 'post_title' => 'Builder page', 'post_content' => '<h1>Welcome</h1>', 'post_status' => 'publish' ) );
 $locked = wp_insert_post( array( 'post_type' => 'page', 'post_title' => 'Builder locked', 'post_content' => '<p>Members</p>', 'post_status' => 'publish', 'post_password' => 'let-me-in' ) );
@@ -49,7 +61,13 @@ try {
 	check( is_array( $raw['meta']['_elementor_data'] ?? null ), 'Elementor tree exported without selection, decoded' );
 	check( 'heading' === ( $raw['meta']['_elementor_data'][0]['elements'][0]['widgetType'] ?? '' ), 'widget types survive' );
 	$form = $raw['meta']['_elementor_data'][0]['elements'][1]['settings'] ?? array();
-	check( 'Contact' === ( $form['form_name'] ?? '' ) && ! isset( $form['email_to'] ) && ! isset( $form['mailchimp_api_key'] ), 'secrets inside widget settings are filtered' );
+	check( 'Contact' === ( $form['form_name'] ?? '' ) && ! isset( $form['email_to'] ) && ! isset( $form['mailchimp_api_key'] ) && ! isset( $form['webhooks'] ) && ! isset( $form['discord_webhook'] ), 'secrets inside widget settings are filtered' );
+	check( array_key_exists( 'redirect_to', $form ) && null === $form['redirect_to'], 'a webhook URL under an innocent key is dropped by value' );
+	$node = $raw['meta']['_elementor_data'][1] ?? array();
+	for ( $i = 0; $i < 6; $i++ ) {
+		$node = $node['elements'][0] ?? array();
+	}
+	check( 'Deep' === ( $node['settings']['title'] ?? '' ) && 20 === ( $node['settings']['typography']['size'] ?? null ), 'a widget six containers deep keeps its settings' );
 	check( 'builder' === ( $raw['meta']['_elementor_edit_mode'] ?? '' ) && 'yes' === ( $raw['meta']['_elementor_page_settings']['hide_title'] ?? '' ), 'Elementor page settings exported' );
 
 	$excluded = array();
@@ -76,7 +94,8 @@ try {
 		check( ! isset( $options['block_templates'] ), 'no block templates for a classic theme' );
 	}
 	$json = wp_json_encode( $options ) . wp_json_encode( Exporter::map_post( get_post( $open ) ) );
-	check( false === strpos( $json, 'planted-key' ) && false === strpos( $json, 'abc123-us1' ) && false === strpos( $json, 'owner@example.test' ) && false === strpos( $json, 'let-me-in' ), 'no planted secret anywhere in the output' );
+	$planted = array( 'planted-key', 'abc123-us1', 'owner@example.test', 'let-me-in', 'planted-zap', 'planted-discord', 'planted-slack' );
+	check( array() === array_filter( $planted, static function ( $p ) use ( $json ) { return false !== strpos( $json, $p ); } ), 'no planted secret anywhere in the output' );
 } finally {
 	foreach ( $created as $id ) {
 		wp_delete_post( $id, true );

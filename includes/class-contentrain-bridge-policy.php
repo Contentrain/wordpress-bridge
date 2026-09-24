@@ -28,12 +28,20 @@ final class Policy {
 	const BUILDER = '/^(_elementor_(data|page_settings|template_type|edit_mode|version)|_et_pb_(use_builder|page_layout|side_nav|post_hide_nav|show_title))$/';
 
 	public static function sensitive( $key ) {
-		return (bool) preg_match( '/pass(word|wd)?|secret|token|credential|api[_-]?key|private[_-]?key|authorization|cookie|session|email|(^|_)ip($|_)|user_agent/i', $key );
+		// `webhook`/`hook_url`: form actions (Elementor Pro, Divi) keep secret-bearing URLs under these names.
+		return (bool) preg_match( '/pass(word|wd)?|secret|token|credential|api[_-]?key|private[_-]?key|authorization|cookie|session|email|webhook|hook_url|(^|_)ip($|_)|user_agent/i', $key );
 	}
 
 	/** Never export secrets nested inside selected fields either. */
-	public static function clean( $value, &$excluded, $path = '', $depth = 0 ) {
-		if ( $depth > 12 || is_object( $value ) || is_resource( $value ) ) {
+	/**
+	 * Nesting a builder tree may reach: Elementor spends about two levels per container step
+	 * (`elements` → index) plus repeaters inside widget settings, so twelve cut a widget five
+	 * containers deep. Only builder meta gets this depth; everything else keeps twelve.
+	 */
+	const BUILDER_DEPTH = 64;
+
+	public static function clean( $value, &$excluded, $path = '', $depth = 0, $max_depth = 12 ) {
+		if ( $depth > $max_depth || is_object( $value ) || is_resource( $value ) ) {
 			$excluded[] = array( 'source' => $path, 'reason' => 'unsupported-value' );
 			return null;
 		}
@@ -45,11 +53,12 @@ final class Policy {
 					$excluded[] = array( 'source' => $child, 'reason' => 'sensitive-key' );
 					continue;
 				}
-				$out[ $key ] = self::clean( $item, $excluded, $child, $depth + 1 );
+				$out[ $key ] = self::clean( $item, $excluded, $child, $depth + 1, $max_depth );
 			}
 			return $out;
 		}
-		if ( is_string( $value ) && preg_match( '/-----BEGIN .*PRIVATE KEY-----|\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9]{20,})/', $value ) ) {
+		// Webhook URLs are credentials in URL form: whoever holds one can post into the channel.
+		if ( is_string( $value ) && preg_match( '/-----BEGIN .*PRIVATE KEY-----|\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9]{20,})|hooks\.slack\.com\/services\/|discord(?:app)?\.com\/api\/webhooks\/|hooks\.zapier\.com\/hooks\/|hook\.[a-z0-9]+\.make\.com\//i', $value ) ) {
 			$excluded[] = array( 'source' => $path, 'reason' => 'credential-pattern' );
 			return null;
 		}
@@ -85,7 +94,7 @@ final class Policy {
 					continue;
 				}
 			}
-			$out[ $key ] = self::clean( $value, $excluded, $prefix . '/' . $key );
+			$out[ $key ] = self::clean( $value, $excluded, $prefix . '/' . $key, 0, $builder ? self::BUILDER_DEPTH : 12 );
 		}
 		return $out;
 	}

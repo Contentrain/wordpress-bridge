@@ -178,10 +178,10 @@ final class Exporter {
 			'template'   => get_template(),
 		);
 		if ( function_exists( 'wp_get_global_settings' ) ) {
-			$out['global_settings'] = Policy::clean( wp_get_global_settings(), $excluded, 'options/global_settings' );
+			$out['global_settings'] = Policy::clean( wp_get_global_settings(), $excluded, 'options/global_settings', 0, Policy::BUILDER_DEPTH );
 		}
 		if ( function_exists( 'wp_get_global_styles' ) ) {
-			$out['global_styles'] = Policy::clean( wp_get_global_styles(), $excluded, 'options/global_styles' );
+			$out['global_styles'] = Policy::clean( wp_get_global_styles(), $excluded, 'options/global_styles', 0, Policy::BUILDER_DEPTH );
 		}
 		if ( function_exists( 'wp_is_block_theme' ) && wp_is_block_theme() && function_exists( 'get_block_templates' ) ) {
 			$templates = array();
@@ -202,7 +202,7 @@ final class Exporter {
 		$kit = (int) get_option( 'elementor_active_kit' );
 		if ( $kit ) {
 			$settings = get_post_meta( $kit, '_elementor_page_settings', true );
-			$out['elementor_kit'] = is_array( $settings ) ? Policy::clean( $settings, $excluded, 'options/elementor_kit' ) : array();
+			$out['elementor_kit'] = is_array( $settings ) ? Policy::clean( $settings, $excluded, 'options/elementor_kit', 0, Policy::BUILDER_DEPTH ) : array();
 		}
 		$divi = get_option( 'et_divi' );
 		if ( is_array( $divi ) ) {
