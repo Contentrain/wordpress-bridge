@@ -19,6 +19,14 @@ final class Policy {
 	/** Unknown metadata requires selection; these content keys are understood. */
 	const CORE = array( '_thumbnail_id', '_wp_page_template', '_wp_attachment_image_alt', '_wp_attached_file', '_wp_attachment_metadata' );
 
+	/**
+	 * Page-builder layout meta, understood without selection: Elementor's element tree and page settings,
+	 * Divi's builder switches. A migration rebuilds the page from these; `@contentrain/wp-import` never
+	 * turns them into content fields (its CORE_META drops `_elementor_*`), so status and entry parity are
+	 * untouched. Divi's `_et_pb_old_content` (a backup of the pre-builder body) is not layout and stays out.
+	 */
+	const BUILDER = '/^(_elementor_(data|page_settings|template_type|edit_mode|version)|_et_pb_(use_builder|page_layout|side_nav|post_hide_nav|show_title))$/';
+
 	public static function sensitive( $key ) {
 		return (bool) preg_match( '/pass(word|wd)?|secret|token|credential|api[_-]?key|private[_-]?key|authorization|cookie|session|email|(^|_)ip($|_)|user_agent/i', $key );
 	}
@@ -48,10 +56,16 @@ final class Policy {
 		return $value;
 	}
 
-	public static function meta( $meta, $selected, &$excluded, $prefix ) {
+	public static function meta( $meta, $selected, &$excluded, $prefix, $protected = false ) {
 		$out = array();
 		foreach ( $meta as $key => $values ) {
-			$known = in_array( $key, self::CORE, true ) || preg_match( '/^(_yoast_wpseo_|rank_math_|_aioseo_)/', $key );
+			$builder = (bool) preg_match( self::BUILDER, $key );
+			// A protected post's builder tree is its body in another shape: it follows the password rule, not the meta rule.
+			if ( $builder && $protected ) {
+				$excluded[] = array( 'source' => $prefix . '/' . $key, 'reason' => 'password-protected' );
+				continue;
+			}
+			$known = in_array( $key, self::CORE, true ) || $builder || preg_match( '/^(_yoast_wpseo_|rank_math_|_aioseo_)/', $key );
 			if ( self::sensitive( $key ) || ( ! $known && ! in_array( $key, $selected, true ) ) ) {
 				$excluded[] = array( 'source' => $prefix . '/' . $key, 'reason' => self::sensitive( $key ) ? 'sensitive-key' : 'not-selected' );
 				continue;
@@ -60,6 +74,16 @@ final class Policy {
 			// Bulk get_post_meta returns stored strings. Decode only selected values, never PHP classes.
 			if ( is_string( $value ) && is_serialized( $value ) ) {
 				$value = unserialize( $value, array( 'allowed_classes' => false, 'max_depth' => 32 ) ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_unserialize -- Selected WP metadata; class instantiation is explicitly disabled.
+			}
+			// Elementor keeps its tree as a JSON string; decoded, the secret filter reaches every widget
+			// setting (a form widget's `email_to`, an integration's API key) instead of passing one opaque string.
+			if ( '_elementor_data' === $key && is_string( $value ) ) {
+				$decoded = json_decode( $value, true );
+				$value   = is_array( $decoded ) ? $decoded : null;
+				if ( null === $value ) {
+					$excluded[] = array( 'source' => $prefix . '/' . $key, 'reason' => 'unparseable-builder-data' );
+					continue;
+				}
 			}
 			$out[ $key ] = self::clean( $value, $excluded, $prefix . '/' . $key );
 		}

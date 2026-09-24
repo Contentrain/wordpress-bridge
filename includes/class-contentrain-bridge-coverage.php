@@ -296,6 +296,9 @@ final class Coverage {
 		if ( 'sticky_posts' === $name ) {
 			return 'exported:flag';
 		}
+		if ( in_array( $name, array( 'stylesheet', 'template', 'elementor_active_kit', 'et_divi' ), true ) ) {
+			return 'exported:design';
+		}
 		if ( 0 === strpos( $name, 'widget_' ) || 'sidebars_widgets' === $name ) {
 			return empty( $job['options']['scan_sources'] ) ? 'excluded:interface-text-scan-off' : 'exported:interface-text';
 		}
