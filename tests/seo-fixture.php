@@ -97,6 +97,10 @@ update_post_meta( $a, '_seopress_titles_title', '%%post_title%% %%sep%% %%siteti
 update_post_meta( $a, '_seopress_titles_desc', 'SEOPress description' );
 update_post_meta( $a, '_seopress_robots_index', 'yes' );
 update_term_meta( $f['terms']['topic'], 'rank_math_title', 'Topic %term% %sep% %sitename%' );
+// AIOSEO Pro keeps term values in its own table (its real columns, reduced to what Bridge reads).
+$aioseo_terms = $wpdb->prefix . 'aioseo_terms';
+$wpdb->query( "CREATE TABLE IF NOT EXISTS {$aioseo_terms} (id bigint(20) unsigned NOT NULL AUTO_INCREMENT, term_id bigint(20) unsigned NOT NULL, title text, description text, canonical_url text, og_title text, og_description text, robots_default tinyint(1) NOT NULL DEFAULT 1, robots_noindex tinyint(1) NOT NULL DEFAULT 0, robots_nofollow tinyint(1) NOT NULL DEFAULT 0, created datetime NOT NULL, updated datetime NOT NULL, PRIMARY KEY (id))" );
+$wpdb->insert( $aioseo_terms, array( 'term_id' => $f['terms']['topic'], 'title' => 'All about #taxonomy_title #separator_sa #site_title', 'description' => 'AIOSEO term description', 'robots_default' => 0, 'robots_noindex' => 1, 'created' => current_time( 'mysql', true ), 'updated' => current_time( 'mysql', true ) ) );
 $make( 'unresolved', 'SEO unresolved', array( 'rank_math_title' => '%title% %unknownvar% %sep% %sitename%', 'rank_math_description' => '%customfield(seo_subtitle)%', 'seo_subtitle' => 'Subtitle from a field' ) );
 
 // ---- Redirects: eight in Redirection, covering served, disabled, gone and conditional. ----

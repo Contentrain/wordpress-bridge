@@ -627,11 +627,16 @@ final class Seo {
 		} else {
 			$appearance = (array) ( self::aioseo_options()['searchAppearance'] ?? array() );
 			$tax = (array) ( $appearance['taxonomies'][ $term->taxonomy ] ?? array() );
+			// AIOSEO Pro keeps a term's own values in its `aioseo_terms` table; the free plugin has none.
+			$row = self::aioseo_term_row( (int) $term->term_id );
+			$own_robots = $row && array_key_exists( 'robots_default', $row ) && empty( $row['robots_default'] );
 			$spec = array(
-				'title'       => array( '', $tax['title'] ?? '', SeoRender::DEFAULTS['aioseo']['term'][0] ),
-				'description' => array( '', $tax['metaDescription'] ?? '', SeoRender::DEFAULTS['aioseo']['term'][1] ),
-				'robots'      => self::aioseo_robots( (array) ( $tax['advanced']['robotsMeta'] ?? array() ), (array) ( $appearance['advanced']['globalRobotsMeta'] ?? array() ) ),
-				'canonical'   => (string) get_term_link( $term ),
+				'title'       => array( $row['title'] ?? '', $tax['title'] ?? '', SeoRender::DEFAULTS['aioseo']['term'][0] ),
+				'description' => array( $row['description'] ?? '', $tax['metaDescription'] ?? '', SeoRender::DEFAULTS['aioseo']['term'][1] ),
+				'robots'      => $own_robots ? self::site_robots( array( empty( $row['robots_noindex'] ), empty( $row['robots_nofollow'] ), 'post' ) ) : self::aioseo_robots( (array) ( $tax['advanced']['robotsMeta'] ?? array() ), (array) ( $appearance['advanced']['globalRobotsMeta'] ?? array() ) ),
+				'canonical'   => '' !== (string) ( $row['canonical_url'] ?? '' ) ? (string) $row['canonical_url'] : (string) get_term_link( $term ),
+				'og'          => array( $row['og_title'] ?? '', $row['og_description'] ?? '', $row['og_image_custom_url'] ?? '' ),
+				'twitter'     => array( $row['twitter_title'] ?? '', $row['twitter_description'] ?? '', $row['twitter_image_custom_url'] ?? '' ),
 			);
 		}
 		return SeoRender::block( $provider, $spec, SeoRender::term_values( $term, self::separator( $provider ) ) );
@@ -734,6 +739,21 @@ final class Seo {
 			$value = get_post_meta( $post->ID, $key, true );
 			return is_scalar( $value ) ? (string) $value : null;
 		};
+	}
+
+	/** A term's row in AIOSEO Pro's `aioseo_terms` table, when the table and the row exist. */
+	private static function aioseo_term_row( $term_id ) {
+		global $wpdb;
+		static $exists = null;
+		$table = $wpdb->prefix . 'aioseo_terms';
+		if ( null === $exists ) {
+			$exists = $table === $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Plugin table probe.
+		}
+		if ( ! $exists ) {
+			return null;
+		}
+		$row = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM %i WHERE term_id = %d', $table, $term_id ), ARRAY_A ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- AIOSEO has no read API when inactive.
+		return $row ? array_map( array( self::class, 'decode' ), $row ) : null;
 	}
 
 	private static function aioseo_options() {

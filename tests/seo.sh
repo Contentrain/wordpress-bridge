@@ -37,4 +37,16 @@ chmod -R a+rX "$here/.out"
 "${cli[@]}" plugin deactivate wordpress-seo redirection >/dev/null
 "${php[@]}" "$plugin/seo-none.php" inactive
 
+# BR-22: each plugin Bridge renders for, live, one at a time: Bridge's rendering against the head it serves.
+prefix="$("${cli[@]}" db prefix | tr -d '[:space:]')"
+# AIOSEO builds its own aioseo_posts; the fixture's reduced one would stand in its way (seo-live.php restores the row).
+"${cli[@]}" db query "DROP TABLE IF EXISTS ${prefix}aioseo_posts" >/dev/null
+for pair in rank_math:seo-by-rank-math aioseo:all-in-one-seo-pack seopress:wp-seopress; do
+  provider="${pair%%:*}"; slug="${pair#*:}"
+  "${cli[@]}" plugin install "$slug" --activate >/dev/null
+  "${cli[@]}" plugin list --name="$slug" --fields=name,version --format=csv | tail -1
+  "${php[@]}" "$plugin/seo-live.php" "$provider"
+  "${cli[@]}" plugin deactivate "$slug" >/dev/null
+done
+
 node "$here/seo-verify.mjs" "$here/.out/seo"
