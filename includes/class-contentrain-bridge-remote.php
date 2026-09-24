@@ -9,7 +9,7 @@ defined( 'ABSPATH' ) || exit;
  * person on the admin screen (BR-19). Same permission as the read API
  * (`export` + `manage_options`), same jobs, same snapshot.
  *
- *   POST /contentrain-bridge/v1/exports                { types?, private?, comments?, max_age?, fresh? }
+ *   POST /contentrain-bridge/v1/exports                { types?, private?, comments?, media_files?, max_age?, fresh? }
  *        201 { export, reused: false } — a new export
  *        200 { export, reused: true }  — the caller's live export with the same scope,
  *                                        started at most `max_age` seconds ago
@@ -56,6 +56,8 @@ final class Remote {
 				'types' => self::sorted( array_intersect( $available, null === $types ? $available : $types ) ),
 				'private' => (bool) $request->get_param( 'private' ),
 				'comments' => (bool) $request->get_param( 'comments' ),
+				// Default true: media files travel with the snapshot unless the reader asks otherwise.
+				'media_files' => null === $request->get_param( 'media_files' ) || rest_sanitize_boolean( $request->get_param( 'media_files' ) ),
 			);
 			if ( ! $scope['types'] ) {
 				return self::error( 'invalid_scope', 'Select at least one content type.', 400 );
@@ -72,7 +74,7 @@ final class Remote {
 					if ( 'failed' === $job['phase'] ) {
 						continue;
 					}
-					$same = self::sorted( $job['options']['types'] ) === $scope['types'] && $job['options']['private'] === $scope['private'] && $job['options']['comments'] === $scope['comments'];
+					$same = self::sorted( $job['options']['types'] ) === $scope['types'] && $job['options']['private'] === $scope['private'] && $job['options']['comments'] === $scope['comments'] && ( $job['options']['media_files'] ?? true ) === $scope['media_files'];
 					if ( $same && null !== $max_age && ( 0 === $max_age || time() - strtotime( $job['created_at'] ) > $max_age ) ) {
 						// Too old to be the content the caller pays for: replaced, and no longer counted.
 						if ( ! self::discard( $job['id'] ) ) {
