@@ -20,7 +20,7 @@ final class SeoRender {
 	/** Each provider's variable names, mapped to one vocabulary. */
 	const VARIABLES = array(
 		'rank_math' => array(
-			'title' => 'title', 'sitename' => 'sitename', 'sitedesc' => 'sitedesc', 'sep' => 'sep', 'excerpt' => 'excerpt', 'excerpt_only' => 'excerpt_only',
+			'title' => 'title', 'sitename' => 'sitename', 'sitedesc' => 'sitedesc', 'sep' => 'sep', 'excerpt' => 'excerpt_whole_words', 'excerpt_only' => 'excerpt_only',
 			'category' => 'category', 'primary_category' => 'category', 'categories' => 'categories', 'tag' => 'tag', 'tags' => 'tags', 'term' => 'term', 'term_description' => 'term_description',
 			'name' => 'author', 'post_author' => 'author', 'date' => 'date', 'modified' => 'modified', 'currentyear' => 'currentyear', 'currentmonth' => 'currentmonth',
 			'currentday' => 'currentday', 'currentdate' => 'currentdate', 'page' => 'page', 'pagenumber' => 'page', 'focuskw' => 'focuskw', 'id' => 'id',
@@ -131,6 +131,8 @@ final class SeoRender {
 		return self::site_values( $sep ) + array(
 			'title'          => html_entity_decode( (string) $post->post_title, ENT_QUOTES | ENT_HTML5, 'UTF-8' ),
 			'excerpt'        => $excerpt,
+			// 156 characters without a broken last word: what Rank Math prints.
+			'excerpt_whole_words' => $own ? (string) $post->post_excerpt : self::whole_words( $content, 156 ),
 			// WordPress's own excerpt length, without its "more" suffix: what AIOSEO prints.
 			'excerpt_words'  => $own ? (string) $post->post_excerpt : wp_trim_words( $content, 55, '' ),
 			'excerpt_only'   => (string) $post->post_excerpt,
@@ -154,6 +156,18 @@ final class SeoRender {
 			'pt_plural'      => $type ? $type->labels->name : '',
 			'url'            => (string) get_permalink( $post ),
 		);
+	}
+
+	/** At most `$limit` characters, ending on a whole word. */
+	public static function whole_words( $text, $limit ) {
+		if ( mb_strlen( $text ) <= $limit ) {
+			return $text;
+		}
+		$cut = mb_substr( $text, 0, $limit );
+		if ( ! preg_match( '/^\s/u', mb_substr( $text, $limit, 1 ) ) ) {
+			$cut = preg_replace( '/\s+\S*$/u', '', $cut );
+		}
+		return rtrim( $cut );
 	}
 
 	/** The shared vocabulary for one term archive. */
