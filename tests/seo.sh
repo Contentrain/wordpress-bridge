@@ -41,12 +41,15 @@ chmod -R a+rX "$here/.out"
 prefix="$("${cli[@]}" db prefix | tr -d '[:space:]')"
 # AIOSEO builds its own aioseo_posts; the fixture's reduced one would stand in its way (seo-live.php restores the row).
 "${cli[@]}" db query "DROP TABLE IF EXISTS ${prefix}aioseo_posts" >/dev/null
+live=0
 for pair in rank_math:seo-by-rank-math aioseo:all-in-one-seo-pack seopress:wp-seopress; do
   provider="${pair%%:*}"; slug="${pair#*:}"
   "${cli[@]}" plugin install "$slug" --activate >/dev/null
   "${cli[@]}" plugin list --name="$slug" --fields=name,version --format=csv | tail -1
-  "${php[@]}" "$plugin/seo-live.php" "$provider"
+  # Every plugin is compared even when one differs, so a run reports all three.
+  "${php[@]}" "$plugin/seo-live.php" "$provider" || live=1
   "${cli[@]}" plugin deactivate "$slug" >/dev/null
 done
+test "$live" = 0
 
 node "$here/seo-verify.mjs" "$here/.out/seo"

@@ -95,5 +95,17 @@ foreach ( $pages as $key => list( $block, $path ) ) {
 	}
 }
 foreach ( $diffs as $diff ) { echo "  $diff\n"; }
+if ( $diffs ) {
+	// What the plugin actually printed on the first page, to tell a rendering difference from a head it never wrote.
+	$first = reset( $pages );
+	preg_match( '#<head[^>]*>(.*?)</head>#s', fetch( $first[1] )['html'], $m );
+	echo "  head of {$first[1]}:\n";
+	foreach ( preg_split( '/\n/', $m[1] ?? '' ) as $line ) {
+		if ( preg_match( '/<(title|meta|link rel="canonical")|rank|aioseo|seopress/i', $line ) ) { echo '    ' . substr( trim( $line ), 0, 200 ) . "\n"; }
+	}
+	if ( 'rank_math' === $provider ) {
+		echo '  rank_math_modules: ' . wp_json_encode( get_option( 'rank_math_modules' ) ) . "\n  titles keys: " . implode( ',', array_slice( array_keys( (array) get_option( 'rank-math-options-titles', array() ) ), 0, 30 ) ) . "\n  separator: " . wp_json_encode( get_option( 'rank-math-options-titles' )['title_separator'] ?? null ) . "\n";
+	}
+}
 check( ! $diffs, "Bridge renders $provider's templates to what $provider serves: title, description, robots and canonical, " . count( $pages ) . ' pages (' . count( $diffs ) . ' differ)' );
 echo "\n$checks checks passed ($provider).\n";
