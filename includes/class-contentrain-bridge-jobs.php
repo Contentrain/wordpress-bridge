@@ -158,10 +158,18 @@ final class Jobs {
 	 * of steps, and re-reading the state for each made it slower the further it got (BR-24).
 	 */
 	public static function run( $id, $deadline ) {
-		return self::mutate( $id, static function ( &$job ) use ( $deadline ) {
+		$limit = wp_convert_hr_to_bytes( (string) ini_get( 'memory_limit' ) );
+		return self::mutate( $id, static function ( &$job ) use ( $deadline, $limit ) {
 			do {
 				self::tick( $job );
-			} while ( ! in_array( $job['phase'], array( 'review', 'ready', 'failed' ), true ) && microtime( true ) < $deadline );
+				// Every post, term and meta row read stays in WordPress's in-request cache; over
+				// thousands of steps that alone exhausts a 64 MB host. A persistent cache is left alone.
+				if ( ! wp_using_ext_object_cache() ) {
+					function_exists( 'wp_cache_flush_runtime' ) ? wp_cache_flush_runtime() : wp_cache_flush();
+				}
+				// Stop early rather than die: what is done is saved, and the next call continues.
+				$full = $limit > 0 && memory_get_usage() > 0.7 * $limit;
+			} while ( ! $full && ! in_array( $job['phase'], array( 'review', 'ready', 'failed' ), true ) && microtime( true ) < $deadline );
 		} );
 	}
 
