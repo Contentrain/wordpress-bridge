@@ -5,17 +5,27 @@ namespace Contentrain\Bridge;
 defined( 'ABSPATH' ) || exit;
 
 /**
- * The export, driven by a program with an application password instead of a
- * person on the admin screen (BR-19). Same permission as the read API
- * (`export` + `manage_options`), same jobs, same snapshot.
+ * The export, driven by a program instead of a person on the admin screen
+ * (BR-19). Same permission as the read API (`export` + `manage_options`), same
+ * jobs, same snapshot. The program signs in with an application password, or,
+ * where the host strips the Authorization header, with the connection key an
+ * administrator created on the Bridge screen (`Key`, BR-27): the key's exports
+ * only, one running at a time.
+ *
+ *   GET  /contentrain-bridge/v1/about                  → { version, auth: [ "app_password", "key" ] }, no sign-in
  *
  *   POST /contentrain-bridge/v1/exports                { types?, private?, comments?, media_files?, max_age?, fresh? }
  *        201 { export, reused: false } — a new export
  *        200 { export, reused: true }  — the caller's live export with the same scope,
  *                                        started at most `max_age` seconds ago
  *        409 bridge_export_busy        — a stale export to replace is running; retry
+ *        409 bridge_export_live        — (key) this key's export with another scope is still running
  *   GET  /contentrain-bridge/v1/exports                → { exports: [ export ] }
  *   POST /contentrain-bridge/v1/exports/{id}/advance   → { export, busy? }
+ *   POST /contentrain-bridge/v1/exports/{id}/read      { file?, offset?, length? } — GET /exports/{id}, for a body-signed caller
+ *
+ * With a key every call carries `X-Contentrain-Key` (and, in a POST body,
+ * `contentrain_key`) and `contentrain_pairing`; its refusals are `bridge_key_*`.
  *
  * `export` is `Jobs::summary`: `id`, `phase`, `step`, `cursor`, `counts`, `files`,
  * `scope`, `created_at`, `expires_at` (24 hours), and `error { code, message }`
@@ -37,11 +47,27 @@ final class Remote {
 	const READ_GUARD = 600;
 
 	public static function routes() {
+		// Public by design: what a reader needs to choose how to sign in. No site data.
+		register_rest_route( 'contentrain-bridge/v1', '/about', array( 'methods' => 'GET', 'permission_callback' => '__return_true', 'callback' => array( self::class, 'about' ) ) );
 		register_rest_route( 'contentrain-bridge/v1', '/exports', array(
-			array( 'methods' => 'POST', 'permission_callback' => array( Admin::class, 'permitted' ), 'callback' => array( self::class, 'start' ) ),
-			array( 'methods' => 'GET', 'permission_callback' => array( Admin::class, 'permitted' ), 'callback' => array( self::class, 'index' ) ),
+			array( 'methods' => 'POST', 'permission_callback' => array( self::class, 'permitted' ), 'callback' => array( self::class, 'start' ) ),
+			array( 'methods' => 'GET', 'permission_callback' => array( self::class, 'permitted' ), 'callback' => array( self::class, 'index' ) ),
 		) );
-		register_rest_route( 'contentrain-bridge/v1', '/exports/(?P<id>[a-f0-9]{32})/advance', array( 'methods' => 'POST', 'permission_callback' => array( Admin::class, 'permitted' ), 'callback' => array( self::class, 'advance' ) ) );
+		register_rest_route( 'contentrain-bridge/v1', '/exports/(?P<id>[a-f0-9]{32})/advance', array( 'methods' => 'POST', 'permission_callback' => array( self::class, 'permitted' ), 'callback' => array( self::class, 'advance' ) ) );
+	}
+
+	/** The read API's permission, or the connection key when the request carries one. */
+	public static function permitted( $request ) {
+		Key::clear();
+		$key = Key::presented( $request );
+		if ( is_wp_error( $key ) ) {
+			return $key;
+		}
+		return null === $key ? Admin::permitted() : Key::authorize( $request, $key );
+	}
+
+	public static function about() {
+		return new \WP_REST_Response( array( 'version' => CONTENTRAIN_BRIDGE_VERSION, 'auth' => array( 'app_password', 'key' ) ), 200, self::headers() );
 	}
 
 	/** Start an export, or return the caller's live one with the same scope: never two alike. */
@@ -69,12 +95,20 @@ final class Remote {
 			}
 			$max_age = rest_sanitize_boolean( $request->get_param( 'fresh' ) ) ? 0 : ( null === $max_age ? null : (int) $max_age );
 			return self::locked( static function () use ( $scope, $max_age ) {
+				// A key runs one export at a time: the same scope is reused below, another waits for it.
+				if ( Key::active() ) {
+					foreach ( self::jobs() as $job ) {
+						if ( in_array( $job['id'], Key::exports(), true ) && ! in_array( $job['phase'], array( 'ready', 'failed' ), true ) && ! self::same( $job, $scope ) ) {
+							return self::error( 'export_live', 'This connection key\'s export is still running; advance it to ready before starting another.', 409 );
+						}
+					}
+				}
 				$live = 0;
 				foreach ( self::jobs() as $job ) {
 					if ( 'failed' === $job['phase'] ) {
 						continue;
 					}
-					$same = self::sorted( $job['options']['types'] ) === $scope['types'] && $job['options']['private'] === $scope['private'] && $job['options']['comments'] === $scope['comments'] && ( $job['options']['media_files'] ?? true ) === $scope['media_files'];
+					$same = self::same( $job, $scope );
 					if ( $same && null !== $max_age && ( 0 === $max_age || time() - strtotime( $job['created_at'] ) > $max_age ) ) {
 						// Too old to be the content the caller pays for: replaced, and no longer counted.
 						if ( ! self::discard( $job['id'] ) ) {
@@ -84,6 +118,9 @@ final class Remote {
 					}
 					++$live;
 					if ( $same ) {
+						if ( Key::active() ) {
+							Key::bind( $job['id'] );
+						}
 						return new \WP_REST_Response( array( 'export' => Jobs::summary( $job ), 'reused' => true ), 200, self::headers() );
 					}
 				}
@@ -94,6 +131,9 @@ final class Remote {
 				$ids = self::ids();
 				$ids[] = $summary['id'];
 				update_user_meta( get_current_user_id(), self::META . get_current_blog_id(), $ids );
+				if ( Key::active() ) {
+					Key::bind( $summary['id'] );
+				}
 				return new \WP_REST_Response( array( 'export' => $summary, 'reused' => false ), 201, self::headers() );
 			} );
 		} catch ( \Throwable $error ) {
@@ -102,10 +142,14 @@ final class Remote {
 		}
 	}
 
-	/** The caller's remote exports that still exist, oldest first. */
+	/** The caller's remote exports that still exist, oldest first; with a key, the key's own. */
 	public static function index() {
 		try {
-			return new \WP_REST_Response( array( 'exports' => array_map( array( Jobs::class, 'summary' ), self::jobs() ) ), 200, self::headers() );
+			$jobs = self::jobs();
+			if ( Key::active() ) {
+				$jobs = array_values( array_filter( $jobs, static function ( $job ) { return in_array( $job['id'], Key::exports(), true ); } ) );
+			}
+			return new \WP_REST_Response( array( 'exports' => array_map( array( Jobs::class, 'summary' ), $jobs ) ), 200, self::headers() );
 		} catch ( \Throwable $error ) {
 			// Input is checked above; what is left is the server's fault, not "not ready".
 			return self::error( 'export_failed', $error->getMessage(), 500 );
@@ -231,6 +275,11 @@ final class Remote {
 			flock( $lock, LOCK_UN );
 			fclose( $lock ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Native advisory lock handle.
 		}
+	}
+
+	/** Whether a job was started with this scope: types in any order, and every switch alike. */
+	private static function same( $job, $scope ) {
+		return self::sorted( $job['options']['types'] ) === $scope['types'] && $job['options']['private'] === $scope['private'] && $job['options']['comments'] === $scope['comments'] && ( $job['options']['media_files'] ?? true ) === $scope['media_files'];
 	}
 
 	private static function sorted( $values ) {

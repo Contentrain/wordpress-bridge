@@ -159,6 +159,33 @@
       render();
     } finally { token = ''; }
   });
+  // The Contentrain Migrate connection key (BR-27): its state, never the key itself, except once on creation.
+  function when(iso) { return new Date(iso).toLocaleString(); }
+  function renderKey(state) {
+    const secure = state.secure !== false;
+    $('key-create').disabled = !secure;
+    $('key-create').textContent = state.active ? __('Replace with a new key', 'contentrain-bridge') : __('Create connection key', 'contentrain-bridge');
+    $('key-revoke').hidden = !state.active;
+    if (!secure) { $('key-state').textContent = __('Open this site over HTTPS to create a connection key.', 'contentrain-bridge'); return; }
+    if (!state.active) { $('key-state').textContent = __('No active connection key.', 'contentrain-bridge'); return; }
+    $('key-state').textContent = state.used
+      ? sprintf(__('Active key, paired with Migrate order %1$s. Last used %2$s from %3$s. Stops working %4$s unless used again.', 'contentrain-bridge'), state.pairing || '—', when(state.last_used_at), state.last_used_ip, when(state.expires_at))
+      : sprintf(__('Active key, not used yet. Stops working %s unless used.', 'contentrain-bridge'), when(state.expires_at));
+  }
+  action('key-create', async () => {
+    const created = await api({ op: 'key-create' });
+    $('key').value = created.key; $('key-new').hidden = false; $('key').select();
+    renderKey(created.status);
+  });
+  action('key-revoke', async () => {
+    renderKey(await api({ op: 'key-revoke' }));
+    $('key').value = ''; $('key-new').hidden = true;
+  });
+  $('key-copy').addEventListener('click', async () => {
+    $('key').select();
+    try { await navigator.clipboard.writeText($('key').value); $('key-copy').textContent = __('Copied', 'contentrain-bridge'); } catch { /* Selected; the person copies it by hand. */ }
+  });
+  api({ op: 'key-status' }).then(renderKey).catch(error);
   (async () => {
     try {
       const inventory = await api({ op: 'inventory' });

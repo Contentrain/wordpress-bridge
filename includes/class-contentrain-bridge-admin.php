@@ -41,6 +41,19 @@ final class Admin {
 			<h1><?php esc_html_e( 'Contentrain Bridge', 'contentrain-bridge' ); ?></h1>
 			<p><?php esc_html_e( 'Turn your WordPress content into editable Contentrain JSON and Markdown. Local export and GitHub delivery are free.', 'contentrain-bridge' ); ?></p>
 			<p><?php esc_html_e( 'Your WordPress site stays as it is. Review the content models and interface text before downloading or sending anything to GitHub.', 'contentrain-bridge' ); ?></p>
+			<section id="cr-connect">
+				<h2><?php esc_html_e( 'Connect to Contentrain Migrate', 'contentrain-bridge' ); ?></h2>
+				<p><?php esc_html_e( 'Moving this site with Contentrain Migrate? Create a connection key and paste it into Migrate. It lets Migrate start and read content exports of this site as you, nothing else, and works where your host blocks application passwords.', 'contentrain-bridge' ); ?></p>
+				<p><?php esc_html_e( 'The key is shown once. It stops working an hour after its last use, 14 days after it was created, or when you revoke it or create a new one. Only a fingerprint of it is stored.', 'contentrain-bridge' ); ?></p>
+				<p id="cr-key-state" role="status" aria-live="polite"></p>
+				<div id="cr-key-new" hidden>
+					<label for="cr-key"><?php esc_html_e( 'Your connection key — copy it now, it will not be shown again', 'contentrain-bridge' ); ?></label>
+					<input id="cr-key" type="text" class="large-text code" readonly autocomplete="off" spellcheck="false" />
+					<button type="button" id="cr-key-copy" class="button"><?php esc_html_e( 'Copy key', 'contentrain-bridge' ); ?></button>
+				</div>
+				<button type="button" id="cr-key-create" class="button"><?php esc_html_e( 'Create connection key', 'contentrain-bridge' ); ?></button>
+				<button type="button" id="cr-key-revoke" class="button" hidden><?php esc_html_e( 'Revoke key', 'contentrain-bridge' ); ?></button>
+			</section>
 			<div id="cr-status" role="status" aria-live="polite"></div>
 			<div id="cr-error" class="notice notice-error" role="alert" hidden></div>
 			<section id="cr-scope">
@@ -156,6 +169,12 @@ final class Admin {
 					$result = json_decode( Files::read( Files::dir( $id ) . '/output', 'bridge/coverage.json' ), true );
 					break;
 				case 'zip': $result = self::zip( $id ); break;
+				case 'key-status': $result = Key::status(); break;
+				case 'key-create': $result = array( 'key' => Key::create(), 'status' => Key::status() ); break;
+				case 'key-revoke':
+					Key::revoke();
+					$result = Key::status();
+					break;
 				case 'delete':
 					// Ownership is checked even for an expired job; no caller-controlled directory is removed.
 					$stored = get_user_meta( get_current_user_id(), 'contentrain_bridge_job_' . get_current_blog_id(), true );
@@ -225,7 +244,9 @@ final class Admin {
 	}
 
 	public static function routes() {
-		register_rest_route( 'contentrain-bridge/v1', '/exports/(?P<id>[a-f0-9]{32})', array( 'methods' => 'GET', 'permission_callback' => array( self::class, 'permitted' ), 'callback' => array( self::class, 'read_export' ) ) );
+		register_rest_route( 'contentrain-bridge/v1', '/exports/(?P<id>[a-f0-9]{32})', array( 'methods' => 'GET', 'permission_callback' => array( Remote::class, 'permitted' ), 'callback' => array( self::class, 'read_export' ) ) );
+		// The same read for a caller whose key travels in the body (BR-27): a GET has none.
+		register_rest_route( 'contentrain-bridge/v1', '/exports/(?P<id>[a-f0-9]{32})/read', array( 'methods' => 'POST', 'permission_callback' => array( Remote::class, 'permitted' ), 'callback' => array( self::class, 'read_export' ) ) );
 		Remote::routes();
 	}
 
@@ -303,6 +324,6 @@ final class Admin {
 	}
 
 	public static function privacy() {
-		wp_add_privacy_policy_content( __( 'Contentrain Bridge', 'contentrain-bridge' ), wp_kses_post( __( 'Contentrain Bridge prepares a private, temporary content export after an administrator requests it. Export files expire after 24 hours and may be deleted earlier. Content can contain personal information; review the scope before sharing. Comment email, IP and metadata are excluded. GitHub transfer is optional and sends the reviewed files to the selected repository only after explicit consent. GitHub credentials are not stored. The optional Migrate link sends no export data. No telemetry is collected.', 'contentrain-bridge' ) ) );
+		wp_add_privacy_policy_content( __( 'Contentrain Bridge', 'contentrain-bridge' ), wp_kses_post( __( 'Contentrain Bridge prepares a private, temporary content export after an administrator requests it. Export files expire after 24 hours and may be deleted earlier. Content can contain personal information; review the scope before sharing. Comment email, IP and metadata are excluded. GitHub transfer is optional and sends the reviewed files to the selected repository only after explicit consent. GitHub credentials are not stored. The optional Migrate link sends no export data. A Contentrain Migrate connection key, when an administrator creates one, lets Contentrain Migrate start and read content exports as that administrator until it expires or is revoked; only a fingerprint of the key and the address and time of its last use are stored. No telemetry is collected.', 'contentrain-bridge' ) ) );
 	}
 }
