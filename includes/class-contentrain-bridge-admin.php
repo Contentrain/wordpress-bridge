@@ -48,6 +48,7 @@ final class Admin {
 				<div id="cr-types"></div>
 				<label><input type="checkbox" id="cr-private" /> <?php esc_html_e( 'Include draft, scheduled, private and password-protected content (requires a private GitHub repository)', 'contentrain-bridge' ); ?></label>
 				<label><input type="checkbox" id="cr-comments" /> <?php esc_html_e( 'Include comment archive: names, links and text; no email, IP address or comment metadata', 'contentrain-bridge' ); ?></label>
+				<label><input type="checkbox" id="cr-media" checked /> <?php esc_html_e( 'Copy media files into the export (turn off when the receiving tool downloads media itself; content then keeps the WordPress upload URLs)', 'contentrain-bridge' ); ?></label>
 				<label><input type="checkbox" id="cr-scan" checked /> <?php esc_html_e( 'Find interface text in the active theme and child theme', 'contentrain-bridge' ); ?></label>
 				<label><input type="checkbox" id="cr-render" /> <?php esc_html_e( 'Also read the text your pages render (home, a post, a page, search and not-found pages, fetched from this site as a visitor)', 'contentrain-bridge' ); ?></label>
 				<label><input type="checkbox" id="cr-plugins" /> <?php esc_html_e( 'Also scan active plugin source files (more text to review)', 'contentrain-bridge' ); ?></label>

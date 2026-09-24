@@ -4,7 +4,7 @@ Tags: export, migration, headless, astro, content
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 0.2.1
+Stable tag: 0.3.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -33,12 +33,14 @@ The plugin makes no network request unless you choose GitHub delivery.
 
 == Installation ==
 
-1. Upload the `contentrain-bridge` folder to `/wp-content/plugins/` or install the plugin ZIP.
+1. Download `contentrain-bridge.zip` from the latest release (https://github.com/Contentrain/wordpress-bridge/releases/latest) and install it in Plugins > Add New > Upload Plugin, or upload the `contentrain-bridge` folder to `/wp-content/plugins/`.
 2. Activate Contentrain Bridge in WordPress.
 3. Open Tools > Contentrain Bridge.
 4. Step 1: choose content types and options, then prepare the content.
 5. Step 2: review the generated models and the interface-text candidates, then validate and finalize.
 6. Step 3: download the ZIP, or deliver to a branch in your own GitHub repository.
+
+Updates are manual while the plugin is distributed outside WordPress.org: download the new release ZIP and upload it the same way; WordPress replaces the installed version. Export snapshots are temporary and are not affected.
 
 == Frequently Asked Questions ==
 
@@ -67,6 +69,16 @@ The active theme and child theme, and optionally the source files of active plug
 The plugin stores export ownership and a source revision marker. It sends nothing anywhere on its own. Export files are written to a private, per-administrator directory, are removed on uninstall, and expire after a day. An export can contain site content, author display names, selected post metadata and, if you chose it, privacy-minimized comments. Treat a downloaded export as you would a WordPress export file. If you deliver to GitHub, the exported content is sent to GitHub under the account whose token you provide; choose a private repository when the export includes draft or private content.
 
 == Changelog ==
+
+= 0.3.0 =
+
+* REST export API for Migrate: start (`POST /exports`, reused per scope, `max_age`/`fresh`), list, and advance an export with an application password; read any snapshot file in 8 MiB chunks. Administrator permissions only.
+* The snapshot of a REST export carries its RawIR v1 as `bridge/rawir.json`. GitHub delivery never includes it.
+* `media_files: false` (REST, and a checkbox on the export screen): attachment records without their files; content keeps the WordPress upload URLs.
+* SEO: Rank Math, AIOSEO, SEOPress and Yoast title and description templates are rendered to the text a page carries, with robots and canonical; SEOPress support; AIOSEO Pro term values. Checked against each plugin running live.
+* Large sites: the export's memory no longer grows with the site. 5,000 posts, 20,000 media records and 20,000 comments export in about two minutes at a 64 MB memory limit.
+* A snapshot being downloaded is not replaced by a fresh export for ten minutes.
+* Updates are manual outside WordPress.org: install the new release ZIP over the old one.
 
 = 0.2.1 =
 
