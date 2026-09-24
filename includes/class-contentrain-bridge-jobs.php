@@ -83,8 +83,10 @@ final class Jobs {
 		if ( count( $job['files'] ) > 50000 ) {
 			throw new \RuntimeException( 'Export exceeds 50,000 files; reduce its scope.' );
 		}
-		// Internal state, not a delivered file: compact, and without Policy's canonical sort, whose
-		// recursive copies of a large site's key maps were what exhausted memory (BR-24).
+		// Internal state, not a delivered file: compact, and without Policy's canonical sort over the
+		// large key maps, whose recursive copies were what exhausted memory (BR-24). The models keep
+		// their canonical order, as every step after the first has always read them.
+		$job['models'] = Policy::canonical( $job['models'] );
 		$json = wp_json_encode( $job, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
 		if ( false === $json ) {
 			throw new \RuntimeException( 'Export state cannot be encoded as UTF-8 JSON.' );
