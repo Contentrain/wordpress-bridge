@@ -20,14 +20,14 @@ final class SeoRender {
 	/** Each provider's variable names, mapped to one vocabulary. */
 	const VARIABLES = array(
 		'rank_math' => array(
-			'title' => 'title', 'sitename' => 'sitename', 'sitedesc' => 'sitedesc', 'sep' => 'sep', 'excerpt' => 'excerpt', 'excerpt_only' => 'excerpt_only',
+			'title' => 'title', 'sitename' => 'sitename', 'sitedesc' => 'sitedesc', 'sep' => 'sep', 'excerpt' => 'excerpt_whole_words', 'excerpt_only' => 'excerpt_only',
 			'category' => 'category', 'primary_category' => 'category', 'categories' => 'categories', 'tag' => 'tag', 'tags' => 'tags', 'term' => 'term', 'term_description' => 'term_description',
 			'name' => 'author', 'post_author' => 'author', 'date' => 'date', 'modified' => 'modified', 'currentyear' => 'currentyear', 'currentmonth' => 'currentmonth',
 			'currentday' => 'currentday', 'currentdate' => 'currentdate', 'page' => 'page', 'pagenumber' => 'page', 'focuskw' => 'focuskw', 'id' => 'id',
 			'parent_title' => 'parent_title', 'pt_single' => 'pt_single', 'pt_plural' => 'pt_plural', 'seo_title' => 'seo_title', 'seo_description' => 'seo_description', 'url' => 'url',
 		),
 		'aioseo' => array(
-			'post_title' => 'title', 'site_title' => 'sitename', 'tagline' => 'sitedesc', 'separator_sa' => 'sep', 'post_excerpt' => 'excerpt', 'post_excerpt_only' => 'excerpt_only',
+			'post_title' => 'title', 'site_title' => 'sitename', 'tagline' => 'sitedesc', 'separator_sa' => 'sep', 'post_excerpt' => 'excerpt_words', 'post_excerpt_only' => 'excerpt_only',
 			'post_content' => 'content', 'categories' => 'categories', 'taxonomy_title' => 'term', 'taxonomy_description' => 'term_description', 'author_name' => 'author',
 			'author_first_name' => 'author_first', 'author_last_name' => 'author_last', 'post_date' => 'date', 'post_day' => 'post_day', 'post_month' => 'post_month', 'post_year' => 'post_year',
 			'current_date' => 'currentdate', 'current_day' => 'currentday', 'current_month' => 'currentmonth', 'current_year' => 'currentyear', 'permalink' => 'url', 'page_number' => 'page',
@@ -53,7 +53,8 @@ final class SeoRender {
 	const DEFAULTS = array(
 		'rank_math' => array( 'post' => array( '%title% %sep% %sitename%', '%excerpt%' ), 'term' => array( '%term% %sep% %sitename%', '%term_description%' ), 'home' => array( '%sitename% %page% %sep% %sitedesc%', '' ) ),
 		'aioseo'    => array( 'post' => array( '#post_title #separator_sa #site_title', '#post_excerpt' ), 'term' => array( '#taxonomy_title #separator_sa #site_title', '#taxonomy_description' ), 'home' => array( '#site_title #separator_sa #tagline', '' ) ),
-		'seopress'  => array( 'post' => array( '%%post_title%% %%sep%% %%sitetitle%%', '%%post_excerpt%%' ), 'term' => array( '%%term_title%% %%sep%% %%sitetitle%%', '%%term_description%%' ), 'home' => array( '%%sitetitle%% %%sep%% %%tagline%%', '' ) ),
+		// SEOPress writes nothing without a template: the page keeps WordPress's own title (null) and no description.
+		'seopress'  => array( 'post' => array( null, '' ), 'term' => array( null, '' ), 'home' => array( null, '' ) ),
 		'yoast'     => array( 'post' => array( '%%title%% %%page%% %%sep%% %%sitename%%', '' ), 'term' => array( '%%term_title%% Archives %%page%% %%sep%% %%sitename%%', '' ), 'home' => array( '%%sitename%% %%page%% %%sep%% %%sitedesc%%', '' ) ),
 	);
 
@@ -125,10 +126,15 @@ final class SeoRender {
 		$author = get_userdata( (int) $post->post_author );
 		$type = get_post_type_object( $post->post_type );
 		$content = trim( preg_replace( '/\s+/u', ' ', wp_strip_all_tags( strip_shortcodes( excerpt_remove_blocks( (string) $post->post_content ) ) ) ) );
-		$excerpt = '' !== trim( (string) $post->post_excerpt ) ? (string) $post->post_excerpt : wp_html_excerpt( $content, 156, '' );
+		$own = '' !== trim( (string) $post->post_excerpt );
+		$excerpt = $own ? (string) $post->post_excerpt : wp_html_excerpt( $content, 156, '' );
 		return self::site_values( $sep ) + array(
 			'title'          => html_entity_decode( (string) $post->post_title, ENT_QUOTES | ENT_HTML5, 'UTF-8' ),
 			'excerpt'        => $excerpt,
+			// Rank Math: the first 160 characters, cut back to the last space.
+			'excerpt_whole_words' => $own ? (string) $post->post_excerpt : self::whole_words( $content, 160 ),
+			// WordPress's own excerpt length, without its "more" suffix: what AIOSEO prints.
+			'excerpt_words'  => $own ? (string) $post->post_excerpt : wp_trim_words( $content, 55, '' ),
 			'excerpt_only'   => (string) $post->post_excerpt,
 			'content'        => $content,
 			'category'       => $categories ? $categories[0]->name : '',
@@ -150,6 +156,14 @@ final class SeoRender {
 			'pt_plural'      => $type ? $type->labels->name : '',
 			'url'            => (string) get_permalink( $post ),
 		);
+	}
+
+	/** A text over `$limit` characters: its first `$limit`, trimmed, and the last word dropped, whole or not. */
+	public static function whole_words( $text, $limit ) {
+		if ( mb_strlen( $text ) <= $limit ) {
+			return $text;
+		}
+		return preg_replace( '/\s+\S+$/u', '', rtrim( mb_substr( $text, 0, $limit ) ) );
 	}
 
 	/** The shared vocabulary for one term archive. */
@@ -225,7 +239,9 @@ final class SeoRender {
 			} else {
 				list( $chosen, $source[ $field ] ) = array( $default, 'default' );
 			}
-			$result = self::render( $provider, $chosen, $values + array( 'seo_title' => $text['title'] ?? '' ), $meta );
+			$result = null === $chosen
+				? array( 'text' => 'title' === $field ? self::core_title( $values ) : '', 'unresolved' => array() )
+				: self::render( $provider, $chosen, $values + array( 'seo_title' => $text['title'] ?? '' ), $meta );
 			$text[ $field ] = $result['text'];
 			$unresolved = array_merge( $unresolved, $result['unresolved'] );
 		}
@@ -259,6 +275,18 @@ final class SeoRender {
 			'template_source' => $source,
 			'unresolved'      => array_values( array_unique( $unresolved ) ),
 		);
+	}
+
+	/**
+	 * The title WordPress itself prints when no plugin sets one (`wp_get_document_title`): the record's
+	 * name and the site's, joined by its separator and texturized (` - ` reads ` – `). The front page is
+	 * the site and its tagline.
+	 */
+	public static function core_title( $values ) {
+		$name = $values['title'] ?? ( $values['term'] ?? null );
+		$parts = null !== $name ? array( $name, $values['sitename'] ) : array_filter( array( $values['sitename'], $values['sitedesc'] ?? '' ) );
+		$sep = apply_filters( 'document_title_separator', '-' ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- WordPress core's own filter, read.
+		return html_entity_decode( wptexturize( implode( " $sep ", $parts ) ), ENT_QUOTES | ENT_HTML5, 'UTF-8' );
 	}
 
 	/** Every string in a stored JSON-LD node, rendered; the plugin's own bookkeeping key dropped. */

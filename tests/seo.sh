@@ -37,4 +37,20 @@ chmod -R a+rX "$here/.out"
 "${cli[@]}" plugin deactivate wordpress-seo redirection >/dev/null
 "${php[@]}" "$plugin/seo-none.php" inactive
 
+# BR-22: each plugin Bridge renders for, live, one at a time: Bridge's rendering against the head it serves.
+prefix="$("${cli[@]}" db prefix | tr -d '[:space:]')"
+# AIOSEO builds its own aioseo_posts; the fixture's reduced one would stand in its way (seo-live.php restores the row).
+"${cli[@]}" db query "DROP TABLE IF EXISTS ${prefix}aioseo_posts" >/dev/null
+live=0
+# Pinned, like Yoast above: a plugin release that changes what it prints must be a deliberate update here.
+for pair in rank_math:seo-by-rank-math:1.0.279 aioseo:all-in-one-seo-pack:5.0.2 seopress:wp-seopress:10.2; do
+  IFS=: read -r provider slug version <<<"$pair"
+  "${cli[@]}" plugin install "$slug" --version="$version" --activate >/dev/null
+  "${cli[@]}" plugin list --name="$slug" --fields=name,version --format=csv | tail -1
+  # Every plugin is compared even when one differs, so a run reports all three.
+  "${php[@]}" "$plugin/seo-live.php" "$provider" || live=1
+  "${cli[@]}" plugin deactivate "$slug" >/dev/null
+done
+test "$live" = 0
+
 node "$here/seo-verify.mjs" "$here/.out/seo"
