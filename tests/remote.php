@@ -9,9 +9,11 @@ if ( 'local' !== wp_get_environment_type() || 'Bridge Acceptance' !== get_option
 	throw new RuntimeException( 'Refusing to run fixtures on a non-test site.' );
 }
 require_once WP_PLUGIN_DIR . '/contentrain-bridge/contentrain-bridge.php';
+use Contentrain\Bridge\Exporter;
 use Contentrain\Bridge\Files;
 use Contentrain\Bridge\Inventory;
 use Contentrain\Bridge\Jobs;
+use Contentrain\Bridge\Models;
 use Contentrain\Bridge\Remote;
 
 $checks = 0;
@@ -264,15 +266,49 @@ ini_set( 'max_execution_time', '0' );
 $_SERVER['REQUEST_TIME_FLOAT'] = $request_time;
 check( 'ready' === $body['export']['phase'] && array( 1 ) === array_values( array_unique( array_filter( $steps ) ) ) && count( array_filter( $steps ) ) >= count( $steps ) - 1, 'with no time left before max_execution_time, each advance takes exactly one step and the export still reaches ready (' . count( $steps ) . ' calls)' );
 
-// ---- QA-23: a password-protected post travels as protected, its password never leaves the site. ----
+// ---- QA-23: status and visibility exactly as wp-import maps them; a protected post's password never leaves the site. ----
+$parity = json_decode( file_get_contents( __DIR__ . '/fixtures/status-parity.json' ), true );
+foreach ( $parity['rows'] as $row ) {
+	$visibility = Models::visibility( array( 'status' => $row['status'], 'password' => $row['protected'] ? Exporter::PROTECTED_PASSWORD : null ) ) ?? 'public';
+	$meta = Models::meta( $row['status'], 'future' === $row['status'] ? $parity['scheduled'] : null, 'password' === $visibility );
+	unset( $meta['source'], $meta['updated_by'] );
+	check( $row['meta'] == $meta && $row['visibility'] === $visibility, "status parity with wp-import, {$row['name']}: " . wp_json_encode( $meta ) . ", $visibility" );
+}
 $forget();
-$locked = wp_insert_post( array( 'post_type' => 'post', 'post_status' => 'publish', 'post_title' => 'Members only', 'post_content' => 'Protected body', 'post_password' => 'hunter2' ) );
+$made = array();
+foreach ( $parity['rows'] as $row ) {
+	if ( false === ( $row['exported'] ?? true ) ) { continue; }
+	$post = array( 'post_type' => 'post', 'post_status' => $row['status'], 'post_title' => 'parity-' . $row['name'], 'post_content' => '<p>parity ' . $row['name'] . '</p>' );
+	if ( $row['protected'] ) { $post['post_password'] = 'hunter2'; }
+	if ( 'future' === $row['status'] ) {
+		$post['post_date_gmt'] = gmdate( 'Y-m-d H:i:s', strtotime( $parity['scheduled'] ) );
+		$post['post_date'] = get_date_from_gmt( $post['post_date_gmt'] );
+	}
+	$made[ $row['name'] ] = wp_insert_post( $post );
+}
 list( , $started ) = call( 'POST', '/exports', array( 'types' => array( 'post' ), 'private' => true, 'media_files' => false ) );
 $p = $started['export']['id'];
 for ( $i = 0; $i < 60; ++$i ) {
 	list( , $body ) = call( 'POST', "/exports/$p/advance" );
 	if ( in_array( $body['export']['phase'], array( 'ready', 'failed' ), true ) ) { break; }
 }
+check( 'ready' === $body['export']['phase'], 'a private-scope REST export with one post per status reaches ready' );
+$job = Jobs::read( $p );
+$out = Files::dir( $p ) . '/output';
+$sources = json_decode( Files::read( $out, 'bridge/entry-source-map.json' ), true );
+$rawir = json_decode( Files::read( $out, 'bridge/rawir.json' ), true );
+$rawir_by_id = array_column( $rawir['posts'], null, 'id' );
+foreach ( $parity['rows'] as $row ) {
+	if ( ! isset( $made[ $row['name'] ] ) ) { continue; }
+	$id = $made[ $row['name'] ];
+	$a = $sources[ (string) $id ] ?? null;
+	$meta = $a ? json_decode( Files::read( $out, Models::meta_path( $job, $a['model_id'], $a['locale'], $a['entry_id'] ) ), true ) : null;
+	$front = $a ? Files::read( $out, Models::content_path( $job, $a['model_id'], $a['locale'], $a['entry_id'] ) ) : '';
+	$visibility = preg_match( '/^visibility: ["\']?([a-z]+)/m', $front, $match ) ? $match[1] : 'public';
+	unset( $meta['source'], $meta['updated_by'] );
+	check( $row['meta'] == $meta && $row['visibility'] === $visibility && ( $row['protected'] ? '[protected]' : null ) === $rawir_by_id[ $id ]['password'], "exported over REST, {$row['name']}: " . wp_json_encode( $meta ) . ", $visibility, password " . wp_json_encode( $rawir_by_id[ $id ]['password'] ) );
+}
+check( false !== strpos( $rawir_by_id[ $made['published-protected'] ]['content'], 'parity published-protected' ), 'a protected post\'s content travels as it is (kept off the public site by its status and visibility)' );
 list( , $list ) = call( 'GET', "/exports/$p" );
 $seen = '';
 foreach ( $list['files'] as $path => $info ) {
@@ -283,11 +319,8 @@ foreach ( $list['files'] as $path => $info ) {
 		$offset += $chunk['length'];
 	}
 }
-$rawir = json_decode( Files::read( Files::dir( $p ) . '/output', 'bridge/rawir.json' ), true );
-$post = array_values( array_filter( $rawir['posts'], static function ( $row ) use ( $locked ) { return $row['id'] === $locked; } ) )[0] ?? null;
-check( 'ready' === $body['export']['phase'] && $post && '[protected]' === $post['password'] && 'Protected body' === $post['content'], 'a password-protected post (private scope) is in rawir.json as "[protected]", its content as it is' );
-check( '' !== $seen && false === strpos( $seen, 'hunter2' ) && isset( $list['files']['bridge/manifest.json'] ), 'its password is in no file read over REST, chunk by chunk — manifest and rawir.json included (' . count( $list['files'] ) . ' files)' );
-wp_delete_post( $locked, true );
+check( '' !== $seen && false === strpos( $seen, 'hunter2' ) && isset( $list['files']['bridge/manifest.json'] ), 'the password is in no file read over REST, chunk by chunk — manifest and rawir.json included (' . count( $list['files'] ) . ' files)' );
+foreach ( $made as $id ) { wp_delete_post( $id, true ); }
 
 $forget();
 echo "\n$checks checks passed.\n";

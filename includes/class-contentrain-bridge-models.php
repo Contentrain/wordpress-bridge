@@ -107,16 +107,39 @@ final class Models {
 		}
 	}
 
-	public static function meta( $status = 'publish', $date = null ) {
+	/**
+	 * A post's Contentrain status — wp-import's `mapStatus` rule for rule (`packages/wp-import/src/contentrain.ts`),
+	 * so Bridge's store and an imported one agree on what goes live (QA-23):
+	 *
+	 * - password-protected, unless trashed → `draft` (checked first: never published, never scheduled);
+	 * - `publish` / `inherit` → `published`; `future` → `published` + `publish_at` (UTC, `…Z`);
+	 * - `pending` → `in_review`; `trash` → `archived`; `private`, `draft` and anything else → `draft`.
+	 */
+	public static function meta( $status = 'publish', $date = null, $protected = false ) {
+		$meta = array( 'status' => 'draft', 'source' => 'import', 'updated_by' => 'contentrain-bridge' );
+		if ( $protected && 'trash' !== $status ) {
+			return $meta;
+		}
 		$map = array( 'publish' => 'published', 'inherit' => 'published', 'pending' => 'in_review', 'trash' => 'archived', 'future' => 'published' );
-		$meta = array( 'status' => $map[ $status ] ?? 'draft', 'source' => 'import', 'updated_by' => 'contentrain-bridge' );
+		$meta['status'] = $map[ $status ] ?? 'draft';
 		if ( 'future' === $status ) {
 			if ( ! $date || false === strtotime( $date ) ) {
 				throw new \RuntimeException( 'Scheduled content has no valid publication date.' );
 			}
-			$meta['publish_at'] = $date;
+			$meta['publish_at'] = gmdate( 'Y-m-d\\TH:i:s\\Z', strtotime( $date ) );
 		}
 		return $meta;
+	}
+
+	/**
+	 * Who may see a post, as wp-import writes it: `password`, `private`, or `public`. Only a post that is not public
+	 * carries the field — an entry without it is public to every reader (the Astro emitter builds only public ones).
+	 */
+	public static function visibility( $raw ) {
+		if ( Exporter::PROTECTED_PASSWORD === ( $raw['password'] ?? null ) ) {
+			return 'password';
+		}
+		return 'private' === $raw['status'] ? 'private' : null;
 	}
 
 	public static function entry( &$job, $model, $locale, $id, $data, $meta = null, $body = '' ) {
@@ -231,9 +254,14 @@ final class Models {
 				$data['cover'] = $url;
 			}
 		}
+		$visibility = self::visibility( $p );
+		if ( null !== $visibility ) {
+			$fields['visibility'] = array( 'type' => 'select', 'options' => array( 'public', 'private', 'password' ) );
+			$data['visibility'] = $visibility;
+		}
 		$name = $job['options']['labels'][ $p['type'] ] ?? $job['inventory']['post_types'][ $p['type'] ]['label'];
 		self::model( $job, $a['model_id'], $kind, $domain, $name, $fields );
-		self::entry( $job, $a['model_id'], $a['locale'], $a['entry_id'], $data, self::meta( $p['status'], $p['date'] ), $p['content'] );
+		self::entry( $job, $a['model_id'], $a['locale'], $a['entry_id'], $data, self::meta( $p['status'], $p['date'], 'password' === $visibility ), $p['content'] );
 		self::row( $job, 'bridge/entry-source-map.json', $p['id'], $a );
 		self::row( $job, 'bridge/raw-posts.json', $p['id'], $p );
 		self::row( $job, 'bridge/routes.json', $p['id'], array( 'source_url' => $p['link'], 'entry' => $a, 'body_format' => 'wordpress-html', 'source_hash' => hash( 'sha256', Policy::json( $p ) ) ) );
