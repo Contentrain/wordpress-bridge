@@ -57,6 +57,8 @@ for (let offset = 0; offset < rawir.bytes || (rawir.bytes === 0 && chunks === 0)
 const readSeconds = (performance.now() - readStart) / 1000
 
 const report = {
+  memory_limit: process.env.MEMORY ?? null,
+  limit_seconds: Number(process.env.LIMIT ?? 1800),
   export_seconds: Math.round(exportSeconds * 10) / 10,
   advance_calls: calls,
   busy_answers: busy,
@@ -70,3 +72,8 @@ const report = {
 }
 console.log(JSON.stringify(report, null, 2))
 if (reportFile) writeFileSync(reportFile, JSON.stringify(report, null, 2) + '\n')
+if (report.export_seconds > report.limit_seconds) {
+  console.error(`FAIL: the export took ${report.export_seconds} s, over the ${report.limit_seconds} s a reader waits`)
+  process.exit(1)
+}
+console.log(`PASS: exported in ${report.export_seconds} s (limit ${report.limit_seconds} s) at memory_limit ${report.memory_limit}`)

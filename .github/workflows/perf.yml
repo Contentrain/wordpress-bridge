@@ -1,31 +1,71 @@
 name: perf
-# BR-23: how long a Migrate-style export of a large site takes. Not a gate: a
-# measurement, run on demand and when the measuring scripts change.
+# BR-23/BR-24: a Migrate-style export (HTTP, application password, advance until
+# ready, rawir.json in chunks) of a synthetic site, timed, at a shared-hosting
+# memory_limit. Small on every pull request; the full size when the export engine
+# changes, and on demand.
 on:
   workflow_dispatch:
     inputs:
       posts: { description: Posts, default: '5000' }
       attachments: { description: Attachment records, default: '20000' }
       comments: { description: Comments, default: '20000' }
+      memory: { description: PHP memory_limit, default: '64M' }
   pull_request:
-    paths:
-      - tests/perf/**
-      - .github/workflows/perf.yml
 permissions:
   contents: read
 jobs:
-  large-site-export:
+  changes:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    outputs:
+      engine: ${{ steps.filter.outputs.engine }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: filter
+        run: |
+          base="${{ github.event.pull_request.base.sha || 'HEAD~1' }}"
+          if git diff --name-only "$base" HEAD | grep -qE '^(includes/class-contentrain-bridge-(jobs|models|inventory|remote|rawir|files|coverage|validator)\.php|tests/perf/|\.github/workflows/perf\.yml)'; then
+            echo engine=true >> "$GITHUB_OUTPUT"
+          else
+            echo engine=false >> "$GITHUB_OUTPUT"
+          fi
+  small:
+    # Every pull request: 1k posts, 4k attachments, 4k comments at 64M.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: tests/perf/run.sh 1000 4000 4000
+        env:
+          MEMORY: 64M
+          LIMIT: '600'
+  large:
+    # The full size, at the default and at a shared host's memory: when the export engine changes, or on demand.
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.engine == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        memory: ${{ github.event_name == 'workflow_dispatch' && fromJSON(format('["{0}"]', inputs.memory)) || fromJSON('["128M","64M"]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - run: tests/perf/run.sh "${{ inputs.posts || '5000' }}" "${{ inputs.attachments || '20000' }}" "${{ inputs.comments || '20000' }}"
+        env:
+          MEMORY: ${{ matrix.memory }}
+          LIMIT: '1800'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: perf-report
+          name: perf-report-${{ matrix.memory }}
           path: tests/.out/perf-report.json
           if-no-files-found: ignore

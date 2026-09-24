@@ -18,8 +18,8 @@ final class Validator {
 			foreach ( array_keys( $job['locales'] ) as $locale ) {
 				$path = Models::content_path( $job, $model, $locale );
 				if ( isset( $job['tables'][ $path ] ) ) {
-					foreach ( $job['tables'][ $path ] as $key => $row ) {
-						$value = json_decode( Files::read( Files::dir( $job['id'] ), 'rows/' . hash( 'sha256', $path ) . '/' . $row . '.json' ), true );
+					foreach ( array_keys( $job['tables'][ $path ] ) as $key ) {
+						$value = json_decode( Files::read( Files::dir( $job['id'] ), Models::row_file( $path, $key ) ), true );
 						if ( 'dictionary' === $model['kind'] ) {
 							if ( ! is_string( $value ) ) {
 								throw new \RuntimeException( 'Dictionary contains a non-string value.' );

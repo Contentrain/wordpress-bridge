@@ -39,7 +39,7 @@ final class Jobs {
 			'inventory' => $inventory, 'default_locale' => $locale, 'locales' => array( $locale => true ), 'i18n' => count( $languages ) > 1,
 			'options' => array( 'types' => $types, 'private' => ! empty( $input['private'] ), 'comments' => ! empty( $input['comments'] ), 'media_files' => ! array_key_exists( 'media_files', $input ) || ! empty( $input['media_files'] ), 'scan_plugins' => ! empty( $input['scan_plugins'] ), 'scan_sources' => ! empty( $input['scan_sources'] ), 'scan_render' => ! empty( $input['scan_render'] ), 'selected_meta' => array_values( array_filter( array_map( 'sanitize_text_field', (array) ( $input['selected_meta'] ?? array() ) ) ) ), 'labels' => array_map( 'sanitize_text_field', (array) ( $input['labels'] ?? array() ) ) ),
 			'uploads' => array_intersect_key( (array) wp_get_upload_dir(), array_flip( array( 'basedir', 'baseurl' ) ) ),
-			'record_scope' => Inventory::scope( $types, array_filter( array_map( 'sanitize_text_field', (array) ( $input['selected_meta'] ?? array() ) ) ), ! empty( $input['private'] ) ), 'records' => array(),
+			'record_scope' => Inventory::scope( $types, array_filter( array_map( 'sanitize_text_field', (array) ( $input['selected_meta'] ?? array() ) ) ), ! empty( $input['private'] ) ),
 			'models' => array(), 'tables' => array(), 'files' => array(), 'candidates' => array(), 'counts' => array( 'posts' => 0, 'media' => 0, 'media_files' => 0, 'media_bytes' => 0, 'media_kept_remote' => 0, 'comments' => 0, 'warnings' => 0 ),
 		);
 		$site = array( 'url' => home_url( '/' ), 'title' => get_bloginfo( 'name' ), 'description' => get_bloginfo( 'description' ), 'language' => $locale, 'base_site_url' => site_url( '/' ), 'base_blog_url' => home_url( '/' ), 'generator' => 'WordPress/' . get_bloginfo( 'version' ), 'export_date' => $job['created_at'] );
@@ -142,30 +142,48 @@ final class Jobs {
 			if ( (int) $expected !== $job['step'] ) {
 				return self::summary( $job );
 			}
-			self::snapshot( $job );
-			if ( 'media' === $job['phase'] ) {
-				self::media( $job );
-			} elseif ( 'posts' === $job['phase'] ) {
-				self::posts( $job );
-			} elseif ( 'terms' === $job['phase'] ) {
-				self::terms( $job );
-			} elseif ( 'inventory' === $job['phase'] ) {
-				self::inventory( $job );
-			} elseif ( 'comments' === $job['phase'] ) {
-				self::comments( $job );
-			} elseif ( 'sources' === $job['phase'] ) {
-				self::sources( $job );
-			} elseif ( 'tables' === $job['phase'] ) {
-				$paths = array_keys( $job['tables'] );
-				if ( isset( $paths[ $job['cursor'] ] ) ) {
-					Models::table( $job, $paths[ $job['cursor']++ ] );
-				} else {
-					self::finish( $job );
-				}
-			}
-			self::snapshot( $job );
-			++$job['step'];
+			self::tick( $job );
 		} );
+	}
+
+	/**
+	 * Steps until `$deadline` (microtime) or a phase that waits (review) or ends, under one
+	 * lock and with one read and one write of the state: a large site's export is thousands
+	 * of steps, and re-reading the state for each made it slower the further it got (BR-24).
+	 */
+	public static function run( $id, $deadline ) {
+		return self::mutate( $id, static function ( &$job ) use ( $deadline ) {
+			do {
+				self::tick( $job );
+			} while ( ! in_array( $job['phase'], array( 'review', 'ready', 'failed' ), true ) && microtime( true ) < $deadline );
+		} );
+	}
+
+	/** One step of the current phase. */
+	private static function tick( &$job ) {
+		self::snapshot( $job );
+		if ( 'media' === $job['phase'] ) {
+			self::media( $job );
+		} elseif ( 'posts' === $job['phase'] ) {
+			self::posts( $job );
+		} elseif ( 'terms' === $job['phase'] ) {
+			self::terms( $job );
+		} elseif ( 'inventory' === $job['phase'] ) {
+			self::inventory( $job );
+		} elseif ( 'comments' === $job['phase'] ) {
+			self::comments( $job );
+		} elseif ( 'sources' === $job['phase'] ) {
+			self::sources( $job );
+		} elseif ( 'tables' === $job['phase'] ) {
+			$paths = array_keys( $job['tables'] );
+			if ( isset( $paths[ $job['cursor'] ] ) ) {
+				Models::table( $job, $paths[ $job['cursor']++ ] );
+			} else {
+				self::finish( $job );
+			}
+		}
+		self::snapshot( $job );
+		++$job['step'];
 	}
 
 	/**
@@ -312,7 +330,14 @@ final class Jobs {
 
 	private static function posts( &$job ) {
 		global $wpdb;
-		$types = $job['options']['types'];
+		// Attachments were read, and counted, in the media phase: walking them again only to skip them
+		// cost minutes on a site with tens of thousands of uploads (BR-23).
+		$types = array_values( array_diff( $job['options']['types'], array( 'attachment' ) ) );
+		if ( ! $types ) {
+			$job['phase'] = 'terms';
+			$job['cursor'] = 0;
+			return;
+		}
 		$placeholders = implode( ',', array_fill( 0, count( $types ), '%s' ) );
 		$args = array_merge( array( $job['cursor'] ), $types );
 		$sql = "SELECT ID FROM {$wpdb->posts} WHERE ID > %d AND post_type IN ($placeholders) ORDER BY ID ASC LIMIT 25";
@@ -416,9 +441,9 @@ final class Jobs {
 	 */
 	private static function inventory( &$job ) {
 		list( $records, $job['inventory_cursor'] ) = Inventory::page( $job['record_scope'], $job['inventory_cursor'] );
-		foreach ( $records as $record ) {
-			$job['records'][ Inventory::key( $record ) ] = $record;
-		}
+		// Beside the state, one JSON line per record: a large site's inventory would not fit in the state
+		// that every step reads and writes (BR-24). Pages are disjoint, so a record is written once.
+		Inventory::append( Files::dir( $job['id'] ) . '/inventory.jsonl', $records );
 		if ( 'done' === $job['inventory_cursor']['stage'] ) {
 			unset( $job['inventory_cursor'] );
 			$job['phase'] = 'comments';
@@ -583,7 +608,12 @@ final class Jobs {
 	private static function finish( &$job ) {
 		Models::file( $job, 'bridge/validation.json', Policy::json( Validator::run( $job ) ) );
 		Models::file( $job, 'CONTENTRAIN-EXPORT.md', "# Contentrain WordPress export\n\nFree, editable JSON and Markdown content. Models live in `.contentrain/models`.\n\nMarkdown bodies preserve the original WordPress HTML; shortcodes and dynamic blocks require a renderer. Source files and the live WordPress theme have not been rewritten. Transferred media lives under `media/` and content links to it; anything too large or unreadable kept its WordPress URL and is listed in the warnings. Review `bridge/warnings.json` and `bridge/string-sources.json` for scope and text decisions.\n\nUse Contentrain Studio or the query SDK to edit/read this store. For an Astro website, choose the optional Migrate handoff from WordPress after delivery.\n" );
-		Models::file( $job, 'bridge/inventory.json', Policy::json( Inventory::document( $job['record_scope'], $job['records'], $job['created_at'], true, $job['inventory'] ) ) );
+		if ( ! empty( $job['records'] ) ) {
+			// An export started before the inventory moved out of the state.
+			Inventory::append( Files::dir( $job['id'] ) . '/inventory.jsonl', array_values( $job['records'] ) );
+			unset( $job['records'] );
+		}
+		Inventory::write( $job, Files::dir( $job['id'] ) . '/inventory.jsonl', 'bridge/inventory.json' );
 		// Services the site is connected to. The home page is read for script hosts only when the
 		// person chose to scan rendered pages; no credential is written, only names and hosts.
 		$home = '';

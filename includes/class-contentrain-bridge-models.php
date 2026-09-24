@@ -44,11 +44,19 @@ final class Models {
 		);
 	}
 
+	/**
+	 * One row of a table, on disk. The job state keeps only the table's keys (value 1): the
+	 * row's file name is derived from the key, and a large site's state stays small enough to
+	 * read and write on every step (BR-24).
+	 */
 	public static function row( &$job, $path, $key, $value ) {
-		$bucket = hash( 'sha256', $path );
-		$row = hash( 'sha256', (string) $key );
-		Files::put( Files::dir( $job['id'] ), 'rows/' . $bucket . '/' . $row . '.json', Policy::json( $value ) );
-		$job['tables'][ $path ][ (string) $key ] = $row;
+		Files::put( Files::dir( $job['id'] ), self::row_file( $path, $key ), Policy::json( $value ) );
+		$job['tables'][ $path ][ (string) $key ] = 1;
+	}
+
+	/** Where a table row is stored, relative to the job directory. */
+	public static function row_file( $path, $key ) {
+		return 'rows/' . hash( 'sha256', $path ) . '/' . hash( 'sha256', (string) $key ) . '.json';
 	}
 
 	/**
@@ -483,8 +491,8 @@ final class Models {
 		try {
 			self::write_stream( $stream, "{\n" );
 			$first = true;
-			foreach ( $rows as $key => $row ) {
-				$json = trim( Files::read( $dir, 'rows/' . hash( 'sha256', $path ) . '/' . $row . '.json' ) );
+			foreach ( array_keys( $rows ) as $key ) {
+				$json = trim( Files::read( $dir, self::row_file( $path, $key ) ) );
 				self::write_stream( $stream, ( $first ? '' : ",\n" ) . '  ' . wp_json_encode( (string) $key ) . ': ' . str_replace( "\n", "\n  ", $json ) );
 				$first = false;
 			}

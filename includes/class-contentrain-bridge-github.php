@@ -150,7 +150,7 @@ final class GitHub {
 			// The inventory the repository was built from is the delta cursor. It
 			// lives in the repository, not in WordPress, so it survives a reinstall;
 			// the previous manifest's hash is what says nobody edited it since.
-			if ( isset( $remote['bridge/inventory.json'] ) && isset( $job['records'] ) ) {
+			if ( isset( $remote['bridge/inventory.json'], $job['files']['bridge/inventory.json'] ) ) {
 				$blob = self::request( $token, 'GET', $prefix . '/git/blobs/' . $remote['bridge/inventory.json'] );
 				$raw = (string) base64_decode( str_replace( "\n", '', $blob['content'] ), true );
 				$trusted = $previous['bridge/inventory.json']['sha256'] ?? null;

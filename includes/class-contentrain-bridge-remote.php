@@ -134,7 +134,7 @@ final class Remote {
 					}
 					$summary = Jobs::review( $id, array(), true );
 				} else {
-					$summary = Jobs::step( $id, $summary['step'] );
+					$summary = Jobs::run( $id, $deadline );
 				}
 			}
 		} catch ( \Throwable $error ) {
