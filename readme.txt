@@ -79,8 +79,10 @@ The plugin stores export ownership and a source revision marker. It sends nothin
 * `media_files: false` (REST, and a checkbox on the export screen): attachment records without their files; content keeps the WordPress upload URLs.
 * SEO: Rank Math, AIOSEO, SEOPress and Yoast title and description templates are rendered to the text a page carries, with robots and canonical; SEOPress support; AIOSEO Pro term values. Checked against each plugin running live.
 * Large sites: the export's memory no longer grows with the site. 5,000 posts, 20,000 media records and 20,000 comments export in about two minutes at a 64 MB memory limit.
+* Shared hosts: an advance stops before PHP's max_execution_time and saves as it goes, and a request killed midway writes nothing twice.
 * A snapshot being downloaded is not replaced by a fresh export for ten minutes.
 * Updates are manual outside WordPress.org: install the new release ZIP over the old one.
+* Readme: what the plugin requests from this site and from GitHub, and the REST export API, described for WordPress.org.
 
 = 0.2.1 =
 
