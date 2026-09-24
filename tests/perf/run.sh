@@ -30,7 +30,8 @@ for _ in $(seq 1 60); do "${cli[@]}" core version >/dev/null 2>&1 && break; slee
 "${cli[@]}" core install --url=http://localhost:8094 --title='Bridge Acceptance' --admin_user=bridge-admin --admin_password=bridge-local-only --admin_email=bridge-admin@example.test --skip-email >/dev/null
 "${cli[@]}" plugin activate contentrain-bridge >/dev/null
 "${cli[@]}" rewrite structure '/%postname%/' >/dev/null
-"${php[@]}" /var/www/html/wp-content/plugins/contentrain-bridge/tests/perf/large-site.php "$posts" "$attachments" "$comments"
+# The generator is setup, not the thing measured: it gets its own memory.
+"${compose[@]}" exec -T wordpress php -d memory_limit=1G /var/www/html/wp-content/plugins/contentrain-bridge/tests/perf/large-site.php "$posts" "$attachments" "$comments"
 password="$("${cli[@]}" user application-password create bridge-admin perf --porcelain | tr -d '[:space:]')"
 mkdir -p "$here/.out"
 LIMIT="$limit" MEMORY="$memory" node "$here/perf/export-timing.mjs" http://localhost:8094 bridge-admin "$password" "$here/.out/perf-report.json"
