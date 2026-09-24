@@ -123,10 +123,12 @@ final class Remote {
 		if ( empty( $job['remote'] ) ) {
 			return self::error( 'not_remote', 'This export belongs to the admin screen; continue it there.', 409 );
 		}
-		$deadline = microtime( true ) + self::BUDGET;
+		// BUDGET, or less where PHP's max_execution_time would end the request first.
+		$deadline = min( microtime( true ) + self::BUDGET, Jobs::time_limit() );
 		$summary = Jobs::summary( $job );
+		$first = true; // The call's first step runs even past the deadline: every call makes progress.
 		try {
-			while ( ! in_array( $summary['phase'], array( 'ready', 'failed' ), true ) && microtime( true ) < $deadline ) {
+			while ( ! in_array( $summary['phase'], array( 'ready', 'failed' ), true ) && ( $first || microtime( true ) < $deadline ) ) {
 				if ( 'review' === $summary['phase'] ) {
 					if ( $summary['unreviewed'] > 0 ) {
 						$summary = Jobs::fail( $id, 'review_required', 'Text candidates need a person to review them.' );
@@ -134,8 +136,13 @@ final class Remote {
 					}
 					$summary = Jobs::review( $id, array(), true );
 				} else {
-					$summary = Jobs::run( $id, $deadline );
+					$before = $summary['step'];
+					$summary = Jobs::run( $id, $deadline, $first );
+					if ( $summary['step'] === $before ) {
+						break; // The next step waits for a call of its own.
+					}
 				}
+				$first = false;
 			}
 		} catch ( \Throwable $error ) {
 			if ( 409 === $error->getCode() ) {

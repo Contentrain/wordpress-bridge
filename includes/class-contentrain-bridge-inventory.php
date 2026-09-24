@@ -156,6 +156,24 @@ final class Inventory {
 		}
 	}
 
+	/** The inventory file's length, 0 when there is none yet. */
+	public static function bytes( $file ) {
+		clearstatcache( true, $file );
+		return file_exists( $file ) ? (int) filesize( $file ) : 0;
+	}
+
+	/** Cut the inventory file back to `$bytes`: what the saved state accounts for. */
+	public static function truncate( $file, $bytes ) {
+		if ( self::bytes( $file ) <= $bytes ) {
+			return;
+		}
+		$handle = fopen( $file, 'r+b' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Truncating a journal; WP_Filesystem cannot.
+		if ( ! $handle || ! ftruncate( $handle, $bytes ) ) {
+			throw new \RuntimeException( 'Cannot write the inventory.' );
+		}
+		fclose( $handle ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Native stream opened above.
+	}
+
 	/**
 	 * `bridge/inventory.json` from the job's inventory file, the same document `document()`
 	 * builds, without holding the records in memory: an index of short sort keys, one pass

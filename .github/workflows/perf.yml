@@ -31,10 +31,15 @@ jobs:
             echo engine=false >> "$GITHUB_OUTPUT"
           fi
   small:
-    # Every pull request: 1k posts, 4k attachments, 4k comments at 64M.
+    # Every pull request: 1k posts, 4k attachments, 4k comments at 64M; again with a
+    # 10-second max_execution_time, shorter than an advance's 20-second budget.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        max_execution: ['', '10']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -44,6 +49,7 @@ jobs:
         env:
           MEMORY: 64M
           LIMIT: '600'
+          MAX_EXECUTION: ${{ matrix.max_execution }}
   large:
     # The full size, at the default and at a shared host's memory: when the export engine changes, or on demand.
     needs: changes
