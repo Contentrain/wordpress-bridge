@@ -264,5 +264,30 @@ ini_set( 'max_execution_time', '0' );
 $_SERVER['REQUEST_TIME_FLOAT'] = $request_time;
 check( 'ready' === $body['export']['phase'] && array( 1 ) === array_values( array_unique( array_filter( $steps ) ) ) && count( array_filter( $steps ) ) >= count( $steps ) - 1, 'with no time left before max_execution_time, each advance takes exactly one step and the export still reaches ready (' . count( $steps ) . ' calls)' );
 
+// ---- QA-23: a password-protected post travels as protected, its password never leaves the site. ----
+$forget();
+$locked = wp_insert_post( array( 'post_type' => 'post', 'post_status' => 'publish', 'post_title' => 'Members only', 'post_content' => 'Protected body', 'post_password' => 'hunter2' ) );
+list( , $started ) = call( 'POST', '/exports', array( 'types' => array( 'post' ), 'private' => true, 'media_files' => false ) );
+$p = $started['export']['id'];
+for ( $i = 0; $i < 60; ++$i ) {
+	list( , $body ) = call( 'POST', "/exports/$p/advance" );
+	if ( in_array( $body['export']['phase'], array( 'ready', 'failed' ), true ) ) { break; }
+}
+list( , $list ) = call( 'GET', "/exports/$p" );
+$seen = '';
+foreach ( $list['files'] as $path => $info ) {
+	for ( $offset = 0; $offset < $info['bytes']; ) {
+		list( $status, $chunk ) = call( 'GET', "/exports/$p", array( 'file' => $path, 'offset' => $offset, 'length' => 65536 ) );
+		if ( 200 !== $status || 0 === $chunk['length'] ) { break; }
+		$seen .= base64_decode( $chunk['content'] );
+		$offset += $chunk['length'];
+	}
+}
+$rawir = json_decode( Files::read( Files::dir( $p ) . '/output', 'bridge/rawir.json' ), true );
+$post = array_values( array_filter( $rawir['posts'], static function ( $row ) use ( $locked ) { return $row['id'] === $locked; } ) )[0] ?? null;
+check( 'ready' === $body['export']['phase'] && $post && '[protected]' === $post['password'] && 'Protected body' === $post['content'], 'a password-protected post (private scope) is in rawir.json as "[protected]", its content as it is' );
+check( '' !== $seen && false === strpos( $seen, 'hunter2' ) && isset( $list['files']['bridge/manifest.json'] ), 'its password is in no file read over REST, chunk by chunk — manifest and rawir.json included (' . count( $list['files'] ) . ' files)' );
+wp_delete_post( $locked, true );
+
 $forget();
 echo "\n$checks checks passed.\n";

@@ -73,5 +73,6 @@ check(bridge.authors.every((a) => wauthors.has(a.login)) && bridge.authors.every
 const wc = new Map(wxr.comments.map((c) => [c.id, c]))
 const cdiff = bridge.comments.filter((c) => !wc.has(c.id) || wc.get(c.id).content !== c.content || wc.get(c.id).post !== c.post)
 check(bridge.comments.length > 0 && !cdiff.length, `comments: Bridge's ${bridge.comments.length} match WXR's by id, post and content`)
-check(bridge.posts.every((p) => p.password === null), 'Bridge withholds every post password (WXR carries them)')
+const wpasswords = new Set(wxr.posts.map((p) => p.password).filter((p) => p && p !== '[protected]'))
+check(bridge.posts.every((p) => p.password === null || p.password === '[protected]') && !bridge.posts.some((p) => wpasswords.has(p.password)), 'Bridge withholds every post password (WXR carries them): at most the "[protected]" marker')
 console.log(`\n${checks} A-03 RawIR parity checks passed.`)

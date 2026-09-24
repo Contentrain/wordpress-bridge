@@ -79,6 +79,7 @@ The plugin stores export ownership and a source revision marker. It sends nothin
 = 0.4.0 =
 
 * Contentrain Migrate connection key: Migrate can start and read exports on hosts that strip the Authorization header, without an application password. Shown once, HTTPS only, bound to one Migrate order: an hour to paste it, then valid for that order up to 14 days; revocable by you or closed by Migrate.
+* A password-protected post (exported with private content) carries `[protected]` instead of an empty password, so a reader keeps it off the public site; the password itself still never leaves WordPress.
 * REST: `GET /about` says which sign-in a reader can use; `POST /exports/{id}/read` reads a snapshot for a caller whose key travels in the request body; `DELETE /key` lets Migrate close its own key.
 
 = 0.3.1 =
