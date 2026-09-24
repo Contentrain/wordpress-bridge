@@ -193,5 +193,33 @@ touch( Files::dir( $a ) . '/' . Remote::READ_MARK, time() - Remote::READ_GUARD -
 list( $status, $replaced ) = call( 'POST', '/exports', $scope + array( 'fresh' => true ) );
 check( 201 === $status && $a !== $replaced['export']['id'] && ! is_dir( Files::dir( $a ) ), 'once no one has read it for 10 minutes, fresh replaces it' );
 
+// ---- BR-21: records without their files, for a reader that localizes media itself. ----
+$forget();
+$lean = array( 'types' => array( 'post', 'page', 'attachment' ), 'comments' => true, 'media_files' => false );
+list( $status, $started ) = call( 'POST', '/exports', $lean );
+check( 201 === $status && false === $started['export']['scope']['media_files'], 'media_files:false starts an export and says so in its scope' );
+$m = $started['export']['id'];
+for ( $i = 0; $i < 60; ++$i ) {
+	list( , $body ) = call( 'POST', "/exports/$m/advance" );
+	if ( in_array( $body['export']['phase'], array( 'ready', 'failed' ), true ) ) { break; }
+}
+check( 'ready' === $body['export']['phase'], 'and reaches ready' );
+$files = Jobs::read( $m )['files'];
+$media = array_filter( array_keys( $files ), static function ( $path ) { return 0 === strpos( $path, 'media/' ); } );
+$attachments = json_decode( Files::read( Files::dir( $m ) . '/output', 'bridge/raw-attachments.json' ), true );
+check( ! $media && count( $attachments ) > 0 && isset( $files['bridge/rawir.json'] ), 'no media/ file in the snapshot, while every attachment record is there (' . count( $attachments ) . ')' );
+$store = '';
+foreach ( array_keys( $files ) as $path ) {
+	if ( 0 === strpos( $path, '.contentrain/content/' ) ) { $store .= Files::read( Files::dir( $m ) . '/output', $path ); }
+}
+$base = wp_get_upload_dir()['baseurl'];
+check( ! preg_match( '#(^|[\s"\x27(=/])media/#', $store ) && false !== strpos( $store, $base ), 'the store points at no media/ path and keeps the WordPress upload URLs' );
+$manifest = json_decode( Files::read( Files::dir( $m ) . '/output', 'bridge/manifest.json' ), true );
+check( 0 === $manifest['media']['transferred_files'] && 0 === $manifest['media']['kept_as_source_url'] && false === $manifest['scope']['media_files'], 'the manifest says no files were requested, and counts none as failed to copy' );
+list( $status, $again ) = call( 'POST', '/exports', $lean );
+check( 200 === $status && $m === $again['export']['id'], 'the same scope again reuses it' );
+list( $status, $full ) = call( 'POST', '/exports', array( 'types' => array( 'post', 'page', 'attachment' ), 'comments' => true ) );
+check( 201 === $status && $m !== $full['export']['id'] && true === $full['export']['scope']['media_files'], 'an export with media files is a different scope: never reused for the other' );
+
 $forget();
 echo "\n$checks checks passed.\n";

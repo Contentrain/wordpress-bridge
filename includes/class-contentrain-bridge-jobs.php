@@ -37,7 +37,7 @@ final class Jobs {
 			'id' => $id, 'remote' => (bool) $remote, 'owner' => get_current_user_id(), 'blog' => get_current_blog_id(), 'created_at' => gmdate( 'c' ),
 			'revision' => Source::revision(), 'phase' => 'media', 'cursor' => 0, 'step' => 0,
 			'inventory' => $inventory, 'default_locale' => $locale, 'locales' => array( $locale => true ), 'i18n' => count( $languages ) > 1,
-			'options' => array( 'types' => $types, 'private' => ! empty( $input['private'] ), 'comments' => ! empty( $input['comments'] ), 'scan_plugins' => ! empty( $input['scan_plugins'] ), 'scan_sources' => ! empty( $input['scan_sources'] ), 'scan_render' => ! empty( $input['scan_render'] ), 'selected_meta' => array_values( array_filter( array_map( 'sanitize_text_field', (array) ( $input['selected_meta'] ?? array() ) ) ) ), 'labels' => array_map( 'sanitize_text_field', (array) ( $input['labels'] ?? array() ) ) ),
+			'options' => array( 'types' => $types, 'private' => ! empty( $input['private'] ), 'comments' => ! empty( $input['comments'] ), 'media_files' => ! array_key_exists( 'media_files', $input ) || ! empty( $input['media_files'] ), 'scan_plugins' => ! empty( $input['scan_plugins'] ), 'scan_sources' => ! empty( $input['scan_sources'] ), 'scan_render' => ! empty( $input['scan_render'] ), 'selected_meta' => array_values( array_filter( array_map( 'sanitize_text_field', (array) ( $input['selected_meta'] ?? array() ) ) ) ), 'labels' => array_map( 'sanitize_text_field', (array) ( $input['labels'] ?? array() ) ) ),
 			'uploads' => array_intersect_key( (array) wp_get_upload_dir(), array_flip( array( 'basedir', 'baseurl' ) ) ),
 			'record_scope' => Inventory::scope( $types, array_filter( array_map( 'sanitize_text_field', (array) ( $input['selected_meta'] ?? array() ) ) ), ! empty( $input['private'] ) ), 'records' => array(),
 			'models' => array(), 'tables' => array(), 'files' => array(), 'candidates' => array(), 'counts' => array( 'posts' => 0, 'media' => 0, 'media_files' => 0, 'media_bytes' => 0, 'media_kept_remote' => 0, 'comments' => 0, 'warnings' => 0 ),
@@ -211,6 +211,9 @@ final class Jobs {
 			throw new \RuntimeException( 'Cannot enumerate media.' );
 		}
 		$basedir = $job['uploads']['basedir'] ?? '';
+		// Records without their files: the reader localizes media itself, and with nothing copied nothing is
+		// relinked, so the store keeps every WordPress URL (`Models::relink` rewrites only copied files).
+		$copy = $job['options']['media_files'] ?? true;
 		foreach ( $ids as $id ) {
 			$p = get_post( $id );
 			$job['cursor'] = (int) $id;
@@ -243,7 +246,7 @@ final class Jobs {
 			}
 			$relative = ltrim( (string) $a['file'], '/' );
 			$stored = null;
-			if ( $relative && $basedir ) {
+			if ( $copy && $relative && $basedir ) {
 				$stored = self::transfer( $job, $basedir, $relative );
 				// Generated sizes live beside the original and are what a theme
 				// actually renders; without them a relinked page loads nothing.
@@ -257,7 +260,7 @@ final class Jobs {
 			}
 			if ( $stored ) {
 				$data['file'] = $stored;
-			} else {
+			} elseif ( $copy ) {
 				++$job['counts']['media_kept_remote'];
 			}
 			Models::entry( $job, 'wp-media', $job['default_locale'], substr( hash( 'sha256', 'media:' . $id ), 0, 12 ), $data );
@@ -607,7 +610,7 @@ final class Jobs {
 	/** The manifest lists every other file; rewritten when delivery adds one. */
 	public static function manifest( &$job ) {
 		unset( $job['files']['bridge/manifest.json'] );
-		$manifest = array( 'format' => 'contentrain-bridge@1', 'version' => CONTENTRAIN_BRIDGE_VERSION, 'snapshot' => $job['id'], 'site' => $job['inventory']['site'], 'created_at' => $job['created_at'], 'scope' => $job['options'], 'counts' => $job['counts'], 'files' => $job['files'], 'media' => array( 'transferred_files' => $job['counts']['media_files'], 'transferred_bytes' => $job['counts']['media_bytes'], 'kept_as_source_url' => $job['counts']['media_kept_remote'], 'stored_under' => 'media/', 'note' => $job['counts']['media_kept_remote'] ? 'Some media still points at WordPress; see bridge/warnings.json' : 'All exported media travels with the content' ), 'source_reuse' => 'not-applied', 'complete_source_coverage' => false, 'coverage' => $job['coverage_summary'] ?? null );
+		$manifest = array( 'format' => 'contentrain-bridge@1', 'version' => CONTENTRAIN_BRIDGE_VERSION, 'snapshot' => $job['id'], 'site' => $job['inventory']['site'], 'created_at' => $job['created_at'], 'scope' => $job['options'], 'counts' => $job['counts'], 'files' => $job['files'], 'media' => array( 'transferred_files' => $job['counts']['media_files'], 'transferred_bytes' => $job['counts']['media_bytes'], 'kept_as_source_url' => $job['counts']['media_kept_remote'], 'stored_under' => 'media/', 'note' => ! ( $job['options']['media_files'] ?? true ) ? 'Media files were not requested (media_files: false): records keep their WordPress URLs' : ( $job['counts']['media_kept_remote'] ? 'Some media still points at WordPress; see bridge/warnings.json' : 'All exported media travels with the content' ) ), 'source_reuse' => 'not-applied', 'complete_source_coverage' => false, 'coverage' => $job['coverage_summary'] ?? null );
 		Models::file( $job, 'bridge/manifest.json', Policy::json( $manifest ) );
 	}
 
@@ -628,7 +631,7 @@ final class Jobs {
 	}
 
 	public static function summary( $job ) {
-		$result = array_intersect_key( $job, array_flip( array( 'id', 'phase', 'cursor', 'step', 'counts', 'created_at', 'error' ) ) ) + array( 'expires_at' => gmdate( 'c', strtotime( $job['created_at'] ) + DAY_IN_SECONDS ), 'scope' => array_intersect_key( $job['options'], array_flip( array( 'types', 'private', 'comments' ) ) ), 'files' => count( $job['files'] ), 'models' => array_values( $job['models'] ), 'candidates' => count( $job['candidates'] ), 'unreviewed' => count( array_filter( $job['candidates'], static function ( $candidate ) { return 'review' === $candidate['decision']; } ) ) );
+		$result = array_intersect_key( $job, array_flip( array( 'id', 'phase', 'cursor', 'step', 'counts', 'created_at', 'error' ) ) ) + array( 'expires_at' => gmdate( 'c', strtotime( $job['created_at'] ) + DAY_IN_SECONDS ), 'scope' => array_intersect_key( $job['options'] + array( 'media_files' => true ), array_flip( array( 'types', 'private', 'comments', 'media_files' ) ) ), 'files' => count( $job['files'] ), 'models' => array_values( $job['models'] ), 'candidates' => count( $job['candidates'] ), 'unreviewed' => count( array_filter( $job['candidates'], static function ( $candidate ) { return 'review' === $candidate['decision']; } ) ) );
 		if ( isset( $job['coverage_summary'] ) ) {
 			$result['coverage'] = $job['coverage_summary'];
 		}
