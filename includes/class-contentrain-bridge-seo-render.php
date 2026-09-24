@@ -158,12 +158,12 @@ final class SeoRender {
 		);
 	}
 
-	/** A text over `$limit` characters: its first `$limit`, cut back to the last space (the last word goes, whole or not). */
+	/** A text over `$limit` characters: its first `$limit`, trimmed, and the last word dropped, whole or not. */
 	public static function whole_words( $text, $limit ) {
 		if ( mb_strlen( $text ) <= $limit ) {
 			return $text;
 		}
-		return rtrim( preg_replace( '/\s+\S*$/u', '', mb_substr( $text, 0, $limit ) ) );
+		return preg_replace( '/\s+\S+$/u', '', rtrim( mb_substr( $text, 0, $limit ) ) );
 	}
 
 	/** The shared vocabulary for one term archive. */
