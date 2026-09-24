@@ -131,8 +131,8 @@ final class SeoRender {
 		return self::site_values( $sep ) + array(
 			'title'          => html_entity_decode( (string) $post->post_title, ENT_QUOTES | ENT_HTML5, 'UTF-8' ),
 			'excerpt'        => $excerpt,
-			// 156 characters without a broken last word: what Rank Math prints.
-			'excerpt_whole_words' => $own ? (string) $post->post_excerpt : self::whole_words( $content, 156 ),
+			// Rank Math: the first 160 characters, cut back to the last space.
+			'excerpt_whole_words' => $own ? (string) $post->post_excerpt : self::whole_words( $content, 160 ),
 			// WordPress's own excerpt length, without its "more" suffix: what AIOSEO prints.
 			'excerpt_words'  => $own ? (string) $post->post_excerpt : wp_trim_words( $content, 55, '' ),
 			'excerpt_only'   => (string) $post->post_excerpt,
@@ -158,16 +158,12 @@ final class SeoRender {
 		);
 	}
 
-	/** At most `$limit` characters, ending on a whole word. */
+	/** A text over `$limit` characters: its first `$limit`, cut back to the last space (the last word goes, whole or not). */
 	public static function whole_words( $text, $limit ) {
 		if ( mb_strlen( $text ) <= $limit ) {
 			return $text;
 		}
-		$cut = mb_substr( $text, 0, $limit );
-		if ( ! preg_match( '/^\s/u', mb_substr( $text, $limit, 1 ) ) ) {
-			$cut = preg_replace( '/\s+\S*$/u', '', $cut );
-		}
-		return rtrim( $cut );
+		return rtrim( preg_replace( '/\s+\S*$/u', '', mb_substr( $text, 0, $limit ) ) );
 	}
 
 	/** The shared vocabulary for one term archive. */
