@@ -130,6 +130,13 @@ final class Acf {
 		if ( ! $post || $post->post_password || ! in_array( $post->post_status, array( 'publish', 'inherit' ), true ) ) {
 			return null;
 		}
+		// An attachment inherits its parent's status, and its address carries the parent's slug.
+		if ( 'inherit' === $post->post_status && $post->post_parent ) {
+			$parent = get_post( $post->post_parent );
+			if ( ! $parent || $parent->post_password || 'publish' !== $parent->post_status ) {
+				return null;
+			}
+		}
 		return get_permalink( $post ) ?: null;
 	}
 

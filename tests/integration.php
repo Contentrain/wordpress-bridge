@@ -487,6 +487,8 @@ check( null === $acf_class::scalar( array( 'type' => 'select', 'multiple' => tru
 check( get_permalink( $page ) === $acf_class::cast( array( 'type' => 'url' ), (string) $page ), 'a page_link post ID casts to its public address' );
 check( null === $acf_class::cast( array( 'type' => 'url' ), $draft ) && null === $acf_class::cast( array( 'type' => 'url' ), 999999 ), 'a page_link to a draft or missing post has no address to give' );
 check( null === $acf_class::scalar( array( 'type' => 'page_link', 'multiple' => true ) ), 'a multiple page_link is not one URL' );
+$draft_attachment = wp_insert_attachment( array( 'post_title' => 'Draft child file', 'post_mime_type' => 'image/png', 'post_status' => 'inherit' ), false, $draft );
+check( null === $acf_class::cast( array( 'type' => 'url' ), $draft_attachment ), 'a page_link to a file attached to a draft has no public address' );
 $link_schema = array( 'type' => 'link', 'key' => 'field_probe_link', 'name' => 'link' );
 $result = $acf_class::field( $probe, $link_schema, array( 'url' => 'https://example.test', 'title' => 'Read more', 'target' => '_blank' ), $job['default_locale'], 'link' );
 $link_model = $acf_class::model_id( 'link', 'field_probe_link' );
