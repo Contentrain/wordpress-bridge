@@ -92,8 +92,14 @@ final class Exporter {
 	}
 
 	/** Export registered navigation menus and resolved target metadata. */
-	public static function menus() {
+	/**
+	 * Classic menus (with the theme locations each is assigned to), then a
+	 * block theme's navigation (`Menus::block()`). `$dropped` counts block
+	 * links left out because their target is not public.
+	 */
+	public static function menus( &$dropped = 0 ) {
 		$results = array();
+		$assigned = get_nav_menu_locations();
 		foreach ( wp_get_nav_menus() as $menu ) {
 			$raw_items = wp_get_nav_menu_items( $menu->term_id );
 			$items     = array_map( array( self::class, 'map_menu_item' ), is_array( $raw_items ) ? $raw_items : array() );
@@ -104,14 +110,22 @@ final class Exporter {
 				$item['parent_unresolved'] = (bool) ( $item['parent'] && ! in_array( $item['parent'], $ids, true ) );
 			}
 			unset( $item );
-			$results[] = array(
+			$entry = array(
 				'id'    => (int) $menu->term_id,
 				'slug'  => $menu->slug,
 				'name'  => $menu->name,
 				'items' => $items,
 			);
+			$locations = array_keys( array_filter( (array) $assigned, static function ( $id ) use ( $menu ) { return (int) $id === (int) $menu->term_id; } ) );
+			if ( $locations ) {
+				sort( $locations );
+				$entry['locations'] = array_map( 'strval', $locations );
+			}
+			$results[] = $entry;
 		}
-		return $results;
+		$block = Menus::block( array_column( $results, 'slug' ) );
+		$dropped = $block['dropped'];
+		return array_merge( $results, $block['menus'] );
 	}
 
 	/** Map one menu item into the shared target union. */
