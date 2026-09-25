@@ -582,6 +582,46 @@ foreach ( array( 'user_pass', 'apiKey', 'access_token', 'client-secret', 'creden
 foreach ( array( 'passage', 'compass', 'session_title', 'cookie_recipe', 'tokenomics', 'contact_email' ) as $name ) {
 	check( ! Policy::secret_name( $name ), $name . ' is content, not a credential name' );
 }
+// Block-theme navigation (TT5's shape), from markup alone: the rules @contentrain/wp-import reads over REST.
+$nav_link = static function ( $label, $url, $extra = '' ) { return '<!-- wp:navigation-link {"label":"' . $label . '","url":"' . $url . '"' . $extra . '} /-->'; };
+$tt5_templates = array(
+	array( 'slug' => 'index', 'area' => '', 'content' => '<!-- wp:template-part {"slug":"header","area":"header"} /--><!-- wp:group --><div><!-- wp:post-content /--></div><!-- /wp:group --><!-- wp:template-part {"slug":"footer","area":"footer"} /-->' ),
+);
+$tt5_parts = array(
+	array( 'slug' => 'header', 'area' => 'header', 'content' => '<!-- wp:group --><div><!-- wp:site-title /--><!-- wp:navigation {"ref":501} /--><!-- wp:template-part {"slug":"header-nav","area":"uncategorized"} /--></div><!-- /wp:group -->' ),
+	array( 'slug' => 'header-nav', 'area' => 'uncategorized', 'content' => '<!-- wp:navigation {"ariaLabel":"Utility"} -->' . $nav_link( 'Account', 'https://example.test/account' ) . '<!-- /wp:navigation -->' ),
+	array( 'slug' => 'footer', 'area' => 'footer', 'content' => '<!-- wp:columns --><div><!-- wp:navigation {"overlayMenu":"never"} -->' . $nav_link( 'Blog', 'https://example.test/blog' ) . $nav_link( 'Draft', '?page_id=' . $draft, ',"kind":"post-type","type":"page","id":' . $draft ) . '<!-- /wp:navigation --><!-- wp:navigation -->' . $nav_link( 'Events', 'https://example.test/events' ) . $nav_link( 'Soon', '#' ) . '<!-- /wp:navigation --></div><!-- /wp:columns -->' ),
+	array( 'slug' => 'footer-columns', 'area' => 'footer', 'content' => '<!-- wp:navigation -->' . $nav_link( 'Never shown', 'https://example.test/nope' ) . '<!-- /wp:navigation -->' ),
+);
+$tt5_navs = array(
+	array( 'id' => 501, 'slug' => 'navigation', 'title' => 'Navigation', 'date' => '2026-01-01 00:00:00', 'content' => $nav_link( 'About', '?page_id=' . $page, ',"kind":"post-type","type":"page","id":' . $page ) . '<!-- wp:navigation-submenu {"label":"More","url":"#"} -->' . $nav_link( 'Team', 'https://example.test/team' ) . '<!-- /wp:navigation-submenu -->' ),
+	array( 'id' => 502, 'slug' => 'old-nav', 'title' => 'Old nav', 'date' => '2025-01-01 00:00:00', 'content' => $nav_link( 'Old', 'https://example.test/old' ) ),
+);
+$block_menus = \Contentrain\Bridge\Menus::from_blocks( $tt5_templates, $tt5_parts, $tt5_navs, array( 'navigation' ), array( \Contentrain\Bridge\Menus::class, 'target' ) );
+$by_slug = array_column( $block_menus['menus'], null, 'slug' );
+check( array( 'navigation-2', 'old-nav', 'utility', 'footer-navigation-1', 'footer-navigation-2' ) === array_column( $block_menus['menus'], 'slug' ), 'block menus: wp_navigation posts, then inline navigation by area; slugs unique against classic menus: ' . implode( ',', array_column( $block_menus['menus'], 'slug' ) ) );
+check( array( 'header' ) === ( $by_slug['navigation-2']['locations'] ?? null ) && ! isset( $by_slug['old-nav']['locations'] ), 'a ref gives its navigation the part\'s area; an unreferenced one has no location' );
+check( array( 'header' ) === $by_slug['utility']['locations'] && 'Utility' === $by_slug['utility']['name'], 'a part used inside a used part is opened in place (its area is the outer part\'s), and an aria label names its navigation' );
+$looped = array( array( 'slug' => 'header', 'area' => 'header', 'content' => '<!-- wp:template-part {"slug":"header"} /--><!-- wp:navigation -->' . $nav_link( 'Once', 'https://example.test/once' ) . '<!-- /wp:navigation -->' ) );
+check( 1 === count( \Contentrain\Bridge\Menus::from_blocks( array(), $looped, array(), array(), array( \Contentrain\Bridge\Menus::class, 'target' ) )['menus'] ), 'a part naming itself is opened once' );
+check( 'Footer navigation 1' === $by_slug['footer-navigation-1']['name'] && array( 'footer' ) === $by_slug['footer-navigation-2']['locations'], 'inline footer columns are numbered menus of the footer' );
+check( array( 'Blog' ) === array_column( $by_slug['footer-navigation-1']['items'], 'title' ) && 1 === $block_menus['dropped'], 'a link to a draft is left out and counted' );
+check( '#' === $by_slug['footer-navigation-2']['items'][1]['url'], 'a placeholder # link stays #' );
+check( ! in_array( 'Never shown', array_merge( ...array_map( static function ( $m ) { return array_column( $m['items'], 'title' ); }, $block_menus['menus'] ) ), true ), 'an unused template part (footer-columns) gives no menu' );
+$nav_items = $by_slug['navigation-2']['items'];
+check( array( 'About', 'More', 'Team' ) === array_column( $nav_items, 'title' ) && $nav_items[1]['id'] === $nav_items[2]['parent'] && $nav_items[0]['id'] < 0, 'block items keep order and nesting, with negative ids' );
+check( 'post' === $nav_items[0]['target']['kind'] && $page === $nav_items[0]['target']['id'] && get_permalink( $page ) === $nav_items[0]['url'], 'a post link is a post target with its public address' );
+// A hand-typed ?page_id= link on this site is checked like a post link; another site's is a plain URL.
+list( $typed_draft, $typed_draft_public ) = \Contentrain\Bridge\Menus::target( array( 'label' => 'Typed', 'url' => home_url( '/?page_id=' . $draft ) ) );
+list( $typed_page, $typed_page_public ) = \Contentrain\Bridge\Menus::target( array( 'label' => 'Typed', 'url' => '/?p=' . $page ) );
+list( $elsewhere, $elsewhere_public ) = \Contentrain\Bridge\Menus::target( array( 'label' => 'Elsewhere', 'url' => 'https://other.example/?page_id=' . $draft ) );
+check( false === $typed_draft_public && 'post' === $typed_draft['kind'], 'a typed ?page_id= link to a draft is not public' );
+check( true === $typed_page_public && 'post' === $typed_page['kind'] && $page === $typed_page['id'] && get_permalink( $page ) === $typed_page['url'], 'a typed ?p= link to a published page is that page' );
+check( true === $elsewhere_public && 'url' === $elsewhere['kind'], 'another site\'s ?page_id= is just an address' );
+$fallback = \Contentrain\Bridge\Menus::locations( array( array( 'slug' => 'header', 'area' => 'header', 'content' => '<!-- wp:navigation /-->' ) ), $tt5_navs );
+check( array( 501 => array( 'header' ) ) === $fallback, 'an empty navigation block shows the most recent published navigation' );
+check( array( 'header', 'footer' ) === array_column( \Contentrain\Bridge\Menus::used_parts( array(), $tt5_parts ), 'slug' ), 'without templates, the parts named after their area count' );
+
 Files::remove( Files::dir( $probe['id'] ) );
 
 // A real candidate review round, independent of the installed theme's size.
@@ -659,6 +699,9 @@ if ( $has_polylang ) {
 	$post_row = $menu_items[ $menu_id( $menu_post_item ) ];
 	check( 'post' === $post_row['target_kind'] && true === $post_row['target_resolved'] && 'post' === $post_row['target_post_type'] && get_post( $post )->post_name === $post_row['target_slug'], 'a post-type menu item resolves kind/post_type/slug' );
 	check( 'bridge-primary' === $post_row['location'], 'a menu assigned to a theme location carries it' );
+	$raw_menus = json_decode( Files::read( $dir, 'bridge/raw-menus.json' ), true );
+	$raw_primary = array_values( array_filter( (array) $raw_menus, static function ( $m ) use ( $primary_menu ) { return (int) $m['id'] === (int) $primary_menu; } ) )[0] ?? null;
+	check( $raw_primary && array( 'bridge-primary' ) === ( $raw_primary['locations'] ?? null ), 'RawIR carries a classic menu\'s theme locations' );
 	check( ! isset( $post_row['parent'] ), 'a top-level item has no parent field' );
 	$child_row = $menu_items[ $menu_id( $menu_child_item ) ];
 	check( $menu_id( $menu_post_item ) === $child_row['parent'], 'a nested item is a relation to its own parent row, not a raw WordPress id' );
