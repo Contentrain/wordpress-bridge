@@ -404,8 +404,9 @@ final class Models {
 				// WordPress itself only ever resolves a link for a post/term whose
 				// target still exists; one that never resolved carries no URL to
 				// fall back to, not an empty string a `url` field would reject.
-				if ( ! empty( $item['url'] ) ) {
-					$data['url'] = $item['url'];
+				$url = self::menu_url( (string) ( $item['url'] ?? '' ) );
+				if ( null !== $url ) {
+					$data['url'] = $url;
 				}
 				if ( $menu_locations ) {
 					$data['location'] = implode( ',', $menu_locations );
@@ -438,6 +439,21 @@ final class Models {
 				self::entry( $job, 'wp-menu-items', $job['default_locale'], substr( hash( 'sha256', 'menu:' . $item['id'] ), 0, 12 ), $data );
 			}
 		}
+	}
+
+	/**
+	 * A menu item's address as a `url` field holds it: a site-relative one
+	 * (`/about/`) made absolute; a placeholder (`#`, `#section`) or anything
+	 * else that is no address has none — RawIR keeps it as written.
+	 */
+	private static function menu_url( $url ) {
+		if ( '' === $url || '#' === $url[0] ) {
+			return null;
+		}
+		if ( '/' === $url[0] && ( ! isset( $url[1] ) || '/' !== $url[1] ) ) {
+			$url = home_url( $url );
+		}
+		return false !== filter_var( $url, FILTER_VALIDATE_URL ) ? $url : null;
 	}
 
 	/**
