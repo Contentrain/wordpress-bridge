@@ -20,6 +20,7 @@ const { model, entry } = Astro.props
 const root = process.env.CONTENTRAIN_STORE as string
 const config = JSON.parse(readFileSync(join(root, '.contentrain/config.json'), 'utf8'))
 const resolved: Record<string, string[]> = {}
+const lists: Record<string, string[]> = {}
 const media: string[] = []
 for (const [key, field] of Object.entries(model.fields ?? {}) as [string, any][]) {
   const value = entry.data[key]
@@ -31,6 +32,10 @@ for (const [key, field] of Object.entries(model.fields ?? {}) as [string, any][]
       if (!target) throw new Error(`Unresolved relation ${model.id}/${entry.id}.${key} -> ${field.model}/${id}`)
       resolved[key].push(String(target.data[target.data.title ? 'title' : 'name'] ?? target.id))
     }
+  }
+  // A list of values with parts (an ACF repeater): each row by its title, or its first text.
+  if (field.type === 'array' && typeof field.items === 'object' && field.items.type === 'object' && Array.isArray(value)) {
+    lists[key] = value.map((row: Record<string, unknown>) => String(row.title ?? Object.values(row).find((v) => typeof v === 'string') ?? ''))
   }
   // String checks, not a regex: Astro's frontmatter scanner reads a slash-heavy regex as a comment.
   const local = typeof value === 'string' ? (value.startsWith('/') ? value.slice(1) : value) : ''
@@ -49,6 +54,7 @@ const { Content } = model.kind === 'document' ? await render(entry) : { Content:
     <h1>{title}</h1>
     <dl>
       {Object.entries(resolved).map(([key, names]) => <Fragment><dt>{key}</dt><dd data-relation={key}>{names.join(', ')}</dd></Fragment>)}
+      {Object.entries(lists).map(([key, names]) => <Fragment><dt>{key}</dt><dd data-list={key}>{names.join(', ')}</dd></Fragment>)}
       {media.map((path) => <Fragment><dt>media</dt><dd data-media>{path}</dd></Fragment>)}
       {entry.data.url && <Fragment><dt>url</dt><dd data-url>{String(entry.data.url)}</dd></Fragment>}
       {entry.data.source_slug && <Fragment><dt>slug</dt><dd data-slug>{String(entry.data.source_slug)}</dd></Fragment>}
