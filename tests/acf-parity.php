@@ -55,8 +55,12 @@ $parity_def = static function ( $def ) use ( &$parity_def ) {
 	return $out;
 };
 
+// A date-time is written in the site's zone (`wp_timezone()`): each case says which site it is.
+$parity_zone = get_option( 'timezone_string' );
+$parity_offset = get_option( 'gmt_offset' );
 foreach ( $parity['cases'] as $i => $case ) {
 	$name = 'p' . $i;
+	update_option( 'timezone_string', $case['site_timezone'] ?? $parity['site_timezone'] ?? 'UTC' );
 	$before = $probe['counts']['warnings'];
 	$result = Acf::field( $probe, $parity_schema( $case['field'], $name ), $case['value'] ?? null, $job['default_locale'], 'parity/' . $name, null, true );
 	$dropped = $probe['counts']['warnings'] - $before;
@@ -67,3 +71,5 @@ foreach ( $parity['cases'] as $i => $case ) {
 	// Strict, through the canonical JSON: `true == 1` in PHP, not in a store.
 	check( wp_json_encode( $want ) === wp_json_encode( $got ), 'ACF parity: ' . $case['name'] . ' — want ' . wp_json_encode( $want ) . ' got ' . wp_json_encode( $got ) );
 }
+update_option( 'timezone_string', $parity_zone );
+update_option( 'gmt_offset', $parity_offset );
