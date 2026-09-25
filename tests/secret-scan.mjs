@@ -26,6 +26,8 @@ const CANARIES = [
   'never-export-semrush', 'never-export-wincher', 'never-export-myyoast',
   // Planted by tests/integrations.php in the services' own settings.
   'never-export-mailchimp', 'never-export-akismet', 'never-export-recaptcha', 'never-export-wpforms', 'never-export-gf-feed-key',
+  // Planted by tests/integration.php in ACF fields: a credential-named text field and a password field.
+  'planted-acf-token-value', 'planted-acf-door-code',
 ]
 const PATTERNS = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
