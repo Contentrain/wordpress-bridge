@@ -110,6 +110,30 @@ if ( $has_acf ) {
 			// once failed the whole export's validation.
 			array( 'key' => 'field_bridge_landing', 'name' => 'landing', 'label' => 'Landing page', 'type' => 'page_link' ),
 			array( 'key' => 'field_bridge_landing_draft', 'name' => 'landing_draft', 'label' => 'Draft landing page', 'type' => 'page_link' ),
+			// B3: values with parts, and lists of choices.
+			array( 'key' => 'field_bridge_map', 'name' => 'office', 'label' => 'Office', 'type' => 'google_map' ),
+			array( 'key' => 'field_bridge_topics', 'name' => 'topics', 'label' => 'Topics', 'type' => 'checkbox', 'choices' => array( 'news' => 'News', 'guides' => 'Guides', 'events' => 'Events' ) ),
+			array( 'key' => 'field_bridge_tags', 'name' => 'audience', 'label' => 'Audience', 'type' => 'select', 'multiple' => 1, 'choices' => array( 'dev' => 'Developers', 'ed' => 'Editors' ) ),
+			array( 'key' => 'field_bridge_tier', 'name' => 'tier', 'label' => 'Tier', 'type' => 'select', 'choices' => array( 'gold' => 'Gold', 'silver' => 'Silver' ) ),
+			array(
+				'key' => 'field_bridge_faq', 'name' => 'faq', 'label' => 'FAQ', 'type' => 'repeater',
+				'sub_fields' => array(
+					array( 'key' => 'field_bridge_faq_q', 'name' => 'question', 'label' => 'Question', 'type' => 'text' ),
+					array(
+						'key' => 'field_bridge_faq_links', 'name' => 'links', 'label' => 'Links', 'type' => 'repeater',
+						'sub_fields' => array( array( 'key' => 'field_bridge_faq_link', 'name' => 'link', 'label' => 'Link', 'type' => 'link' ) ),
+					),
+				),
+			),
+			array(
+				'key' => 'field_bridge_deep', 'name' => 'deep', 'label' => 'Too deep', 'type' => 'group',
+				'sub_fields' => array(
+					array(
+						'key' => 'field_bridge_deep_2', 'name' => 'inner', 'type' => 'group',
+						'sub_fields' => array( array( 'key' => 'field_bridge_deep_3', 'name' => 'innermost', 'type' => 'group', 'sub_fields' => array( array( 'key' => 'field_bridge_deep_text', 'name' => 'text', 'type' => 'text' ) ) ) ),
+					),
+				),
+			),
 			array(
 				'key' => 'field_bridge_sections', 'name' => 'sections', 'label' => 'Sections', 'type' => 'flexible_content',
 				'layouts' => array(
@@ -145,6 +169,17 @@ if ( $has_acf ) {
 	update_field( 'field_bridge_person', $admin->ID, $page );
 	update_field( 'cta_link', array( 'title' => 'Read more', 'url' => 'https://example.test/read-more', 'target' => '_blank' ), $page );
 	update_field( 'landing', $post, $page );
+	update_field( 'office', array( 'address' => '1 Example Street', 'lat' => 52.37, 'lng' => 4.89, 'zoom' => 14 ), $page );
+	update_field( 'topics', array( 'guides', 'news' ), $page );
+	update_field( 'audience', array( 'ed' ), $page );
+	// A choice the site has since removed: kept in the database, gone from the field.
+	update_post_meta( $page, 'tier', 'bronze' );
+	update_post_meta( $page, '_tier', 'field_bridge_tier' );
+	update_field( 'faq', array(
+		array( 'question' => 'Where do I start?', 'links' => array( array( 'link' => array( 'url' => 'https://example.test/start', 'title' => 'Start here', 'target' => '' ) ) ) ),
+		array( 'question' => 'Is it mine?', 'links' => array() ),
+	), $page );
+	update_field( 'deep', array( 'inner' => array( 'innermost' => array( 'text' => 'Three levels down' ) ) ), $page );
 	update_field( 'landing_draft', $draft, $page );
 	update_field( 'sections', array(
 		array( 'acf_fc_layout' => 'text_block', 'heading' => 'Intro', 'body' => 'Welcome copy' ),
@@ -329,16 +364,16 @@ if ( $has_polylang ) {
 		update_field( 'gallery', array( $attachment, $ghost ), $page_da );
 		update_field( 'field_bridge_person', $admin->ID, $page_da );
 		update_field( 'cta_link', array( 'title' => 'Læs mere', 'url' => 'https://example.test/read-more', 'target' => '_blank' ), $page_da );
+		// Its three-deep group falls back to structured values, which the store expects in every locale.
+		update_field( 'deep', array( 'inner' => array( 'innermost' => array( 'text' => 'Tre niveauer nede' ) ) ), $page_da );
 		update_field( 'sections', array(
 			array( 'acf_fc_layout' => 'text_block', 'heading' => 'Intro', 'body' => 'Velkomst' ),
 			array( 'acf_fc_layout' => 'quote_block', 'heading' => 'Ros', 'quote' => 'Det virker bare.' ),
 		), $page_da );
 	}
-	// A group-display clone becomes its own nested collection model (like a
-	// native `group` field), so it carries the same cross-locale requirement:
-	// a translated page needs its own entry, not a same-language gap. The
-	// seamless clone above needs no mirror — its fields flatten onto the page
-	// document itself, where an unset scalar is not a parity error.
+	// A group-display clone is an object on the page, like a native `group`
+	// field; the translated page carries its own copy. The seamless clone
+	// above needs no mirror — its fields flatten onto the page itself.
 	if ( $has_scf_pro ) {
 		update_field( 'field_bridge_clone_group', array( 'note' => 'Grupperet note', 'priority' => 5 ), $page_da );
 	}
@@ -472,15 +507,10 @@ check( ! array_key_exists( 'acf', $post_raw ), 'a post outside every ACF field g
 check( ! isset( $job['models']['wp-post']['fields']['slug'] ), 'document system slug is not declared as a field' );
 check( isset( $job['models']['wp-structured-values'] ), 'nested content becomes editable related records' );
 if ( $has_acf ) {
-	// The point of modelling: a repeater of testimonials is a list of records
-	// with a person and a quote, not an anonymous name/value bag.
-	check( isset( $job['models'][\Contentrain\Bridge\Acf::model_id( 'quotes', 'field_bridge_quotes' )] ), 'a repeater becomes its own model' );
-	$quotes = $job['models'][\Contentrain\Bridge\Acf::model_id( 'quotes', 'field_bridge_quotes' )];
-	check( 'collection' === $quotes['kind'] && 'person' === $quotes['title_field'], 'the repeater model is titled by its first text field' );
-	check( array( 'person', 'position', 'quote' ) === array_keys( $quotes['fields'] ), 'sub-fields become fields: ' . implode( ',', array_keys( $quotes['fields'] ) ) );
-	check( 'text' === $quotes['fields']['quote']['type'] && 'integer' === $quotes['fields']['position']['type'], 'ACF types map onto Contentrain types' );
-	check( isset( $job['models'][\Contentrain\Bridge\Acf::model_id( 'hero', 'field_bridge_hero' )] ) && array( 'cta', 'heading' ) === array_keys( $job['models'][\Contentrain\Bridge\Acf::model_id( 'hero', 'field_bridge_hero' )]['fields'] ), 'a group becomes its own model' );
-
+	// B3: a page's (a collection entry's) group, repeater, flexible content and
+	// link are values with parts, written in place — not models of their own.
+	$acf_models = array_filter( array_keys( $job['models'] ), static function ( $m ) { return 0 === strpos( $m, 'acf-' ) && 0 !== strpos( $m, 'acf-options-' ); } );
+	check( array() === array_values( $acf_models ), 'a page\'s ACF fields create no models of their own: ' . implode( ',', $acf_models ) );
 }
 // Adversarial ACF shapes must either model losslessly or use the explicit fallback.
 $probe = $job;
@@ -494,6 +524,11 @@ check( null === $acf_class::scalar( array( 'type' => 'select', 'multiple' => tru
 check( get_permalink( $page ) === $acf_class::cast( array( 'type' => 'url' ), (string) $page ), 'a page_link post ID casts to its public address' );
 check( null === $acf_class::cast( array( 'type' => 'url' ), $draft ) && null === $acf_class::cast( array( 'type' => 'url' ), 999999 ), 'a page_link to a draft or missing post has no address to give' );
 check( null === $acf_class::scalar( array( 'type' => 'page_link', 'multiple' => true ) ), 'a multiple page_link is not one URL' );
+// B3: definitions come from the schema alone.
+check( null === $acf_class::definition( array( 'type' => 'repeater', 'sub_fields' => array( array( 'name' => 'heading', 'type' => 'text' ), array( 'name' => 'post', 'type' => 'post_object' ) ) ) ), 'a repeater holding a reference has no inline shape' );
+check( null === $acf_class::definition( array( 'type' => 'flexible_content', 'layouts' => array( array( 'name' => 'a', 'sub_fields' => array( array( 'name' => 'x', 'type' => 'text' ) ) ), array( 'name' => 'b', 'sub_fields' => array( array( 'name' => 'x', 'type' => 'number' ) ) ) ) ) ), 'two layouts typing one name differently have no single shape' );
+check( array( 'type' => 'object', 'fields' => array( 'heading' => array( 'type' => 'string' ) ) ) === $acf_class::definition( array( 'type' => 'group', 'sub_fields' => array( array( 'name' => 'heading', 'type' => 'text', 'required' => 1 ), array( 'name' => 'pin', 'type' => 'password' ), array( 'name' => 'api_key', 'type' => 'text' ) ) ) ), 'a group object has no password or credential-named field, and no nested required' );
+check( null === $acf_class::definition( array( 'type' => 'group', 'sub_fields' => array( array( 'name' => 'g', 'type' => 'group', 'sub_fields' => array( array( 'name' => 'r', 'type' => 'repeater', 'sub_fields' => array( array( 'name' => 't', 'type' => 'text' ) ) ) ) ) ) ) ), 'containers nest at most two deep' );
 $draft_attachment = wp_insert_attachment( array( 'post_title' => 'Draft child file', 'post_mime_type' => 'image/png', 'post_status' => 'inherit' ), false, $draft );
 check( null === $acf_class::cast( array( 'type' => 'url' ), $draft_attachment ), 'a page_link to a file attached to a draft has no public address' );
 $link_schema = array( 'type' => 'link', 'key' => 'field_probe_link', 'name' => 'link' );
@@ -702,19 +737,22 @@ if ( $has_acf ) {
 	check( false === strpos( wp_json_encode( $page_entry ), 'planted-acf-' ), 'no planted secret reaches the entry' );
 	check( 3 === $page_entry['acf_rank'] || 3.0 === $page_entry['acf_rank'], 'a number stays a number' );
 	check( true === $page_entry['acf_featured'], 'true_false becomes a boolean' );
-	check( 'relations' === $job['models']['wp-page']['fields']['acf_quotes']['type'], 'the post relates to its repeater rows' );
-	check( 2 === count( $page_entry['acf_quotes'] ), 'every repeater row is exported' );
-	check( 'relation' === $job['models']['wp-page']['fields']['acf_hero']['type'], 'a group is a single relation' );
-
-	$rows = json_decode( Files::read( $dir, Models::content_path( $job, \Contentrain\Bridge\Acf::model_id( 'quotes', 'field_bridge_quotes' ), $job['default_locale'] ) ), true );
-	// Only this page's rows: a re-used test database keeps earlier fixtures.
-	$people = array_map( static function ( $ref ) use ( $rows ) { return $rows[ $ref ]['person']; }, $page_entry['acf_quotes'] );
-	sort( $people );
-	check( array( 'Ada', 'Grace' ) === $people, 'repeater rows carry their own named fields' );
-	check( 'It reads like my site.' === $rows[ $page_entry['acf_quotes'][0] ]['quote'], 'each row keeps its own values' );
-	check( 0 === $rows[ $page_entry['acf_quotes'][0] ]['position'], 'row order is preserved as data' );
-	$hero = json_decode( Files::read( $dir, Models::content_path( $job, \Contentrain\Bridge\Acf::model_id( 'hero', 'field_bridge_hero' ), $job['default_locale'] ) ), true );
-	check( 'Own your words' === $hero[ $page_entry['acf_hero'] ]['heading'], 'the group row is reachable through the relation' );
+	$page_fields = $job['models']['wp-page']['fields'];
+	check( array( 'type' => 'array', 'items' => array( 'type' => 'object', 'fields' => array( 'person' => array( 'type' => 'string' ), 'quote' => array( 'type' => 'text' ) ) ) ) == $page_fields['acf_quotes'], 'a repeater is an array of objects with its sub-fields\' own types: ' . wp_json_encode( $page_fields['acf_quotes'] ) );
+	check( array( array( 'person' => 'Ada', 'quote' => 'It reads like my site.' ), array( 'person' => 'Grace', 'quote' => 'The diff is the content.' ) ) === $page_entry['acf_quotes'], 'every repeater row is kept, in order, with its own values: ' . wp_json_encode( $page_entry['acf_quotes'] ) );
+	check( array( 'type' => 'object', 'fields' => array( 'heading' => array( 'type' => 'string' ), 'cta' => array( 'type' => 'string' ) ) ) == $page_fields['acf_hero'], 'a group is an object: ' . wp_json_encode( $page_fields['acf_hero'] ) );
+	check( array( 'cta' => 'Start now', 'heading' => 'Own your words' ) == $page_entry['acf_hero'], 'the group\'s values are in place: ' . wp_json_encode( $page_entry['acf_hero'] ) );
+	check( 'object' === $page_fields['acf_office']['type'] && 'decimal' === $page_fields['acf_office']['fields']['lat']['type'] && 'integer' === $page_fields['acf_office']['fields']['zoom']['type'], 'a map is an object of address, lat, lng, zoom' );
+	check( '1 Example Street' === $page_entry['acf_office']['address'] && 52.37 === $page_entry['acf_office']['lat'] && 14 === $page_entry['acf_office']['zoom'], 'a map keeps its address and position: ' . wp_json_encode( $page_entry['acf_office'] ?? null ) );
+	check( array( 'type' => 'array', 'items' => array( 'type' => 'select', 'options' => array( 'news', 'guides', 'events' ) ) ) == $page_fields['acf_topics'] && array( 'guides', 'news' ) === $page_entry['acf_topics'], 'a checkbox is an array of its choices: ' . wp_json_encode( array( $page_fields['acf_topics'] ?? null, $page_entry['acf_topics'] ?? null ) ) );
+	check( 'array' === $page_fields['acf_audience']['type'] && array( 'ed' ) === $page_entry['acf_audience'], 'a multi-select is an array of its choices' );
+	// No entry has a valid tier, so the field is not declared at all; were it, it would be the schema's select.
+	check( ! isset( $page_entry['acf_tier'] ) && ( ! isset( $page_fields['acf_tier'] ) || array( 'type' => 'select', 'options' => array( 'gold', 'silver' ) ) == $page_fields['acf_tier'] ), 'a stored choice the field no longer offers is left out, not a failed export: ' . wp_json_encode( array( $page_fields['acf_tier'] ?? null, $page_entry['acf_tier'] ?? null ) ) );
+	check( 'object' === $page_fields['acf_faq']['items']['fields']['links']['items']['fields']['link']['type'], 'a repeater inside a repeater (depth 2) holds a link object' );
+	check( array( array( 'question' => 'Where do I start?', 'links' => array( array( 'link' => array( 'title' => 'Start here', 'url' => 'https://example.test/start' ) ) ) ), array( 'question' => 'Is it mine?' ) ) == $page_entry['acf_faq'], 'nested rows keep their values; an empty nested list and an empty target are left out: ' . wp_json_encode( $page_entry['acf_faq'] ?? null ) );
+	check( 'wp-structured-values' === ( $page_fields['acf_deep']['model'] ?? null ), 'a group nested three deep takes the structured fallback' );
+	$b3_warnings = array_column( json_decode( Files::read( $dir, 'bridge/warnings.json' ), true ), 'reason' );
+	check( in_array( 'acf-choice-not-in-options', $b3_warnings, true ), 'the removed choice is reported' );
 
 	// ACF Pro field types: relationship, post_object, taxonomy, gallery, user, link, flexible_content.
 	$post_address = Source::address( get_post( $post ) );
@@ -730,18 +768,17 @@ if ( $has_acf ) {
 	$author_ref = substr( hash( 'sha256', 'author:' . $admin->ID ), 0, 12 );
 	check( 'relation' === $job['models']['wp-page']['fields']['acf_person']['type'] && 'wp-authors' === $job['models']['wp-page']['fields']['acf_person']['model'] && $author_ref === $page_entry['acf_person'], 'a user field becomes a relation to the same author collection a post author uses' );
 	check( $page_entry['acf_person'] === $page_entry['author'], 'the ACF user reference and the post author resolve to the same author record' );
-	$link_model = \Contentrain\Bridge\Acf::model_id( 'cta_link', 'field_bridge_cta' );
-	check( 'relation' === $job['models']['wp-page']['fields']['acf_cta_link']['type'] && $link_model === $job['models']['wp-page']['fields']['acf_cta_link']['model'], 'link becomes its own model' );
-	$link_row = json_decode( Files::read( $dir, Models::content_path( $job, $link_model, $job['default_locale'] ) ), true )[ $page_entry['acf_cta_link'] ];
-	check( 'https://example.test/read-more' === $link_row['url'] && 'Read more' === $link_row['title'] && '_blank' === $link_row['target'], 'a link keeps its label and target alongside the URL' );
+	check( array( 'type' => 'object', 'fields' => array( 'url' => array( 'type' => 'url' ), 'title' => array( 'type' => 'string' ), 'target' => array( 'type' => 'string' ) ) ) == $job['models']['wp-page']['fields']['acf_cta_link'], 'a link is an object' );
+	check( array( 'target' => '_blank', 'title' => 'Read more', 'url' => 'https://example.test/read-more' ) == $page_entry['acf_cta_link'], 'a link keeps its label and target alongside the URL: ' . wp_json_encode( $page_entry['acf_cta_link'] ?? null ) );
 	check( 'url' === $job['models']['wp-page']['fields']['acf_landing']['type'] && get_permalink( $post ) === $page_entry['acf_landing'], 'a page_link becomes the linked post\'s address, not its ID' );
 	check( ! isset( $page_entry['acf_landing_draft'] ), 'a page_link to a draft is left out: its address is not public' );
 	check( in_array( 'acf-page-link-target-not-public', array_column( json_decode( Files::read( $dir, 'bridge/warnings.json' ), true ), 'reason' ), true ), 'and the export says so' );
-	$sections_model = \Contentrain\Bridge\Acf::model_id( 'sections', 'field_bridge_sections' );
-	check( 'relations' === $job['models']['wp-page']['fields']['acf_sections']['type'] && $sections_model === $job['models']['wp-page']['fields']['acf_sections']['model'], 'flexible_content becomes its own collection' );
-	$sections = json_decode( Files::read( $dir, Models::content_path( $job, $sections_model, $job['default_locale'] ) ), true );
-	$section_rows = array_map( static function ( $ref ) use ( $sections ) { return $sections[ $ref ]; }, $page_entry['acf_sections'] );
-	usort( $section_rows, static function ( $a, $b ) { return $a['position'] <=> $b['position']; } );
+	$sections_field = $job['models']['wp-page']['fields']['acf_sections'];
+	check( 'array' === $sections_field['type'] && array( 'type' => 'select', 'options' => array( 'quote_block', 'text_block' ), 'required' => true ) == $sections_field['items']['fields']['layout'], 'flexible_content is an array of rows naming their layout' );
+	$section_keys = array_keys( $sections_field['items']['fields'] );
+	sort( $section_keys );
+	check( array( 'body', 'heading', 'layout', 'quote' ) === $section_keys, 'a flexible row\'s fields are the union of its layouts\' fields' );
+	$section_rows = $page_entry['acf_sections'];
 	check( 2 === count( $section_rows ), 'every flexible_content row is exported' );
 	check( 'text_block' === $section_rows[0]['layout'] && 'Intro' === $section_rows[0]['heading'] && 'Welcome copy' === $section_rows[0]['body'], 'a flexible_content row keeps its own layout and fields' );
 	check( 'quote_block' === $section_rows[1]['layout'] && 'Praise' === $section_rows[1]['heading'] && 'It just works.' === $section_rows[1]['quote'], 'a different layout in the same field keeps its own fields' );
@@ -754,10 +791,9 @@ if ( $has_scf_pro ) {
 	check( 'Seamless note' === $page_entry['acf_note'] && ( 3 === $page_entry['acf_priority'] || 3.0 === $page_entry['acf_priority'] ), 'a seamless clone flattens into the parent field group under the source fields\' own names' );
 	check( ! isset( $job['models']['wp-page']['fields']['acf_clone_seamless'] ), 'a seamless clone field itself is never a field on the parent' );
 
-	// Group-display clone: a real `relation`, exactly like a native `group` field.
-	check( 'relation' === $job['models']['wp-page']['fields']['acf_meta_info']['type'], 'a group-display clone becomes a relation, like a native group field' );
-	$clone_group_model = $job['models']['wp-page']['fields']['acf_meta_info']['model'];
-	$clone_group_row = json_decode( Files::read( $dir, Models::content_path( $job, $clone_group_model, $job['default_locale'] ) ), true )[ $page_entry['acf_meta_info'] ];
+	// Group-display clone: an object, exactly like a native `group` field.
+	check( 'object' === $job['models']['wp-page']['fields']['acf_meta_info']['type'], 'a group-display clone becomes an object, like a native group field' );
+	$clone_group_row = $page_entry['acf_meta_info'];
 	// `prefix_name => 1` on the clone usage itself, so the values are honestly
 	// under the prefixed names ACF/SCF actually reports for it (`meta_info_note`),
 	// not the source group's own unprefixed names — that guarantee is what the

@@ -64,60 +64,98 @@ final class Validator {
 				continue;
 			}
 			$value = $data[ $name ];
-			$type = $field['type'];
 			if ( ! empty( $field['required'] ) && ( null === $value || '' === $value ) ) {
 				throw new \RuntimeException( 'Required content value is empty.' );
 			}
-			$valid = true;
-			if ( 'integer' === $type ) {
-				$valid = is_int( $value );
-			} elseif ( 'number' === $type ) {
-				$valid = is_int( $value ) || is_float( $value );
-			} elseif ( 'boolean' === $type ) {
-				$valid = is_bool( $value );
-			} elseif ( 'relation' === $type || 'relations' === $type ) {
-				$refs = 'relations' === $type ? $value : array( $value );
-				$valid = is_array( $refs ) && isset( $job['models'][ $field['model'] ] );
-				$target = $valid ? $job['models'][ $field['model'] ] : null;
-				foreach ( $valid ? $refs : array() as $ref ) {
-					if ( ! is_string( $ref ) ) {
-						$valid = false;
-						break;
-					}
-					// A document (the WordPress `post` type) stores its entry as a
-					// file, not a table row; every other kind is checked as before.
-					$exists = 'document' === $target['kind']
-						? isset( $job['files'][ Models::content_path( $job, $target, $locale, $ref ) ] )
-						: isset( $job['tables'][ Models::content_path( $job, $target, $locale ) ][ $ref ] );
-					if ( ! $exists ) {
-						$valid = false;
-					}
-				}
-			} else {
-				$valid = is_string( $value );
-				if ( $valid && 'url' === $type ) {
-					$valid = false !== filter_var( $value, FILTER_VALIDATE_URL );
-				}
-				if ( $valid && 'datetime' === $type ) {
-					$valid = (bool) preg_match( '/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/D', $value ) && false !== strtotime( $value );
-				}
-				if ( $valid && 'date' === $type ) {
-					$date = \DateTimeImmutable::createFromFormat( '!Y-m-d', $value );
-					$valid = $date && $date->format( 'Y-m-d' ) === $value;
-				}
-				if ( $valid && 'select' === $type ) {
-					$valid = in_array( $value, $field['options'] ?? array(), true );
-				}
-				if ( $valid && 'email' === $type ) {
-					$valid = false !== filter_var( $value, FILTER_VALIDATE_EMAIL );
-				}
-				if ( $valid && 'color' === $type ) {
-					$valid = (bool) preg_match( '/^#[a-f0-9]{6}$/iD', $value );
-				}
-			}
+			$valid = self::value( $job, $field, $value, $locale );
 			if ( ! $valid ) {
 				throw new \RuntimeException( 'Invalid value or missing relation: ' . $model['id'] . '.' . $name . ' (' . $locale . ')' ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Diagnostic data is escaped at the admin output boundary or JSON encoded.
 			}
 		}
+	}
+
+	/** Whether one value fits its field definition, at any depth of `object` and `array`. */
+	private static function value( $job, $field, $value, $locale ) {
+		$type = $field['type'];
+		$valid = true;
+		if ( 'object' === $type ) {
+			if ( ! is_array( $value ) || ( $value && array_keys( $value ) === range( 0, count( $value ) - 1 ) ) ) {
+				return false;
+			}
+			foreach ( $field['fields'] ?? array() as $name => $sub ) {
+				if ( ! array_key_exists( $name, $value ) ) {
+					if ( ! empty( $sub['required'] ) ) {
+						return false;
+					}
+					continue;
+				}
+				if ( ! self::value( $job, $sub, $value[ $name ], $locale ) ) {
+					return false;
+				}
+			}
+			return ! array_diff_key( $value, $field['fields'] ?? array() );
+		}
+		if ( 'array' === $type ) {
+			if ( ! is_array( $value ) || ( $value && array_keys( $value ) !== range( 0, count( $value ) - 1 ) ) ) {
+				return false;
+			}
+			$item = is_array( $field['items'] ?? null ) ? $field['items'] : array( 'type' => $field['items'] ?? 'string' );
+			foreach ( $value as $each ) {
+				if ( ! self::value( $job, $item, $each, $locale ) ) {
+					return false;
+				}
+			}
+			return true;
+		}
+		if ( 'decimal' === $type ) {
+			return is_int( $value ) || is_float( $value );
+		}
+		if ( 'integer' === $type ) {
+			$valid = is_int( $value );
+		} elseif ( 'number' === $type ) {
+			$valid = is_int( $value ) || is_float( $value );
+		} elseif ( 'boolean' === $type ) {
+			$valid = is_bool( $value );
+		} elseif ( 'relation' === $type || 'relations' === $type ) {
+			$refs = 'relations' === $type ? $value : array( $value );
+			$valid = is_array( $refs ) && isset( $job['models'][ $field['model'] ] );
+			$target = $valid ? $job['models'][ $field['model'] ] : null;
+			foreach ( $valid ? $refs : array() as $ref ) {
+				if ( ! is_string( $ref ) ) {
+					$valid = false;
+					break;
+				}
+				// A document (the WordPress `post` type) stores its entry as a
+				// file, not a table row; every other kind is checked as before.
+				$exists = 'document' === $target['kind']
+					? isset( $job['files'][ Models::content_path( $job, $target, $locale, $ref ) ] )
+					: isset( $job['tables'][ Models::content_path( $job, $target, $locale ) ][ $ref ] );
+				if ( ! $exists ) {
+					$valid = false;
+				}
+			}
+		} else {
+			$valid = is_string( $value );
+			if ( $valid && 'url' === $type ) {
+				$valid = false !== filter_var( $value, FILTER_VALIDATE_URL );
+			}
+			if ( $valid && 'datetime' === $type ) {
+				$valid = (bool) preg_match( '/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/D', $value ) && false !== strtotime( $value );
+			}
+			if ( $valid && 'date' === $type ) {
+				$date = \DateTimeImmutable::createFromFormat( '!Y-m-d', $value );
+				$valid = $date && $date->format( 'Y-m-d' ) === $value;
+			}
+			if ( $valid && 'select' === $type ) {
+				$valid = in_array( $value, $field['options'] ?? array(), true );
+			}
+			if ( $valid && 'email' === $type ) {
+				$valid = false !== filter_var( $value, FILTER_VALIDATE_EMAIL );
+			}
+			if ( $valid && 'color' === $type ) {
+				$valid = (bool) preg_match( '/^#[a-f0-9]{6}$/iD', $value );
+			}
+		}
+		return $valid;
 	}
 }
