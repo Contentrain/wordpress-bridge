@@ -620,20 +620,6 @@ final class Acf {
 	}
 
 	/**
-	 * A page_link (a post ID in a URL field) whose target has no public address.
-	 * Its value is left out with a warning instead of the field falling back:
-	 * a fallback would give the same field a different type in another entry,
-	 * and a model with inconsistent field types fails the whole export.
-	 */
-	private static function unresolved_page_link( &$job, $definition, $raw, $source ) {
-		if ( 'url' !== $definition['type'] || ! is_numeric( $raw ) ) {
-			return false;
-		}
-		Jobs::warning( $job, array( 'source' => $source, 'reason' => 'acf-page-link-target-not-public' ) );
-		return true;
-	}
-
-	/**
 	 * relationship/post_object/taxonomy/user/gallery all point at content that
 	 * already has, or will have, its own model — a post, a term, an author, a
 	 * media record — so each one becomes a relation instead of an opaque id.
