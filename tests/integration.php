@@ -614,9 +614,13 @@ check( 'post' === $nav_items[0]['target']['kind'] && $page === $nav_items[0]['ta
 // A hand-typed ?page_id= link on this site is checked like a post link; another site's is a plain URL.
 list( $typed_draft, $typed_draft_public ) = \Contentrain\Bridge\Menus::target( array( 'label' => 'Typed', 'url' => home_url( '/?page_id=' . $draft ) ) );
 list( $typed_page, $typed_page_public ) = \Contentrain\Bridge\Menus::target( array( 'label' => 'Typed', 'url' => '/?p=' . $page ) );
+$home_host = (string) wp_parse_url( home_url( '/' ), PHP_URL_HOST );
+$www_host = 0 === strpos( $home_host, 'www.' ) ? substr( $home_host, 4 ) : 'www.' . $home_host;
+list( $typed_www, $typed_www_public ) = \Contentrain\Bridge\Menus::target( array( 'label' => 'Typed', 'url' => 'https://' . strtoupper( $www_host ) . '/?p=' . $page ) );
 list( $elsewhere, $elsewhere_public ) = \Contentrain\Bridge\Menus::target( array( 'label' => 'Elsewhere', 'url' => 'https://other.example/?page_id=' . $draft ) );
 check( false === $typed_draft_public && 'post' === $typed_draft['kind'], 'a typed ?page_id= link to a draft is not public' );
 check( true === $typed_page_public && 'post' === $typed_page['kind'] && $page === $typed_page['id'] && get_permalink( $page ) === $typed_page['url'], 'a typed ?p= link to a published page is that page' );
+check( 'post' === $typed_www['kind'] && $page === $typed_www['id'], 'the same site with or without www. is still this site' );
 check( true === $elsewhere_public && 'url' === $elsewhere['kind'], 'another site\'s ?page_id= is just an address' );
 $fallback = \Contentrain\Bridge\Menus::locations( array( array( 'slug' => 'header', 'area' => 'header', 'content' => '<!-- wp:navigation /-->' ) ), $tt5_navs );
 check( array( 501 => array( 'header' ) ) === $fallback, 'an empty navigation block shows the most recent published navigation' );
