@@ -1159,6 +1159,7 @@ foreach ( array( 'HT-COOKIE-SECRET', 'HT-HEADER-SECRET', '203', '113', 'RED-COOK
 	check( false === strpos( $secret_json, $canary ), 'no condition value in the export: ' . $canary );
 }
 check( get_attachment_link( $attachment ) === \Contentrain\Bridge\Exporter::map_attachment( get_post( $attachment ) )['link'], 'an attachment carries its attachment page address' );
+check( null === \Contentrain\Bridge\Exporter::map_attachment( get_post( $draft_attachment ) )['link'], 'an attachment under a draft has no page address (its parent\'s slug stays out)' );
 
 // The same Redirection rules as @contentrain/wp-import, case by case (tests/fixtures/redirect-parity.json).
 require __DIR__ . '/redirect-parity.php';

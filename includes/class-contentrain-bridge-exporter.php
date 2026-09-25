@@ -68,6 +68,15 @@ final class Exporter {
 		);
 	}
 
+	/** Whether an attachment's page is public: no parent, or a published parent without a password. */
+	private static function attachment_page_public( $attachment ) {
+		if ( ! $attachment->post_parent ) {
+			return true;
+		}
+		$parent = get_post( $attachment->post_parent );
+		return $parent && 'publish' === $parent->post_status && ! $parent->post_password;
+	}
+
 	/** Map an attachment as metadata; binary transfer is a downstream concern. */
 	public static function map_attachment( $attachment ) {
 		$author = get_userdata( $attachment->post_author );
@@ -76,8 +85,10 @@ final class Exporter {
 			'title'           => $attachment->post_title,
 			'slug'            => $attachment->post_name,
 			'url'             => wp_get_attachment_url( $attachment->ID ) ?: null,
-			// The attachment page's own address: indexed like any page, so it needs a redirect too.
-			'link'            => get_attachment_link( $attachment->ID ) ?: null,
+			// The attachment page's own address: indexed like any page, so it needs a redirect too. Under a
+			// parent that is not public (private, scheduled, protected) the page is not either, and its
+			// address would carry that parent's slug: none.
+			'link'            => self::attachment_page_public( $attachment ) ? ( get_attachment_link( $attachment->ID ) ?: null ) : null,
 			'alt'             => (string) get_post_meta( $attachment->ID, '_wp_attachment_image_alt', true ),
 			'caption'         => $attachment->post_excerpt,
 			'description'     => $attachment->post_content,
