@@ -611,6 +611,13 @@ check( ! in_array( 'Never shown', array_merge( ...array_map( static function ( $
 $nav_items = $by_slug['navigation-2']['items'];
 check( array( 'About', 'More', 'Team' ) === array_column( $nav_items, 'title' ) && $nav_items[1]['id'] === $nav_items[2]['parent'] && $nav_items[0]['id'] < 0, 'block items keep order and nesting, with negative ids' );
 check( 'post' === $nav_items[0]['target']['kind'] && $page === $nav_items[0]['target']['id'] && get_permalink( $page ) === $nav_items[0]['url'], 'a post link is a post target with its public address' );
+// A hand-typed ?page_id= link on this site is checked like a post link; another site's is a plain URL.
+list( $typed_draft, $typed_draft_public ) = \Contentrain\Bridge\Menus::target( array( 'label' => 'Typed', 'url' => home_url( '/?page_id=' . $draft ) ) );
+list( $typed_page, $typed_page_public ) = \Contentrain\Bridge\Menus::target( array( 'label' => 'Typed', 'url' => '/?p=' . $page ) );
+list( $elsewhere, $elsewhere_public ) = \Contentrain\Bridge\Menus::target( array( 'label' => 'Elsewhere', 'url' => 'https://other.example/?page_id=' . $draft ) );
+check( false === $typed_draft_public && 'post' === $typed_draft['kind'], 'a typed ?page_id= link to a draft is not public' );
+check( true === $typed_page_public && 'post' === $typed_page['kind'] && $page === $typed_page['id'] && get_permalink( $page ) === $typed_page['url'], 'a typed ?p= link to a published page is that page' );
+check( true === $elsewhere_public && 'url' === $elsewhere['kind'], 'another site\'s ?page_id= is just an address' );
 $fallback = \Contentrain\Bridge\Menus::locations( array( array( 'slug' => 'header', 'area' => 'header', 'content' => '<!-- wp:navigation /-->' ) ), $tt5_navs );
 check( array( 501 => array( 'header' ) ) === $fallback, 'an empty navigation block shows the most recent published navigation' );
 check( array( 'header', 'footer' ) === array_column( \Contentrain\Bridge\Menus::used_parts( array(), $tt5_parts ), 'slug' ), 'without templates, the parts named after their area count' );

@@ -263,6 +263,25 @@ final class Menus {
 		);
 	}
 
+	/** The post id a same-site `?page_id=N` / `?p=N` address names, or 0. */
+	public static function query_post_id( $url ) {
+		$parts = wp_parse_url( $url );
+		if ( ! $parts || empty( $parts['query'] ) ) {
+			return 0;
+		}
+		$home = wp_parse_url( home_url( '/' ) );
+		if ( isset( $parts['host'] ) && strtolower( $parts['host'] ) !== strtolower( (string) ( $home['host'] ?? '' ) ) ) {
+			return 0;
+		}
+		parse_str( $parts['query'], $query );
+		foreach ( array( 'page_id', 'p' ) as $key ) {
+			if ( isset( $query[ $key ] ) && ctype_digit( (string) $query[ $key ] ) ) {
+				return (int) $query[ $key ];
+			}
+		}
+		return 0;
+	}
+
 	/**
 	 * A link block's target, and whether it may be exported: a post or term by
 	 * its id when the block names one; otherwise its URL. `#` stays `#`.
@@ -271,6 +290,14 @@ final class Menus {
 		$url = (string) ( $attrs['url'] ?? '' );
 		$kind = $attrs['kind'] ?? '';
 		$id = isset( $attrs['id'] ) ? (int) $attrs['id'] : 0;
+		// A hand-typed `?page_id=` / `?p=` link on this site is a post link like any other (wp-import #296).
+		if ( ! $id && 'post-type' !== $kind && 'taxonomy' !== $kind ) {
+			$query_id = self::query_post_id( $url );
+			if ( $query_id ) {
+				$kind = 'post-type';
+				$id = $query_id;
+			}
+		}
 		if ( 'post-type' === $kind && $id ) {
 			$post = get_post( $id );
 			$public = $post && 'publish' === $post->post_status && ! $post->post_password;
