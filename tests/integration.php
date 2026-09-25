@@ -1094,6 +1094,81 @@ Files::put( $dir, 'reader-compat.md', "---\n" . Policy::frontmatter( $compat ) .
 Files::put( $dir, 'reader-compat.json', Policy::json( $compat ) );
 check( is_file( $dir . '/reader-compat.md' ), 'reader compatibility fixture written for escape-bearing metadata' );
 
+// .htaccess rules, from lines alone: what Apache would serve, and everything else accounted for.
+$ht_doc = array( 'redirects' => array(), 'excluded' => array() );
+$ht_count = \Contentrain\Bridge\Redirects::htaccess_rules(
+	$ht_doc,
+	array(
+		'RedirectPermanent /a /b',
+		'RedirectMatch ^/c/(.*)$ https://example.org/$1',
+		'Redirect 451 /censored',
+		'Redirect 404 /missing',
+		'# BEGIN WordPress',
+		'RewriteRule . /index.php [L]',
+		'# END WordPress',
+		'RewriteBase /blog/',
+		'RewriteRule ^old/(.*)$ new/$1?from=old [R,L]',
+		'RewriteRule ^x$ /y [QSA,R=permanent]',
+		'RewriteRule ^gone$ - [G]',
+		'RewriteRule ^private$ - [F]',
+		'RewriteRule !^keep /elsewhere [R=301]',
+		'<If "%{HTTP_HOST} == \'a.example\'">',
+		'Redirect /inside /out',
+		'</If>',
+		'RewriteRule ^long \\',
+		'  /continued [R=308]',
+	)
+);
+$ht_all = array();
+foreach ( array_merge( $ht_doc['redirects'], $ht_doc['excluded'] ) as $r ) {
+	$ht_all[ $r['id'] ] = $r;
+}
+check( 11 === $ht_count && 11 === count( $ht_all ) && ! isset( $ht_all['htaccess:6'] ), '.htaccess: eleven rules outside WordPress\'s block, each exported or excluded once' );
+check( 'start' === $ht_all['htaccess:1']['match'] && 301 === $ht_all['htaccess:1']['status'] && 'pass' === $ht_all['htaccess:1']['query'], 'RedirectPermanent is a prefix rule that carries the query over' );
+check( 302 === $ht_all['htaccess:2']['status'] && 'https://example.org/$1' === $ht_all['htaccess:2']['to'], 'RedirectMatch without a code is a 302' );
+check( 451 === $ht_all['htaccess:3']['status'] && '' === $ht_all['htaccess:3']['to'] && 'not-a-redirect:status-404' === $ht_all['htaccess:4']['reason'], 'Redirect 451 is served as 451; a 404 is not a redirect' );
+check( '^/blog/old/(.*)$' === $ht_all['htaccess:9']['from'] && '/blog/new/$1?from=old' === $ht_all['htaccess:9']['to'] && 302 === $ht_all['htaccess:9']['status'] && 'ignore' === $ht_all['htaccess:9']['query'], 'RewriteRule [R]: RewriteBase in the pattern and the target, 302, a target query drops the request\'s' );
+check( 301 === $ht_all['htaccess:10']['status'] && 'pass' === $ht_all['htaccess:10']['query'], 'RewriteRule [QSA,R=permanent] is a 301 that keeps the query' );
+check( 410 === $ht_all['htaccess:11']['status'] && 'not-a-redirect:status-403' === $ht_all['htaccess:12']['reason'] && 'not-a-redirect:negated' === $ht_all['htaccess:13']['reason'], '[G] is 410, [F] is not a redirect, a negated pattern cannot be one rule' );
+check( 'conditional-match:htaccess' === $ht_all['htaccess:15']['reason'] && array( 'host' ) === $ht_all['htaccess:15']['condition'], 'a rule inside <If> is conditional, with what its block tests as the condition' );
+check( '/continued' === $ht_all['htaccess:18']['to'] && 308 === $ht_all['htaccess:18']['status'], 'a line continued with \\ is one directive' );
+// A condition's values never leave: a cookie, a header, an address are told apart by type only.
+$secret_doc = array( 'redirects' => array(), 'excluded' => array() );
+\Contentrain\Bridge\Redirects::htaccess_rules(
+	$secret_doc,
+	array(
+		'RewriteCond %{HTTP_COOKIE} session=HT-COOKIE-SECRET',
+		'RewriteCond %{HTTP:X-Api-Key} ^HT-HEADER-SECRET$',
+		'RewriteRule ^members$ /in/ [R=302]',
+		'RewriteCond %{REMOTE_ADDR} ^203\.0\.113\.7$',
+		'RewriteRule ^office$ /internal/ [R=302]',
+	)
+);
+\Contentrain\Bridge\Redirects::redirection_rules(
+	$secret_doc,
+	array( 1 => array( 'id' => 1, 'status' => 'enabled', 'module_id' => 1 ) ),
+	array(
+		array( 'id' => 1, 'url' => '/c', 'regex' => 0, 'group_id' => 1, 'status' => 'enabled', 'action_type' => 'url', 'action_code' => 301, 'action_data' => wp_json_encode( array( 'name' => 'RED-COOKIE-NAME', 'value' => 'RED-COOKIE-SECRET', 'regex' => false, 'url_from' => '/a', 'url_notfrom' => '/b' ) ), 'match_type' => 'cookie', 'match_data' => null ),
+		array( 'id' => 2, 'url' => '/h', 'regex' => 0, 'group_id' => 1, 'status' => 'enabled', 'action_type' => 'url', 'action_code' => 301, 'action_data' => wp_json_encode( array( 'name' => 'X-Token', 'value' => 'RED-HEADER-SECRET', 'url_from' => '/a' ) ), 'match_type' => 'header', 'match_data' => null ),
+		array( 'id' => 3, 'url' => '/i', 'regex' => 0, 'group_id' => 1, 'status' => 'enabled', 'action_type' => 'url', 'action_code' => 301, 'action_data' => wp_json_encode( array( 'ip' => array( '198.51.100.23' ), 'url_from' => '/a' ) ), 'match_type' => 'ip', 'match_data' => null ),
+		array( 'id' => 4, 'url' => '/r', 'regex' => 0, 'group_id' => 1, 'status' => 'enabled', 'action_type' => 'url', 'action_code' => 301, 'action_data' => wp_json_encode( array( 'role' => 'administrator', 'url_from' => '/a' ) ), 'match_type' => 'role', 'match_data' => null ),
+	),
+	false,
+	true
+);
+$secret_json = wp_json_encode( $secret_doc );
+check( 6 === count( $secret_doc['excluded'] ) && ! $secret_doc['redirects'], 'every rule behind a cookie, header, address or role is excluded as conditional' );
+check( array( array( 'cookie', 'header' ), array( 'ip' ) ) === array_column( array_slice( $secret_doc['excluded'], 0, 2 ), 'condition' ), 'a RewriteCond is told by what it tests: cookie, header, ip' );
+check( array( 'conditional-match:cookie', 'conditional-match:header', 'conditional-match:ip', 'conditional-match:role' ) === array_column( array_slice( $secret_doc['excluded'], 2 ), 'reason' ) && ! array_filter( array_slice( $secret_doc['excluded'], 2 ), static function ( $r ) { return isset( $r['condition'] ); } ), 'a Redirection cookie, header, IP or role rule carries its type as the reason, no condition data' );
+foreach ( array( 'HT-COOKIE-SECRET', 'HT-HEADER-SECRET', '203', '113', 'RED-COOKIE-NAME', 'RED-COOKIE-SECRET', 'RED-HEADER-SECRET', '198.51.100.23', 'administrator', 'X-Api-Key', 'X-Token' ) as $canary ) {
+	check( false === strpos( $secret_json, $canary ), 'no condition value in the export: ' . $canary );
+}
+check( get_attachment_link( $attachment ) === \Contentrain\Bridge\Exporter::map_attachment( get_post( $attachment ) )['link'], 'an attachment carries its attachment page address' );
+check( null === \Contentrain\Bridge\Exporter::map_attachment( get_post( $draft_attachment ) )['link'], 'an attachment under a draft has no page address (its parent\'s slug stays out)' );
+
+// The same Redirection rules as @contentrain/wp-import, case by case (tests/fixtures/redirect-parity.json).
+require __DIR__ . '/redirect-parity.php';
+
 // Snapshot consistency check on a separate job, preserving the finished artifact for external validation.
 delete_user_meta( $admin->ID, 'contentrain_bridge_job_1' );
 $other = Jobs::create( array( 'types' => array( 'page' ) ) );

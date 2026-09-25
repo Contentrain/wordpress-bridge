@@ -49,7 +49,7 @@ const baseline = pages.map((p) => ({ url: p.url, status: 200, html: readFileSync
 const rebuilt = (opts = {}) => pages.map((p) => ({ url: p.url, status: 200, html: rebuild(entries[p.entry], opts[p.key] ?? {}) }))
 // The host's rules: this fixture's plain, served redirects (regex rules need a server, not a map).
 const rules = redirects.redirects
-  .filter((r) => !r.regex && r.match === 'url' && r.from.startsWith('/') && r.from.includes(fixture.run))
+  .filter((r) => !r.regex && r.match === 'url' && r.status < 400 && r.from.startsWith('/') && r.from.includes(fixture.run))
   .map(({ from, to, status }) => ({ from, to, status }))
 const errors = (report) => report.findings.filter((f) => f.severity === 'error').map((f) => `${f.check} ${f.url ?? ''}`).sort()
 

@@ -52,9 +52,11 @@ final class Rawir {
 			$field( 'language_pairs' );
 			self::rows( $stream, $job, 'bridge/language-pairs.json', false );
 			$field( 'options', $file( 'bridge/options.json' ) ?? '{}' );
-			// RawIR.redirects is RawRedirect[]: what the site serves. Excluded rules stay in bridge/redirects.json.
+			// RawIR.redirects is RawRedirect[]: what the site serves; redirects_excluded what it holds but does not
+			// serve as a plain redirect, each with its reason. Sources and counts stay in bridge/redirects.json.
 			$redirects = json_decode( $file( 'bridge/redirects.json' ) ?? '{}' );
 			$field( 'redirects', self::encode( $redirects->redirects ?? array() ) );
+			$field( 'redirects_excluded', self::encode( $redirects->excluded ?? array() ) );
 			// Not yet RawIR fields (proposed): carried beside it rather than dropped.
 			$seo = json_decode( $file( 'bridge/seo.json' ) ?? 'null' );
 			if ( is_object( $seo ) ) {

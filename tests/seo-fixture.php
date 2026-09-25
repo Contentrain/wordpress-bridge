@@ -103,7 +103,7 @@ $wpdb->query( "CREATE TABLE IF NOT EXISTS {$aioseo_terms} (id bigint(20) unsigne
 $wpdb->insert( $aioseo_terms, array( 'term_id' => $f['terms']['topic'], 'title' => 'All about #taxonomy_title #separator_sa #site_title', 'description' => 'AIOSEO term description', 'robots_default' => 0, 'robots_noindex' => 1, 'created' => current_time( 'mysql', true ), 'updated' => current_time( 'mysql', true ) ) );
 $make( 'unresolved', 'SEO unresolved', array( 'rank_math_title' => '%title% %unknownvar% %sep% %sitename%', 'rank_math_description' => '%customfield(seo_subtitle)%', 'seo_subtitle' => 'Subtitle from a field' ) );
 
-// ---- Redirects: eight in Redirection, covering served, disabled, gone and conditional. ----
+// ---- Redirects: nine in Redirection, covering served, disabled, gone, conditional and matching flags. ----
 $path = static function ( $id ) { return wp_make_link_relative( get_permalink( $id ) ); };
 $red = static function ( $args ) {
 	$item = Red_Item::create( $args + array( 'group_id' => 1, 'match_type' => 'url', 'action_type' => 'url', 'action_code' => 301 ) );
@@ -123,6 +123,8 @@ $disabled->disable();
 $r['disabled'] = $disabled->get_id();
 $r['gone'] = $red( array( 'url' => '/seo-gone-' . $run, 'action_type' => 'error', 'action_code' => 410, 'action_data' => array( 'url' => '' ) ) )->get_id();
 $r['login'] = $red( array( 'url' => '/seo-members-' . $run, 'match_type' => 'login', 'action_data' => array( 'logged_in' => '/in/', 'logged_out' => '/out/' ) ) )->get_id();
+// Its own matching flags: any query (dropped), any case, with or without the trailing slash.
+$r['flags'] = $red( array( 'url' => '/seo-flags-' . $run . '/', 'match_data' => array( 'source' => array( 'flag_query' => 'ignore', 'flag_case' => true, 'flag_trailing' => true, 'flag_regex' => false ) ), 'action_data' => array( 'url' => $path( $a ) ) ) )->get_id();
 $f['redirection'] = $r;
 
 // Yoast Premium's redirect option, left by an uninstalled Premium.
@@ -136,6 +138,27 @@ $rm = $wpdb->prefix . 'rank_math_redirections';
 $wpdb->query( "CREATE TABLE IF NOT EXISTS {$rm} (id bigint(20) unsigned NOT NULL AUTO_INCREMENT, sources text NOT NULL, url_to text NOT NULL, header_code smallint(4) unsigned NOT NULL, hits bigint(20) unsigned NOT NULL DEFAULT 0, status varchar(25) NOT NULL DEFAULT 'active', created datetime NOT NULL, updated datetime NOT NULL, last_accessed datetime NOT NULL DEFAULT '0000-00-00 00:00:00', PRIMARY KEY (id))" );
 $wpdb->insert( $rm, array( 'sources' => serialize( array( array( 'pattern' => 'rm-old-' . $run, 'comparison' => 'exact' ), array( 'pattern' => 'rm-start-' . $run, 'comparison' => 'start' ) ) ), 'url_to' => home_url( '/rm-new/' ), 'header_code' => 301, 'status' => 'active', 'created' => current_time( 'mysql', true ), 'updated' => current_time( 'mysql', true ) ) );
 $wpdb->insert( $rm, array( 'sources' => serialize( array( array( 'pattern' => 'rm-off-' . $run, 'comparison' => 'exact' ) ) ), 'url_to' => '/', 'header_code' => 302, 'status' => 'inactive', 'created' => current_time( 'mysql', true ), 'updated' => current_time( 'mysql', true ) ) );
+// Simple 301 Redirects, left by an uninstalled plugin: one plain rule, one wildcard.
+update_option( '301_redirects', array( '/s301-old-' . $run => '/s301-new/', '/s301-wild-' . $run . '/*' => '/s301-target/*' ) );
+update_option( '301_redirects_wildcard', 'true' );
+// The site's .htaccess, ahead of WordPress's block (its catch-all would take the rewrites otherwise).
+$htaccess = ABSPATH . '.htaccess';
+$ours = implode( "\n", array(
+	'# BEGIN Bridge fixture',
+	'Redirect 301 /ht-old-' . $run . ' /ht-new',
+	'RedirectMatch 302 ^/ht-match-' . $run . '/(.*)$ /blog/$1',
+	'Redirect gone /ht-gone-' . $run,
+	'<IfModule mod_rewrite.c>',
+	'RewriteEngine On',
+	'RewriteBase /',
+	'RewriteRule ^ht-rw-' . $run . '/(.*)$ /rw-new/$1 [R=301,L,NC]',
+	'RewriteCond %{HTTP_HOST} ^never\\.example$',
+	'RewriteRule ^ht-cond-' . $run . '$ /cond-new/ [R=301,L]',
+	'RewriteRule ^ht-internal-' . $run . '$ index.php [L]',
+	'</IfModule>',
+	'# END Bridge fixture',
+) ) . "\n\n";
+file_put_contents( $htaccess, $ours . ( file_exists( $htaccess ) ? (string) file_get_contents( $htaccess ) : '' ) );
 // Safe Redirect Manager: a rule is a `redirect_rule` post.
 foreach ( array( 'publish' => '/srm-old-', 'draft' => '/srm-draft-' ) as $status => $from ) {
 	wp_insert_post( array( 'post_type' => 'redirect_rule', 'post_status' => $status, 'post_title' => 'SRM ' . $status, 'meta_input' => array( '_redirect_rule_from' => $from . $run, '_redirect_rule_to' => '/srm-new/', '_redirect_rule_status_code' => 301, '_redirect_rule_from_regex' => 0 ) ) );
@@ -148,4 +171,4 @@ foreach ( $f['posts'] as $key => $id ) {
 $f['paths']['topic'] = wp_make_link_relative( get_term_link( $f['terms']['topic'] ) );
 wp_mkdir_p( '/tmp/bridge-seo' );
 file_put_contents( '/tmp/bridge-seo/fixture.json', wp_json_encode( $f, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ) );
-echo 'Fixture ' . $run . ': ' . count( $f['posts'] ) . " posts/pages, 8 Redirection rules, 3 Yoast Premium, 3 Rank Math, 2 SRM\n";
+echo 'Fixture ' . $run . ': ' . count( $f['posts'] ) . " posts/pages, 9 Redirection rules, 3 Yoast Premium, 3 Rank Math, 2 SRM, 2 Simple 301, 6 .htaccess\n";

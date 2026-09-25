@@ -1,0 +1,2 @@
+Contentrain/ai packages/wp-import/src/fixtures/redirect-parity.json @ 2578366336efb37052cc38ca9fdd435272b7c8a5
+# Copied unchanged. Re-copy from the merged main commit when wp-import changes the rules; tests/redirect-parity.php runs every case through Redirects::redirection_rules.

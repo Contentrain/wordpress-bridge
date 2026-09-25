@@ -31,7 +31,7 @@ if ( 'none' === $mode ) {
 	check( array( 'absent' ) === array_values( array_unique( array_column( $seo['providers'], 'status' ) ) ) && 4 === count( $seo['providers'] ), 'every known provider is reported absent, by name' );
 	check( '{}' === wp_json_encode( $seo['settings'] ), 'settings are an empty object, not null' );
 	check( null === Seo::post( $sample ), 'a post has no SEO entry to write' );
-	foreach ( array( 'redirection', 'yoast_premium', 'rank_math', 'safe_redirect_manager' ) as $source ) {
+	foreach ( array( 'redirection', 'yoast_premium', 'rank_math', 'safe_redirect_manager', 'simple_301_redirects' ) as $source ) {
 		check( array( 'status' => 'absent' ) === $redirects['sources'][ $source ], "redirect source $source is reported absent" );
 	}
 	check( 'active' === $redirects['sources']['wordpress_old_slug']['status'] && array() === $redirects['excluded'], 'WordPress core old-slug redirects are still read' );

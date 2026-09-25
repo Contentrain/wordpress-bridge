@@ -39,9 +39,12 @@ export function prepareMigrate(source, destination) {
     terms: values('bridge/raw-terms.json'), attachments: values('bridge/raw-attachments.json'),
     comments: values('bridge/raw-comments.json'), menus: json('bridge/raw-menus.json', []),
     language_pairs: values('bridge/language-pairs.json'), options: json('bridge/options.json', {}),
-    // RawIR.redirects is RawRedirect[]: what the site serves. Excluded rules stay in bridge/redirects.json.
-    redirects: json('bridge/redirects.json', { redirects: [] }).redirects,
   }
+  // RawIR.redirects is RawRedirect[]: what the site serves; redirects_excluded what it holds but does not serve
+  // as a plain redirect, each with its reason. Sources and counts stay in bridge/redirects.json.
+  const redirects = json('bridge/redirects.json', { redirects: [], excluded: [] })
+  raw.redirects = redirects.redirects
+  raw.redirects_excluded = redirects.excluded ?? []
   // Not yet RawIR fields (proposed in the B-04 contract); carried beside it rather than dropped.
   const seo = json('bridge/seo.json', null)
   if (seo) raw.seo = { ...seo, entries: json('bridge/seo-entries.json', {}) }

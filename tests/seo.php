@@ -182,6 +182,9 @@ $db = array(
 	'rank_math'             => array_sum( array_map( static function ( $s ) { return count( unserialize( $s ) ); }, $wpdb->get_col( "SELECT sources FROM {$wpdb->prefix}rank_math_redirections" ) ) ),
 	'safe_redirect_manager' => (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type = 'redirect_rule' AND post_status <> 'auto-draft'" ),
 	'wordpress'             => (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->postmeta} pm JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key = '_wp_old_slug' AND p.post_status = 'publish'" ),
+	'simple_301_redirects'  => count( get_option( '301_redirects' ) ),
+	// Counted apart from the reader: every Redirect*/RewriteRule line outside WordPress's own block.
+	'htaccess'              => count( preg_grep( '/^\s*(Redirect|RedirectPermanent|RedirectTemp|RedirectMatch|RewriteRule)\s/i', explode( "\n", preg_replace( '/# BEGIN WordPress.*?# END WordPress/s', '', (string) file_get_contents( ABSPATH . '.htaccess' ) ) ) ) ),
 );
 $sources_key = array( 'wordpress' => 'wordpress_old_slug' );
 foreach ( $db as $source => $count ) {
@@ -205,7 +208,16 @@ $regex = $rule( 'redirection:' . $f['regex'] );
 $live = fetch( '/seo-legacy-' . $run . '/some/deep' );
 check( true === $regex['regex'] && ! isset( $regex['reason'] ) && 301 === $live['status'] && '/blog/some/deep' === relative( $live['location'] ), 'a regex rule is exported as a pattern, and the site applies it' );
 check( 'disabled' === $rule( 'redirection:' . $f['disabled'] )['reason'] && 404 === fetch( '/seo-old-disabled-' . $run )['status'], 'a disabled rule is excluded, and the site does not serve it' );
-check( 'not-a-redirect:error' === $rule( 'redirection:' . $f['gone'] )['reason'] && 410 === $rule( 'redirection:' . $f['gone'] )['status'] && 410 === fetch( '/seo-gone-' . $run )['status'], 'a 410 rule is excluded as not-a-redirect, and the site answers 410' );
+$gone = $rule( 'redirection:' . $f['gone'] );
+check( ! isset( $gone['reason'] ) && 410 === $gone['status'] && '' === $gone['to'] && 410 === fetch( '/seo-gone-' . $run )['status'], 'a 410 rule is served as 410 with no target, as the site answers' );
+$flags = $rule( 'redirection:' . $f['flags'] );
+$live = fetch( '/SEO-Flags-' . $run . '?utm=x' );
+check( 'ignore' === $flags['query'] && true === $flags['case_insensitive'] && 'ignore' === $flags['trailing_slash'] && 301 === $live['status'] && $flags['to'] === relative( $live['location'] ), 'Redirection\'s matching flags are exported, and the site matches as they say (other case, no slash, a query dropped)' );
+// A rule without flags of its own: whatever Redirection applies to it here is what was exported.
+$plain = $rule( 'redirection:' . $f['plain'] );
+$upper = fetch( strtoupper( $plain['from'] ) );
+$slash = fetch( $plain['from'] . '/' );
+check( $plain['case_insensitive'] === ( 301 === $upper['status'] ) && ( 'ignore' === $plain['trailing_slash'] ) === ( 301 === $slash['status'] ), 'a rule without its own flags carries the flags Redirection applies to it (case ' . wp_json_encode( $plain['case_insensitive'] ) . ' → ' . $upper['status'] . ', slash ' . $plain['trailing_slash'] . ' → ' . $slash['status'] . ')' );
 check( 'conditional-match:login' === $rule( 'redirection:' . $f['login'] )['reason'] && '/out/' === $rule( 'redirection:' . $f['login'] )['condition']['logged_out'], 'a login-conditional rule is excluded with its condition kept' );
 $old = null;
 foreach ( $redirects['redirects'] as $r ) { if ( 'wordpress' === $r['source'] && false !== strpos( $r['from'], $fixture['old_slug'] . '/' ) ) { $old = $r; } }
@@ -217,15 +229,35 @@ foreach ( array( 'yoast_premium', 'rank_math', 'safe_redirect_manager' ) as $sou
 	check( 'inactive-with-data' === $redirects['sources'][ $source ]['status'] && in_array( 'source-inactive', $reasons, true ), "$source rules are kept but not listed as served: its plugin is not running" );
 }
 check( 'yoast-new/' !== $rule( 'yoast_premium:0' )['to'] && '/yoast-new/' === $rule( 'yoast_premium:0' )['to'] && '/yoast-old-' . $run === $rule( 'yoast_premium:0' )['from'], 'Yoast Premium paths are made root-relative' );
-check( 'not-a-redirect:gone' === $rule( 'yoast_premium:2' )['reason'] && true === $rule( 'yoast_premium:1' )['regex'], 'Yoast Premium 410 and regex rules are classified' );
+check( 410 === $rule( 'yoast_premium:2' )['status'] && '' === $rule( 'yoast_premium:2' )['to'] && true === $rule( 'yoast_premium:1' )['regex'], 'Yoast Premium 410 and regex rules are classified' );
+// Simple 301 Redirects (inactive): a plain rule and a wildcard as a regex.
+check( 'inactive-with-data' === $redirects['sources']['simple_301_redirects']['status'] && '/s301-new/' === $rule( 'simple_301_redirects:0' )['to'] && '^/s301-wild-' . $run . '/(.*)$' === $rule( 'simple_301_redirects:1' )['from'] && '/s301-target/$1' === $rule( 'simple_301_redirects:1' )['to'], 'Simple 301 Redirects: plain and wildcard rules, kept but not served' );
+// .htaccess: each rule as exported, then as the live site answers it.
+$ht = array();
+foreach ( array_merge( $redirects['redirects'], $redirects['excluded'] ) as $r ) {
+	if ( 'htaccess' === $r['source'] && false !== strpos( $r['from'], $run ) ) {
+		$ht[ preg_replace( '/[^a-z]/', '', explode( $run, $r['from'] )[0] ) ] = $r;
+	}
+}
+check( 'active' === $redirects['sources']['htaccess']['status'] && 6 === count( $ht ), '.htaccess: six rules outside WordPress\'s block are read: ' . implode( ',', array_keys( $ht ) ) );
+$live = fetch( '/ht-old-' . $run . '/deep' );
+check( 'start' === $ht['htold']['match'] && '/ht-new' === $ht['htold']['to'] && 301 === $live['status'] && '/ht-new/deep' === relative( $live['location'] ), 'Redirect is a prefix rule, and the site carries the rest of the path' );
+$live = fetch( '/ht-match-' . $run . '/a' );
+check( true === $ht['htmatch']['regex'] && 302 === $ht['htmatch']['status'] && 302 === $live['status'] && '/blog/a' === relative( $live['location'] ), 'RedirectMatch is a regex rule, as served' );
+check( 410 === $ht['htgone']['status'] && '' === $ht['htgone']['to'] && 410 === fetch( '/ht-gone-' . $run )['status'], 'Redirect gone is a 410' );
+$live = fetch( '/HT-RW-' . $run . '/abc' );
+check( '^/ht-rw-' . $run . '/(.*)$' === $ht['htrw']['from'] && true === $ht['htrw']['case_insensitive'] && 301 === $live['status'] && '/rw-new/abc' === relative( $live['location'] ), 'RewriteRule [R=301,NC]: the pattern gets its leading slash, and the site matches any case' );
+check( 'conditional-match:htaccess' === $ht['htcond']['reason'] && array( 'host' ) === $ht['htcond']['condition'] && false === strpos( wp_json_encode( $ht['htcond'] ), 'never' ) && 404 === fetch( '/ht-cond-' . $run )['status'], 'a RewriteRule behind a RewriteCond is excluded with what its condition tests (not the value), and the site does not serve it here' );
+check( 'not-a-redirect:rewrite' === $ht['htinternal']['reason'], 'an internal rewrite is accounted for, not a redirect' );
 $rm_rules = array_values( array_filter( array_merge( $redirects['redirects'], $redirects['excluded'] ), static function ( $r ) use ( $run ) { return 'rank_math' === $r['source'] && false !== strpos( $r['from'], $run ); } ) );
 check( 3 === count( $rm_rules ) && '/rm-new/' === $rm_rules[0]['to'] && 'start' === $rm_rules[1]['match'] && 'disabled' === $rm_rules[2]['reason'], 'Rank Math: two patterns become two rules, the inactive row is disabled' );
 foreach ( $redirects['redirects'] as $r ) {
-	if ( ! isset( $r['from'], $r['to'], $r['status'], $r['source'] ) || $r['status'] < 300 || $r['status'] > 399 ) {
+	$gone = in_array( $r['status'] ?? 0, array( 410, 451 ), true ) && '' === ( $r['to'] ?? null );
+	if ( ! isset( $r['from'], $r['to'], $r['status'], $r['source'] ) || ( ! $gone && ( $r['status'] < 300 || $r['status'] > 399 ) ) ) {
 		throw new RuntimeException( 'FAIL: RawRedirect shape ' . wp_json_encode( $r ) );
 	}
 }
-check( true, 'every listed redirect has from, to, a 3xx status and a source (RawRedirect)' );
+check( true, 'every listed redirect has from, to, a 3xx status (or 410/451 with no target) and a source (RawRedirect)' );
 
 // ---- Routing. ----
 check( '/blog/%year%/%postname%/' === $routing['permalink_structure'] && true === $routing['trailing_slash'] && 'topics' === $routing['category_base'] && 'labels' === $routing['tag_base'], 'the custom permalink structure and bases are exported' );
