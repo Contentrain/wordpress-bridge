@@ -517,6 +517,12 @@ $team_schema = array( 'type' => 'repeater', 'name' => 'team', 'sub_fields' => ar
 $clean_team = Source::acf_value( $team_schema, array( array( 'name' => 'Ada', 'email' => 'ada@example.test', 'secret' => 'planted' ) ), $redactions, 'acf' );
 check( 'ada@example.test' === $clean_team[0]['email'] && ! isset( $clean_team[0]['secret'] ), 'a nested ACF email sub-field is content; a secret-named one is not' );
 check( array() === Policy::clean( array( 'customer_email' => 'x@example.test' ), $redactions, 'meta' ), 'unknown meta keeps the broad name rule' );
+foreach ( array( 'user_pass', 'apiKey', 'access_token', 'client-secret', 'credentials', 'private_key' ) as $name ) {
+	check( Policy::secret_name( $name ), $name . ' is a credential name' );
+}
+foreach ( array( 'passage', 'compass', 'session_title', 'cookie_recipe', 'tokenomics', 'contact_email' ) as $name ) {
+	check( ! Policy::secret_name( $name ), $name . ' is content, not a credential name' );
+}
 Files::remove( Files::dir( $probe['id'] ) );
 
 // A real candidate review round, independent of the installed theme's size.

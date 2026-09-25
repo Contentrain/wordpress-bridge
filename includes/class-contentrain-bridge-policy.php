@@ -31,7 +31,10 @@ final class Policy {
 	 * a field or sub-field named like a credential still never leaves.
 	 */
 	public static function secret_name( $key ) {
-		return (bool) preg_match( '/pass(word|wd)?|secret|token|credential|api[_-]?key|private[_-]?key|authorization|cookie|session/i', $key );
+		// Word-bounded, the same rule as @contentrain/wp-import's ACF reader: `user_pass`,
+		// `apiKey`, `access_token` are secrets; `passage`, `session_title`, `cookie_recipe` are content.
+		$words = str_replace( '-', '_', preg_replace( '/([a-z0-9])([A-Z])/', '$1_$2', (string) $key ) );
+		return (bool) preg_match( '/(?:^|_)(?:pass(?:word|wd)?|secret|token|api_?key|private_?key|credentials?)(?:_|$)/i', $words );
 	}
 
 	/**
