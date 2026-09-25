@@ -1089,6 +1089,49 @@ Files::put( $dir, 'reader-compat.md', "---\n" . Policy::frontmatter( $compat ) .
 Files::put( $dir, 'reader-compat.json', Policy::json( $compat ) );
 check( is_file( $dir . '/reader-compat.md' ), 'reader compatibility fixture written for escape-bearing metadata' );
 
+// .htaccess rules, from lines alone: what Apache would serve, and everything else accounted for.
+$ht_doc = array( 'redirects' => array(), 'excluded' => array() );
+$ht_count = \Contentrain\Bridge\Redirects::htaccess_rules(
+	$ht_doc,
+	array(
+		'RedirectPermanent /a /b',
+		'RedirectMatch ^/c/(.*)$ https://example.org/$1',
+		'Redirect 451 /censored',
+		'Redirect 404 /missing',
+		'# BEGIN WordPress',
+		'RewriteRule . /index.php [L]',
+		'# END WordPress',
+		'RewriteBase /blog/',
+		'RewriteRule ^old/(.*)$ new/$1?from=old [R,L]',
+		'RewriteRule ^x$ /y [QSA,R=permanent]',
+		'RewriteRule ^gone$ - [G]',
+		'RewriteRule ^private$ - [F]',
+		'RewriteRule !^keep /elsewhere [R=301]',
+		'<If "%{HTTP_HOST} == \'a.example\'">',
+		'Redirect /inside /out',
+		'</If>',
+		'RewriteRule ^long \\',
+		'  /continued [R=308]',
+	)
+);
+$ht_all = array();
+foreach ( array_merge( $ht_doc['redirects'], $ht_doc['excluded'] ) as $r ) {
+	$ht_all[ $r['id'] ] = $r;
+}
+check( 11 === $ht_count && 11 === count( $ht_all ) && ! isset( $ht_all['htaccess:6'] ), '.htaccess: eleven rules outside WordPress\'s block, each exported or excluded once' );
+check( 'start' === $ht_all['htaccess:1']['match'] && 301 === $ht_all['htaccess:1']['status'] && 'pass' === $ht_all['htaccess:1']['query'], 'RedirectPermanent is a prefix rule that carries the query over' );
+check( 302 === $ht_all['htaccess:2']['status'] && 'https://example.org/$1' === $ht_all['htaccess:2']['to'], 'RedirectMatch without a code is a 302' );
+check( 451 === $ht_all['htaccess:3']['status'] && '' === $ht_all['htaccess:3']['to'] && 'not-a-redirect:status-404' === $ht_all['htaccess:4']['reason'], 'Redirect 451 is served as 451; a 404 is not a redirect' );
+check( '^/blog/old/(.*)$' === $ht_all['htaccess:9']['from'] && '/blog/new/$1?from=old' === $ht_all['htaccess:9']['to'] && 302 === $ht_all['htaccess:9']['status'] && 'ignore' === $ht_all['htaccess:9']['query'], 'RewriteRule [R]: RewriteBase in the pattern and the target, 302, a target query drops the request\'s' );
+check( 301 === $ht_all['htaccess:10']['status'] && 'pass' === $ht_all['htaccess:10']['query'], 'RewriteRule [QSA,R=permanent] is a 301 that keeps the query' );
+check( 410 === $ht_all['htaccess:11']['status'] && 'not-a-redirect:status-403' === $ht_all['htaccess:12']['reason'] && 'not-a-redirect:negated' === $ht_all['htaccess:13']['reason'], '[G] is 410, [F] is not a redirect, a negated pattern cannot be one rule' );
+check( 'conditional-match:htaccess' === $ht_all['htaccess:15']['reason'] && array( '<If "%{HTTP_HOST} == \'a.example\'">' ) === $ht_all['htaccess:15']['condition'], 'a rule inside <If> is conditional, with its block as the condition' );
+check( '/continued' === $ht_all['htaccess:18']['to'] && 308 === $ht_all['htaccess:18']['status'], 'a line continued with \\ is one directive' );
+check( get_attachment_link( $attachment ) === \Contentrain\Bridge\Exporter::map_attachment( get_post( $attachment ) )['link'], 'an attachment carries its attachment page address' );
+
+// The same Redirection rules as @contentrain/wp-import, case by case (tests/fixtures/redirect-parity.json).
+require __DIR__ . '/redirect-parity.php';
+
 // Snapshot consistency check on a separate job, preserving the finished artifact for external validation.
 delete_user_meta( $admin->ID, 'contentrain_bridge_job_1' );
 $other = Jobs::create( array( 'types' => array( 'page' ) ) );

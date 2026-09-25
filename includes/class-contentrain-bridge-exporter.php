@@ -76,6 +76,8 @@ final class Exporter {
 			'title'           => $attachment->post_title,
 			'slug'            => $attachment->post_name,
 			'url'             => wp_get_attachment_url( $attachment->ID ) ?: null,
+			// The attachment page's own address: indexed like any page, so it needs a redirect too.
+			'link'            => get_attachment_link( $attachment->ID ) ?: null,
 			'alt'             => (string) get_post_meta( $attachment->ID, '_wp_attachment_image_alt', true ),
 			'caption'         => $attachment->post_excerpt,
 			'description'     => $attachment->post_content,
