@@ -1,0 +1,2 @@
+Contentrain/ai packages/wp-import/src/fixtures/menu-parity.json @ 824937c80dd97da3e7993bfb51fdb4e35d4b3796
+# Copied unchanged. Re-copy from the merged main commit when wp-import changes the rules; tests/menu-parity.php runs every case through Menus::from_blocks.

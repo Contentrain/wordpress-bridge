@@ -53,21 +53,28 @@ final class Menus {
 	 * published wp_navigation posts { id, slug, title, date, content }.
 	 * `$target` maps a link block's attributes to [ target, public ].
 	 */
-	public static function from_blocks( $templates, $parts, $navigations, $taken, $target ) {
+	public static function from_blocks( $templates, $parts, $navigations, $taken, $target, $pages = null ) {
 		$used = self::used_parts( $templates, $parts );
-		$state = (object) array( 'next' => 0, 'dropped' => 0, 'taken' => array_fill_keys( (array) $taken, true ) );
+		$navigations = array_values( array_filter( $navigations, static function ( $nav ) { return 'publish' === ( $nav['status'] ?? 'publish' ); } ) );
+		usort( $navigations, static function ( $a, $b ) { return (int) $a['id'] <=> (int) $b['id']; } );
+		$state = (object) array( 'next' => 0, 'dropped' => 0, 'taken' => array_fill_keys( (array) $taken, true ), 'target' => $target, 'pages' => $pages );
 		$next = static function () use ( $state ) {
 			return --$state->next;
 		};
 		$locations = self::locations( $used, $navigations, $parts );
 		$menus = array();
 		foreach ( $navigations as $nav ) {
-			$slug = self::unique( $nav['slug'] ?: sanitize_title( $nav['title'] ) ?: 'navigation', $state );
+			// A navigation keeps its own slug, `-nav` while a classic menu has it (wp-import's rule).
+			$slug = $nav['slug'] ?: 'navigation-' . (int) $nav['id'];
+			while ( isset( $state->taken[ $slug ] ) ) {
+				$slug .= '-nav';
+			}
+			$state->taken[ $slug ] = true;
 			$menu = array(
 				'id' => (int) $nav['id'],
 				'slug' => $slug,
-				'name' => wp_strip_all_tags( $nav['title'] ) ?: $slug,
-				'items' => self::items( parse_blocks( $nav['content'] ), $target, $next, $state ),
+				'name' => self::label( $nav['title'] ) ?: $slug,
+				'items' => self::items( parse_blocks( $nav['content'] ), $next, $state ),
 			);
 			if ( ! empty( $locations[ $nav['id'] ] ) ) {
 				$menu['locations'] = $locations[ $nav['id'] ];
@@ -79,10 +86,10 @@ final class Menus {
 			self::inline_navs( self::expand( $part, $parts ), $inline );
 			foreach ( $inline as $i => $nav ) {
 				$area = $part['area'];
-				$label = trim( wp_strip_all_tags( (string) ( $nav['attrs']['ariaLabel'] ?? '' ) ) );
+				$label = self::label( $nav['attrs']['ariaLabel'] ?? '' );
 				$name = '' !== $label ? $label : ucfirst( $area ) . ' navigation' . ( count( $inline ) > 1 ? ' ' . ( $i + 1 ) : '' );
 				$slug = self::unique( sanitize_title( $name ) ?: $area . '-navigation', $state );
-				$items = self::items( $nav['innerBlocks'], $target, $next, $state );
+				$items = self::items( $nav['innerBlocks'], $next, $state );
 				if ( $items ) {
 					$menus[] = array( 'id' => $next(), 'slug' => $slug, 'name' => $name, 'items' => $items, 'locations' => array( $area ) );
 				}
@@ -215,42 +222,76 @@ final class Menus {
 		return $candidate;
 	}
 
-	/** Menu items of navigation blocks, in the shape of `Exporter::map_menu_item()`. */
-	private static function items( $blocks, $target, $next, $state, $parent = null, &$items = array() ) {
+	/**
+	 * Menu items of navigation blocks, in the shape of `Exporter::map_menu_item()`.
+	 * A link that may not be exported is left out and counted; its children
+	 * move up to its parent, as in a classic menu.
+	 */
+	private static function items( $blocks, $next, $state, $parent = null, &$items = array() ) {
 		foreach ( $blocks as $block ) {
 			$name = $block['blockName'];
 			$attrs = $block['attrs'] ?? array();
 			if ( 'core/navigation-link' === $name || 'core/navigation-submenu' === $name ) {
-				list( $to, $public ) = call_user_func( $target, $attrs );
+				list( $to, $public ) = call_user_func( $state->target, $attrs );
 				if ( ! $public ) {
 					++$state->dropped;
+					self::items( $block['innerBlocks'] ?? array(), $next, $state, $parent, $items );
 					continue;
 				}
 				$id = $next();
 				$items[] = self::item( $id, $attrs['label'] ?? '', $to, $attrs, $parent, count( $items ) );
-				self::items( $block['innerBlocks'] ?? array(), $target, $next, $state, $id, $items );
+				self::items( $block['innerBlocks'] ?? array(), $next, $state, $id, $items );
 			} elseif ( 'core/home-link' === $name ) {
-				$items[] = self::item( $next(), $attrs['label'] ?? 'Home', array( 'kind' => 'url', 'url' => home_url( '/' ), 'resolved' => true ), $attrs, $parent, count( $items ) );
+				$items[] = self::item( $next(), self::label( $attrs['label'] ?? '' ) ?: 'Home', array( 'kind' => 'url', 'url' => home_url( '/' ), 'resolved' => true ), $attrs, $parent, count( $items ) );
 			} elseif ( 'core/page-list' === $name ) {
-				foreach ( get_pages( array( 'sort_column' => 'menu_order,post_title', 'post_status' => 'publish' ) ) as $page ) {
-					if ( $page->post_password ) {
-						continue;
-					}
-					$items[] = self::item( $next(), $page->post_title, array( 'kind' => 'post', 'post_type' => 'page', 'id' => (int) $page->ID, 'slug' => $page->post_name, 'resolved' => true, 'url' => (string) get_permalink( $page ) ), array(), $parent, count( $items ) );
+				if ( null === $state->pages ) {
+					$state->pages = self::public_pages();
 				}
+				self::page_list( isset( $attrs['parentPageID'] ) ? (int) $attrs['parentPageID'] : 0, $parent, $next, $state, $items );
 			}
 		}
 		return $items;
 	}
 
+	/** Pages under `$page`, as a tree, by menu order then title (a page list block). */
+	private static function page_list( $page, $parent, $next, $state, &$items ) {
+		$kids = array_values( array_filter( $state->pages, static function ( $p ) use ( $page ) { return (int) $p['parent'] === $page; } ) );
+		usort( $kids, static function ( $a, $b ) { return ( (int) $a['menu_order'] <=> (int) $b['menu_order'] ) ?: strcmp( $a['title'], $b['title'] ); } );
+		foreach ( $kids as $kid ) {
+			$id = $next();
+			$items[] = self::item( $id, $kid['title'], array( 'kind' => 'post', 'post_type' => 'page', 'id' => (int) $kid['id'], 'slug' => $kid['slug'], 'resolved' => true, 'url' => $kid['link'] ), array(), $parent, count( $items ) );
+			self::page_list( (int) $kid['id'], $id, $next, $state, $items );
+		}
+	}
+
+	/** Published pages without a password: { id, parent, menu_order, title, slug, link }. */
+	private static function public_pages() {
+		$out = array();
+		foreach ( get_pages( array( 'post_status' => 'publish' ) ) as $page ) {
+			if ( ! $page->post_password ) {
+				$out[] = array( 'id' => (int) $page->ID, 'parent' => (int) $page->post_parent, 'menu_order' => (int) $page->menu_order, 'title' => $page->post_title, 'slug' => $page->post_name, 'link' => (string) get_permalink( $page ) );
+			}
+		}
+		return $out;
+	}
+
+	/** A label as text: tags out, entities decoded, whitespace collapsed. */
+	private static function label( $label ) {
+		$text = html_entity_decode( preg_replace( '/<[^>]*>/', ' ', (string) $label ), ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+		return trim( preg_replace( '/\s+/u', ' ', $text ) );
+	}
+
 	private static function item( $id, $label, $to, $attrs, $parent, $order ) {
 		$url = $to['url'] ?? ( $attrs['url'] ?? '' );
+		if ( '/' === substr( $url, 0, 1 ) && '/' !== substr( $url, 1, 1 ) ) {
+			$url = home_url( $url ); // Site-relative, as a visitor's browser reads it.
+		}
 		if ( 'url' !== ( $to['kind'] ?? '' ) ) {
 			unset( $to['url'] ); // A post or term target is known by its id and slug, as in a classic menu.
 		}
 		return array(
 			'id' => $id,
-			'title' => wp_strip_all_tags( (string) $label ),
+			'title' => self::label( $label ),
 			'order' => $order,
 			'parent' => $parent,
 			'parent_unresolved' => false,
@@ -289,9 +330,13 @@ final class Menus {
 
 	/**
 	 * A link block's target, and whether it may be exported: a post or term by
-	 * its id when the block names one; otherwise its URL. `#` stays `#`.
+	 * its id when the block names one; otherwise its URL. `#` stays `#`. A
+	 * public post or term points at its public address, whatever the block
+	 * kept. `$lookup` answers `post( id )` → { type, slug, public, link } and
+	 * `term( taxonomy, id )` → { slug, link }, or null; WordPress by default.
 	 */
-	public static function target( $attrs ) {
+	public static function target( $attrs, $lookup = null ) {
+		$lookup = $lookup ?: self::wp_lookup();
 		$url = (string) ( $attrs['url'] ?? '' );
 		$kind = $attrs['kind'] ?? '';
 		$id = isset( $attrs['id'] ) ? (int) $attrs['id'] : 0;
@@ -304,17 +349,37 @@ final class Menus {
 			}
 		}
 		if ( 'post-type' === $kind && $id ) {
-			$post = get_post( $id );
-			$public = $post && 'publish' === $post->post_status && ! $post->post_password;
-			return array( array( 'kind' => 'post', 'post_type' => $post ? $post->post_type : (string) ( $attrs['type'] ?? '' ), 'id' => $id, 'slug' => $post ? $post->post_name : null, 'resolved' => (bool) $post, 'url' => $public ? ( get_permalink( $post ) ?: $url ) : $url ), $public );
+			$post = call_user_func( $lookup['post'], $id );
+			$public = $post && $post['public'];
+			return array( array( 'kind' => 'post', 'post_type' => $post ? $post['type'] : (string) ( $attrs['type'] ?? '' ), 'id' => $id, 'slug' => $post ? $post['slug'] : null, 'resolved' => (bool) $post, 'url' => $public && $post['link'] ? $post['link'] : $url ), $public );
 		}
 		if ( 'taxonomy' === $kind && $id ) {
 			$taxonomy = 'tag' === ( $attrs['type'] ?? '' ) ? 'post_tag' : (string) ( $attrs['type'] ?? 'category' );
-			$term = get_term( $id, $taxonomy );
-			$found = $term && ! is_wp_error( $term );
-			$link = $found ? get_term_link( $term ) : null;
-			return array( array( 'kind' => 'term', 'taxonomy' => $taxonomy, 'id' => $id, 'slug' => $found ? $term->slug : null, 'resolved' => $found, 'url' => is_string( $link ) ? $link : $url ), true );
+			$term = call_user_func( $lookup['term'], $taxonomy, $id );
+			return array( array( 'kind' => 'term', 'taxonomy' => $taxonomy, 'id' => $id, 'slug' => $term ? $term['slug'] : null, 'resolved' => (bool) $term, 'url' => $term && $term['link'] ? $term['link'] : $url ), true );
 		}
 		return array( array( 'kind' => 'url', 'url' => $url, 'resolved' => true ), true );
+	}
+
+	/** `target()`'s lookup over this site: public = published and not password-protected. */
+	private static function wp_lookup() {
+		return array(
+			'post' => static function ( $id ) {
+				$post = get_post( $id );
+				if ( ! $post ) {
+					return null;
+				}
+				$public = 'publish' === $post->post_status && ! $post->post_password;
+				return array( 'type' => $post->post_type, 'slug' => $post->post_name, 'public' => $public, 'link' => $public ? (string) get_permalink( $post ) : null );
+			},
+			'term' => static function ( $taxonomy, $id ) {
+				$term = get_term( $id, $taxonomy );
+				if ( ! $term || is_wp_error( $term ) ) {
+					return null;
+				}
+				$link = get_term_link( $term );
+				return array( 'slug' => $term->slug, 'link' => is_string( $link ) ? $link : null );
+			},
+		);
 	}
 }
