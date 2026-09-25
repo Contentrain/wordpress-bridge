@@ -244,7 +244,9 @@ final class Models {
 				continue;
 			}
 			$fields[ $name ] = $field;
-			$data[ $name ] = $content;
+			if ( null !== $content ) {
+				$data[ $name ] = $content;
+			}
 		}
 		$cover = (int) ( $p['meta']['_thumbnail_id'] ?? 0 );
 		if ( $cover ) {
@@ -475,7 +477,9 @@ final class Models {
 				continue;
 			}
 			$fields[ $name ] = $field;
-			$data[ $name ] = $content;
+			if ( null !== $content ) {
+				$data[ $name ] = $content;
+			}
 		}
 		// ACF/SCF's own Options Page storage has no per-language copy — one
 		// `options_{name}` (or `{post_id}_{name}`) row per field, not one per

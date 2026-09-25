@@ -326,7 +326,7 @@ final class Acf {
 			return array( null, null );
 		}
 		if ( null !== $cast && ! self::chosen( $job, $definition, $cast, $source ) ) {
-			return array( null, null );
+			return array( $definition, null ); // The field is the schema's; this entry just has no valid value for it.
 		}
 		return null === $cast ? ( null === $value || '' === $value ? array( null, null ) : null ) : array( $definition, $cast );
 	}
