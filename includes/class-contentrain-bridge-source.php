@@ -170,7 +170,7 @@ final class Source {
 		if ( $acf ) {
 			$raw['acf'] = $acf;
 		}
-		return array( 'raw' => $raw, 'acf_schema' => Policy::clean( $schema, $excluded, 'acf-schema/' . $post->ID ), 'address' => self::address( $post ), 'translations' => self::translations( $post ) );
+		return array( 'raw' => $raw, 'acf_schema' => Policy::clean( $schema, $excluded, 'acf-schema/' . $post->ID, 0, true ), 'address' => self::address( $post ), 'translations' => self::translations( $post ) );
 	}
 
 	/** ACF/SCF field objects for a real post: every field group whose location rule matches it, exactly what `get_field_objects()` already scopes correctly for a single, ordinary post. */
@@ -180,7 +180,7 @@ final class Source {
 		if ( function_exists( 'get_field_objects' ) ) {
 			$fields = get_field_objects( $post_id, false, true ) ?: array();
 			foreach ( $fields as $name => $field ) {
-				if ( Policy::sensitive( $name ) || in_array( $field['type'], Acf::EXCLUDED, true ) ) {
+				if ( Policy::secret_name( $name ) || in_array( $field['type'], Acf::EXCLUDED, true ) ) {
 					$excluded[] = array( 'source' => $source_prefix . '/' . $name, 'reason' => 'sensitive-field' );
 					continue;
 				}
@@ -226,7 +226,7 @@ final class Source {
 						continue;
 					}
 					$name = $loaded['name'];
-					if ( Policy::sensitive( $name ) || in_array( $loaded['type'], Acf::EXCLUDED, true ) ) {
+					if ( Policy::secret_name( $name ) || in_array( $loaded['type'], Acf::EXCLUDED, true ) ) {
 						$excluded[] = array( 'source' => $source_prefix . '/' . $name, 'reason' => 'sensitive-field' );
 						continue;
 					}
@@ -305,7 +305,7 @@ final class Source {
 
 	/** ACF groups can use opaque field keys: inspect types before values reach RawIR. */
 	public static function acf_value( $field, $value, &$excluded, $path ) {
-		if ( in_array( $field['type'] ?? '', Acf::EXCLUDED, true ) || Policy::sensitive( $field['name'] ?? '' ) ) {
+		if ( in_array( $field['type'] ?? '', Acf::EXCLUDED, true ) || Policy::secret_name( $field['name'] ?? '' ) ) {
 			$excluded[] = array( 'source' => $path, 'reason' => 'sensitive-field' );
 			return null;
 		}
@@ -335,7 +335,7 @@ final class Source {
 			unset( $row );
 			$value = in_array( $field['type'] ?? '', array( 'repeater', 'flexible_content' ), true ) ? $rows : $rows[0];
 		}
-		return Policy::clean( $value, $excluded, $path );
+		return Policy::clean( $value, $excluded, $path, 0, true );
 	}
 
 	/** The parts of an ACF field definition that describe content, at every depth. */
