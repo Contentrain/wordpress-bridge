@@ -483,6 +483,19 @@ $result = $acf_class::field( $probe, $link_schema, array( 'url' => 'https://exam
 $link_model = $acf_class::model_id( 'link', 'field_probe_link' );
 check( null !== $result && 'relation' === $result[0]['type'] && $link_model === $result[0]['model'], 'a link becomes its own model instead of a lossy URL-only cast' );
 check( 'url' === $probe['models'][ $link_model ]['title_field'], 'a link is titled by its URL, which is never empty, rather than its optional label' );
+// B2: a link inside a row is {url, title, target}; casting it to a URL lost the label.
+check( null === $acf_class::scalar( array( 'type' => 'link' ) ), 'a link is not a scalar URL' );
+$flex_link_schema = array(
+	'type' => 'flexible_content', 'key' => 'field_probe_flex_link', 'name' => 'flex_link',
+	'layouts' => array( array( 'sub_fields' => array( array( 'name' => 'heading', 'type' => 'text' ), array( 'name' => 'cta', 'type' => 'link' ) ) ) ),
+);
+$models_before = $probe['models'];
+$result = $acf_class::field( $probe, $flex_link_schema, array( array( 'acf_fc_layout' => 'cta', 'heading' => 'Talk to us', 'cta' => array( 'url' => 'https://example.test/contact', 'title' => 'Contact', 'target' => '' ) ) ), $job['default_locale'], 'flex_link' );
+check( null === $result && $models_before === $probe['models'], 'a flexible row holding a link falls back whole instead of dropping the link label' );
+$repeater_link_schema = array( 'type' => 'repeater', 'key' => 'field_probe_rep_link', 'name' => 'rep_link', 'sub_fields' => array( array( 'name' => 'heading', 'type' => 'text' ), array( 'name' => 'cta', 'type' => 'link' ) ) );
+$result = $acf_class::field( $probe, $repeater_link_schema, array( array( 'heading' => 'Hi', 'cta' => array( 'url' => 'https://example.test', 'title' => 'Go', 'target' => '' ) ) ), $job['default_locale'], 'rep_link' );
+check( null === $result, 'a repeater row holding a link falls back instead of dropping the link label' );
+check( array( null, null ) === $acf_class::field( $probe, $link_schema, '', $job['default_locale'], 'link' ), 'an empty link has nothing to export' );
 // Two flexible_content layouts that cannot agree on a title field have no single
 // honest shape, so the field falls back whole rather than half-modelling it.
 $flex_schema = array(

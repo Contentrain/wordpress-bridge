@@ -13,14 +13,18 @@ defined( 'ABSPATH' ) || exit;
  */
 final class Acf {
 
-	/** ACF field type → Contentrain field type. Absent means "not a scalar we can map". */
+	/**
+	 * ACF field type → Contentrain field type. Absent means "not a scalar we can map".
+	 * `link` is absent on purpose: it is {url, title, target}, and casting it to a
+	 * URL inside a group, repeater or flexible row lost the label without a word.
+	 * A top-level link is modelled in `field()`; a row holding one falls back.
+	 */
 	const SCALARS = array(
 		'text' => 'string',
 		'textarea' => 'text',
 		'wysiwyg' => 'richtext',
 		'email' => 'email',
 		'url' => 'url',
-		'link' => 'url',
 		'page_link' => 'url',
 		'oembed' => 'url',
 		'number' => 'number',
@@ -190,6 +194,11 @@ final class Acf {
 				),
 			);
 			$type = 'group';
+		}
+		if ( 'link' === $type ) {
+			// An empty link has nothing to lose. A link inside a row is not a
+			// scalar either (see SCALARS): its label and target would be dropped.
+			return null === $value || '' === $value || array() === $value ? array( null, null ) : null;
 		}
 		if ( in_array( $type, self::LAYOUT, true ) ) {
 			return array( null, null );
