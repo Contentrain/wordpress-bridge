@@ -74,6 +74,10 @@ if ( $has_acf ) {
 		'location' => array( array( array( 'param' => 'post_type', 'operator' => '==', 'value' => 'page' ) ) ),
 		'fields' => array(
 			array( 'key' => 'field_bridge_tagline', 'name' => 'tagline', 'label' => 'Tagline', 'type' => 'text' ),
+			// B4: an email field the owner built is published content; a secret is judged by type or a credential name.
+			array( 'key' => 'field_bridge_contact_email', 'name' => 'contact_email', 'label' => 'Contact email', 'type' => 'email' ),
+			array( 'key' => 'field_bridge_api_token', 'name' => 'api_token', 'label' => 'API token', 'type' => 'text' ),
+			array( 'key' => 'field_bridge_door', 'name' => 'door_code', 'label' => 'Door code', 'type' => 'password' ),
 			array( 'key' => 'field_bridge_rank', 'name' => 'rank', 'label' => 'Rank', 'type' => 'number' ),
 			array( 'key' => 'field_bridge_featured', 'name' => 'featured', 'label' => 'Featured', 'type' => 'true_false' ),
 			array(
@@ -122,6 +126,9 @@ if ( $has_acf ) {
 		),
 	) );
 	update_field( 'tagline', 'Content you own', $page );
+	update_field( 'contact_email', 'hello@example.test', $page );
+	update_field( 'api_token', 'planted-acf-token-value', $page );
+	update_field( 'door_code', 'planted-acf-door-code', $page );
 	update_field( 'rank', 3, $page );
 	update_field( 'featured', true, $page );
 	update_field( 'hero', array( 'heading' => 'Own your words', 'cta' => 'Start now' ), $page );
@@ -530,6 +537,16 @@ $redactions = array();
 $private_schema = array( 'type' => 'group', 'name' => 'public_group', 'sub_fields' => array( array( 'key' => 'field_opaque', 'name' => 'connection', 'type' => 'password' ), array( 'key' => 'field_heading', 'name' => 'heading', 'type' => 'text' ) ) );
 $clean_acf = Source::acf_value( $private_schema, array( 'field_opaque' => 'hidden-credential', 'field_heading' => 'Safe headline' ), $redactions, 'acf' );
 check( ! isset( $clean_acf['field_opaque'] ) && 'Safe headline' === $clean_acf['field_heading'], 'nested ACF password is removed by its type even behind an opaque field key' );
+$team_schema = array( 'type' => 'repeater', 'name' => 'team', 'sub_fields' => array( array( 'key' => 'field_team_name', 'name' => 'name', 'type' => 'text' ), array( 'key' => 'field_team_email', 'name' => 'email', 'type' => 'email' ), array( 'key' => 'field_team_secret', 'name' => 'secret', 'type' => 'text' ) ) );
+$clean_team = Source::acf_value( $team_schema, array( array( 'name' => 'Ada', 'email' => 'ada@example.test', 'secret' => 'planted' ) ), $redactions, 'acf' );
+check( 'ada@example.test' === $clean_team[0]['email'] && ! isset( $clean_team[0]['secret'] ), 'a nested ACF email sub-field is content; a secret-named one is not' );
+check( array() === Policy::clean( array( 'customer_email' => 'x@example.test' ), $redactions, 'meta' ), 'unknown meta keeps the broad name rule' );
+foreach ( array( 'user_pass', 'apiKey', 'access_token', 'client-secret', 'credentials', 'private_key' ) as $name ) {
+	check( Policy::secret_name( $name ), $name . ' is a credential name' );
+}
+foreach ( array( 'passage', 'compass', 'session_title', 'cookie_recipe', 'tokenomics', 'contact_email' ) as $name ) {
+	check( ! Policy::secret_name( $name ), $name . ' is content, not a credential name' );
+}
 Files::remove( Files::dir( $probe['id'] ) );
 
 // A real candidate review round, independent of the installed theme's size.
@@ -680,6 +697,9 @@ if ( $has_acf ) {
 	$page_data = json_decode( Files::read( $dir, Models::content_path( $job, 'wp-page', $job['default_locale'] ) ), true );
 	$page_entry = $page_data[ Source::address( get_post( $page ) )['entry_id'] ];
 	check( 'Content you own' === $page_entry['acf_tagline'], 'a scalar ACF field is a scalar field' );
+	check( 'email' === $job['models']['wp-page']['fields']['acf_contact_email']['type'] && 'hello@example.test' === $page_entry['acf_contact_email'], 'a public ACF email field is exported, not dropped by its name' );
+	check( ! isset( $page_entry['acf_api_token'] ) && ! isset( $page_entry['acf_door_code'] ), 'a credential-named field and a password field are never exported' );
+	check( false === strpos( wp_json_encode( $page_entry ), 'planted-acf-' ), 'no planted secret reaches the entry' );
 	check( 3 === $page_entry['acf_rank'] || 3.0 === $page_entry['acf_rank'], 'a number stays a number' );
 	check( true === $page_entry['acf_featured'], 'true_false becomes a boolean' );
 	check( 'relations' === $job['models']['wp-page']['fields']['acf_quotes']['type'], 'the post relates to its repeater rows' );
