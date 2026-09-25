@@ -582,6 +582,8 @@ foreach ( array( 'user_pass', 'apiKey', 'access_token', 'client-secret', 'creden
 foreach ( array( 'passage', 'compass', 'session_title', 'cookie_recipe', 'tokenomics', 'contact_email' ) as $name ) {
 	check( ! Policy::secret_name( $name ), $name . ' is content, not a credential name' );
 }
+// The same table as @contentrain/wp-import, case by case (tests/fixtures/acf-parity.json).
+require __DIR__ . '/acf-parity.php';
 Files::remove( Files::dir( $probe['id'] ) );
 
 // A real candidate review round, independent of the installed theme's size.
