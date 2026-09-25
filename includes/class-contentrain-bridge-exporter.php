@@ -64,7 +64,7 @@ final class Exporter {
 				},
 				$terms
 			),
-			'meta'           => Policy::meta( get_post_meta( $post->ID ), $selected, $excluded, 'post/' . $post->ID ),
+			'meta'           => Policy::meta( get_post_meta( $post->ID ), $selected, $excluded, 'post/' . $post->ID, '' !== (string) $post->post_password ),
 		);
 	}
 
@@ -175,7 +175,54 @@ final class Exporter {
 		foreach ( $keys as $key ) {
 			$result[ $key ] = get_option( $key );
 		}
-		return $result;
+		return $result + self::design();
+	}
+
+	/**
+	 * The site's design system as WordPress and the builders hold it: the active theme, block-theme global
+	 * settings and styles (theme.json merged with the user's Site Editor changes) and templates, the
+	 * Elementor kit (global colours, fonts, layout) and Divi's theme options. Read-only calls, no theme code
+	 * run; every value passes the same secret filter as selected meta (Divi keeps integration API keys in
+	 * `et_divi`).
+	 */
+	public static function design() {
+		$excluded = array();
+		$out      = array(
+			'stylesheet' => get_stylesheet(),
+			'template'   => get_template(),
+		);
+		if ( function_exists( 'wp_get_global_settings' ) ) {
+			$out['global_settings'] = Policy::clean( wp_get_global_settings(), $excluded, 'options/global_settings', 0, false, Policy::BUILDER_DEPTH );
+		}
+		if ( function_exists( 'wp_get_global_styles' ) ) {
+			$out['global_styles'] = Policy::clean( wp_get_global_styles(), $excluded, 'options/global_styles', 0, false, Policy::BUILDER_DEPTH );
+		}
+		if ( function_exists( 'wp_is_block_theme' ) && wp_is_block_theme() && function_exists( 'get_block_templates' ) ) {
+			$templates = array();
+			foreach ( array( 'wp_template', 'wp_template_part' ) as $type ) {
+				foreach ( get_block_templates( array(), $type ) as $template ) {
+					$templates[] = array(
+						'type'    => $type,
+						'slug'    => $template->slug,
+						'area'    => isset( $template->area ) ? $template->area : null,
+						'source'  => $template->source,
+						'content' => $template->content,
+					);
+				}
+			}
+			usort( $templates, static function ( $a, $b ) { return strcmp( $a['type'] . '/' . $a['slug'], $b['type'] . '/' . $b['slug'] ); } );
+			$out['block_templates'] = $templates;
+		}
+		$kit = (int) get_option( 'elementor_active_kit' );
+		if ( $kit ) {
+			$settings = get_post_meta( $kit, '_elementor_page_settings', true );
+			$out['elementor_kit'] = is_array( $settings ) ? Policy::clean( $settings, $excluded, 'options/elementor_kit', 0, false, Policy::BUILDER_DEPTH ) : array();
+		}
+		$divi = get_option( 'et_divi' );
+		if ( is_array( $divi ) ) {
+			$out['et_divi'] = Policy::clean( $divi, $excluded, 'options/et_divi' );
+		}
+		return $out;
 	}
 
 	/** Convert a WordPress GMT timestamp to ISO 8601 or null. */
