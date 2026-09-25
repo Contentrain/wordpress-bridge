@@ -64,7 +64,7 @@ final class Exporter {
 				},
 				$terms
 			),
-			'meta'           => Policy::meta( get_post_meta( $post->ID ), $selected, $excluded, 'post/' . $post->ID ),
+			'meta'           => Policy::meta( get_post_meta( $post->ID ), $selected, $excluded, 'post/' . $post->ID, '' !== (string) $post->post_password ),
 		);
 	}
 
@@ -92,8 +92,14 @@ final class Exporter {
 	}
 
 	/** Export registered navigation menus and resolved target metadata. */
-	public static function menus() {
+	/**
+	 * Classic menus (with the theme locations each is assigned to), then a
+	 * block theme's navigation (`Menus::block()`). `$dropped` counts block
+	 * links left out because their target is not public.
+	 */
+	public static function menus( &$dropped = 0 ) {
 		$results = array();
+		$assigned = get_nav_menu_locations();
 		foreach ( wp_get_nav_menus() as $menu ) {
 			$raw_items = wp_get_nav_menu_items( $menu->term_id );
 			$items     = array_map( array( self::class, 'map_menu_item' ), is_array( $raw_items ) ? $raw_items : array() );
@@ -104,14 +110,22 @@ final class Exporter {
 				$item['parent_unresolved'] = (bool) ( $item['parent'] && ! in_array( $item['parent'], $ids, true ) );
 			}
 			unset( $item );
-			$results[] = array(
+			$entry = array(
 				'id'    => (int) $menu->term_id,
 				'slug'  => $menu->slug,
 				'name'  => $menu->name,
 				'items' => $items,
 			);
+			$locations = array_keys( array_filter( (array) $assigned, static function ( $id ) use ( $menu ) { return (int) $id === (int) $menu->term_id; } ) );
+			if ( $locations ) {
+				sort( $locations );
+				$entry['locations'] = array_map( 'strval', $locations );
+			}
+			$results[] = $entry;
 		}
-		return $results;
+		$block = Menus::block( array_column( $results, 'slug' ) );
+		$dropped = $block['dropped'];
+		return array_merge( $results, $block['menus'] );
 	}
 
 	/** Map one menu item into the shared target union. */
@@ -161,7 +175,54 @@ final class Exporter {
 		foreach ( $keys as $key ) {
 			$result[ $key ] = get_option( $key );
 		}
-		return $result;
+		return $result + self::design();
+	}
+
+	/**
+	 * The site's design system as WordPress and the builders hold it: the active theme, block-theme global
+	 * settings and styles (theme.json merged with the user's Site Editor changes) and templates, the
+	 * Elementor kit (global colours, fonts, layout) and Divi's theme options. Read-only calls, no theme code
+	 * run; every value passes the same secret filter as selected meta (Divi keeps integration API keys in
+	 * `et_divi`).
+	 */
+	public static function design() {
+		$excluded = array();
+		$out      = array(
+			'stylesheet' => get_stylesheet(),
+			'template'   => get_template(),
+		);
+		if ( function_exists( 'wp_get_global_settings' ) ) {
+			$out['global_settings'] = Policy::clean( wp_get_global_settings(), $excluded, 'options/global_settings', 0, false, Policy::BUILDER_DEPTH );
+		}
+		if ( function_exists( 'wp_get_global_styles' ) ) {
+			$out['global_styles'] = Policy::clean( wp_get_global_styles(), $excluded, 'options/global_styles', 0, false, Policy::BUILDER_DEPTH );
+		}
+		if ( function_exists( 'wp_is_block_theme' ) && wp_is_block_theme() && function_exists( 'get_block_templates' ) ) {
+			$templates = array();
+			foreach ( array( 'wp_template', 'wp_template_part' ) as $type ) {
+				foreach ( get_block_templates( array(), $type ) as $template ) {
+					$templates[] = array(
+						'type'    => $type,
+						'slug'    => $template->slug,
+						'area'    => isset( $template->area ) ? $template->area : null,
+						'source'  => $template->source,
+						'content' => $template->content,
+					);
+				}
+			}
+			usort( $templates, static function ( $a, $b ) { return strcmp( $a['type'] . '/' . $a['slug'], $b['type'] . '/' . $b['slug'] ); } );
+			$out['block_templates'] = $templates;
+		}
+		$kit = (int) get_option( 'elementor_active_kit' );
+		if ( $kit ) {
+			$settings = get_post_meta( $kit, '_elementor_page_settings', true );
+			$out['elementor_kit'] = is_array( $settings ) ? Policy::clean( $settings, $excluded, 'options/elementor_kit', 0, false, Policy::BUILDER_DEPTH ) : array();
+		}
+		$divi = get_option( 'et_divi' );
+		if ( is_array( $divi ) ) {
+			$out['et_divi'] = Policy::clean( $divi, $excluded, 'options/et_divi' );
+		}
+		return $out;
 	}
 
 	/** Convert a WordPress GMT timestamp to ISO 8601 or null. */

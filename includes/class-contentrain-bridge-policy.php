@@ -19,13 +19,47 @@ final class Policy {
 	/** Unknown metadata requires selection; these content keys are understood. */
 	const CORE = array( '_thumbnail_id', '_wp_page_template', '_wp_attachment_image_alt', '_wp_attached_file', '_wp_attachment_metadata' );
 
+	/**
+	 * Page-builder layout meta, understood without selection: Elementor's element tree and page settings,
+	 * Divi's builder switches. A migration rebuilds the page from these; `@contentrain/wp-import` never
+	 * turns them into content fields (its CORE_META drops `_elementor_*`), so status and entry parity are
+	 * untouched. Divi's `_et_pb_old_content` (a backup of the pre-builder body) is not layout and stays out.
+	 */
+	const BUILDER = '/^(_elementor_(data|page_settings|template_type|edit_mode|version)|_et_pb_(use_builder|page_layout|side_nav|post_hide_nav|show_title))$/';
+
 	public static function sensitive( $key ) {
-		return (bool) preg_match( '/pass(word|wd)?|secret|token|credential|api[_-]?key|private[_-]?key|authorization|cookie|session|email|(^|_)ip($|_)|user_agent/i', $key );
+		// `webhook`/`hook_url`: form actions (Elementor Pro, Divi) keep secret-bearing URLs under these names.
+		return (bool) preg_match( '/pass(word|wd)?|secret|token|credential|api[_-]?key|private[_-]?key|authorization|cookie|session|email|webhook|hook_url|(^|_)ip($|_)|user_agent/i', $key );
 	}
 
-	/** Never export secrets nested inside selected fields either. */
-	public static function clean( $value, &$excluded, $path = '', $depth = 0 ) {
-		if ( $depth > 12 || is_object( $value ) || is_resource( $value ) ) {
+	/**
+	 * Nesting a builder tree may reach: Elementor spends about two levels per container step
+	 * (`elements` → index) plus repeaters inside widget settings, so twelve cut a widget five
+	 * containers deep. Only builder meta gets this depth; everything else keeps twelve.
+	 */
+	const BUILDER_DEPTH = 64;
+
+	/**
+	 * A name that only a secret carries. For an ACF field the type says what it
+	 * holds — `password` is never content — and a field the site owner built as
+	 * `contact_email` or `office_ip` is content they publish, so the broad
+	 * `sensitive()` name rule (built for unknown post meta) does not apply to it;
+	 * a field or sub-field named like a credential still never leaves.
+	 */
+	public static function secret_name( $key ) {
+		// Word-bounded, the same rule as @contentrain/wp-import's ACF reader: `user_pass`,
+		// `apiKey`, `access_token` are secrets; `passage`, `session_title`, `cookie_recipe` are content.
+		$words = str_replace( '-', '_', preg_replace( '/([a-z0-9])([A-Z])/', '$1_$2', (string) $key ) );
+		return (bool) preg_match( '/(?:^|_)(?:pass(?:word|wd)?|secret|token|api_?key|private_?key|credentials?)(?:_|$)/i', $words );
+	}
+
+	/**
+	 * Never export secrets nested inside selected fields either. `$field_names`
+	 * marks the keys as ACF sub-field names, judged by `secret_name()`; `$max_depth`
+	 * is twelve except for builder data (`BUILDER_DEPTH`).
+	 */
+	public static function clean( $value, &$excluded, $path = '', $depth = 0, $field_names = false, $max_depth = 12 ) {
+		if ( $depth > $max_depth || is_object( $value ) || is_resource( $value ) ) {
 			$excluded[] = array( 'source' => $path, 'reason' => 'unsupported-value' );
 			return null;
 		}
@@ -33,25 +67,32 @@ final class Policy {
 			$out = array();
 			foreach ( $value as $key => $item ) {
 				$child = $path . '/' . $key;
-				if ( self::sensitive( (string) $key ) ) {
+				if ( $field_names ? self::secret_name( (string) $key ) : self::sensitive( (string) $key ) ) {
 					$excluded[] = array( 'source' => $child, 'reason' => 'sensitive-key' );
 					continue;
 				}
-				$out[ $key ] = self::clean( $item, $excluded, $child, $depth + 1 );
+				$out[ $key ] = self::clean( $item, $excluded, $child, $depth + 1, $field_names, $max_depth );
 			}
 			return $out;
 		}
-		if ( is_string( $value ) && preg_match( '/-----BEGIN .*PRIVATE KEY-----|\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9]{20,})/', $value ) ) {
+		// Webhook URLs are credentials in URL form: whoever holds one can post into the channel.
+		if ( is_string( $value ) && preg_match( '/-----BEGIN .*PRIVATE KEY-----|\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9]{20,})|hooks\.slack\.com\/services\/|discord(?:app)?\.com\/api\/webhooks\/|hooks\.zapier\.com\/hooks\/|hook\.[a-z0-9]+\.make\.com\//i', $value ) ) {
 			$excluded[] = array( 'source' => $path, 'reason' => 'credential-pattern' );
 			return null;
 		}
 		return $value;
 	}
 
-	public static function meta( $meta, $selected, &$excluded, $prefix ) {
+	public static function meta( $meta, $selected, &$excluded, $prefix, $protected = false ) {
 		$out = array();
 		foreach ( $meta as $key => $values ) {
-			$known = in_array( $key, self::CORE, true ) || preg_match( '/^(_yoast_wpseo_|rank_math_|_aioseo_)/', $key );
+			$builder = (bool) preg_match( self::BUILDER, $key );
+			// A protected post's builder tree is its body in another shape: it follows the password rule, not the meta rule.
+			if ( $builder && $protected ) {
+				$excluded[] = array( 'source' => $prefix . '/' . $key, 'reason' => 'password-protected' );
+				continue;
+			}
+			$known = in_array( $key, self::CORE, true ) || $builder || preg_match( '/^(_yoast_wpseo_|rank_math_|_aioseo_)/', $key );
 			if ( self::sensitive( $key ) || ( ! $known && ! in_array( $key, $selected, true ) ) ) {
 				$excluded[] = array( 'source' => $prefix . '/' . $key, 'reason' => self::sensitive( $key ) ? 'sensitive-key' : 'not-selected' );
 				continue;
@@ -61,7 +102,17 @@ final class Policy {
 			if ( is_string( $value ) && is_serialized( $value ) ) {
 				$value = unserialize( $value, array( 'allowed_classes' => false, 'max_depth' => 32 ) ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_unserialize -- Selected WP metadata; class instantiation is explicitly disabled.
 			}
-			$out[ $key ] = self::clean( $value, $excluded, $prefix . '/' . $key );
+			// Elementor keeps its tree as a JSON string; decoded, the secret filter reaches every widget
+			// setting (a form widget's `email_to`, an integration's API key) instead of passing one opaque string.
+			if ( '_elementor_data' === $key && is_string( $value ) ) {
+				$decoded = json_decode( $value, true );
+				$value   = is_array( $decoded ) ? $decoded : null;
+				if ( null === $value ) {
+					$excluded[] = array( 'source' => $prefix . '/' . $key, 'reason' => 'unparseable-builder-data' );
+					continue;
+				}
+			}
+			$out[ $key ] = self::clean( $value, $excluded, $prefix . '/' . $key, 0, false, $builder ? self::BUILDER_DEPTH : 12 );
 		}
 		return $out;
 	}

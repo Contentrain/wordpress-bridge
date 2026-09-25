@@ -75,7 +75,7 @@ if (mode === 'build') {
   check(/data-media>\/?media\/[^<]+e2e-cover-[a-f0-9]+\.png</.test(html) && walk(join(out, 'media')).some((f) => /e2e-cover-.*\.png$/.test(f)), 'the featured image is a transferred file the site serves')
   const guide = map[String(fixture.page)]
   const guideHtml = page(out, guide.model_id, guide.entry_id)
-  check(guideHtml && /data-relation="acf_e2e_steps">Export, Build</.test(guideHtml), 'the ACF repeater rows resolve, in order')
+  check(guideHtml && /data-list="acf_e2e_steps">Export, Build</.test(guideHtml), 'the ACF repeater rows are in the page, in order')
   const menu = walk(join(out, 'wp-menu-items')).map((f) => readFileSync(f, 'utf8'))
   check(['Guide', 'Guides', 'Contentrain'].every((t) => menu.some((h) => h.includes(`<h1>${t}</h1>`))) && menu.some((h) => h.includes('https://contentrain.io/')), 'the menu items are pages with their titles and targets')
   const lang = json(join(store, '.contentrain/config.json')).locales.default

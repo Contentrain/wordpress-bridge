@@ -17,7 +17,8 @@
     "test:delivery-git": "tests/delivery-git.sh",
     "test:text": "tests/text.sh",
     "test:coverage": "tests/coverage.sh",
-    "test:integrations": "tests/integrations.sh"
+    "test:integrations": "tests/integrations.sh",
+    "test:builder": "tests/builder.sh"
   },
   "devDependencies": {
     "@contentrain/types": "1.14.0",

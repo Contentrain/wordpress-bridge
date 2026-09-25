@@ -234,7 +234,7 @@ final class Models {
 			$source = $a['model_id'] . '/' . $a['entry_id'] . '/acf/' . $key;
 			// The field group knows what this is; use it before falling back to a
 			// shape-only guess.
-			$modelled = isset( $record['acf_schema'][ $key ] ) ? Acf::field( $job, $record['acf_schema'][ $key ], $acf['value'], $a['locale'], $source ) : null;
+			$modelled = isset( $record['acf_schema'][ $key ] ) ? Acf::field( $job, $record['acf_schema'][ $key ], $acf['value'], $a['locale'], $source, null, 'document' !== $kind ) : null;
 			if ( null === $modelled ) {
 				Jobs::warning( $job, array( 'source' => $source, 'reason' => 'acf-shape-not-modelled: exported as structured values' ) );
 				$modelled = self::value( $job, $acf['value'], $a['locale'], $source );
@@ -244,7 +244,9 @@ final class Models {
 				continue;
 			}
 			$fields[ $name ] = $field;
-			$data[ $name ] = $content;
+			if ( null !== $content ) {
+				$data[ $name ] = $content;
+			}
 		}
 		$cover = (int) ( $p['meta']['_thumbnail_id'] ?? 0 );
 		if ( $cover ) {
@@ -383,10 +385,13 @@ final class Models {
 			'parent' => array( 'type' => 'relation', 'model' => 'wp-menu-items' ),
 		), 'title', false );
 		foreach ( $menus as $menu ) {
-			$menu_locations = array();
-			foreach ( (array) $locations as $slug => $assigned ) {
-				if ( (int) $assigned === (int) $menu['id'] ) {
-					$menu_locations[] = $slug;
+			// Exporter::menus() names each menu's locations (classic theme locations, block template-part areas).
+			$menu_locations = $menu['locations'] ?? array();
+			if ( ! isset( $menu['locations'] ) ) {
+				foreach ( (array) $locations as $slug => $assigned ) {
+					if ( (int) $assigned === (int) $menu['id'] ) {
+						$menu_locations[] = $slug;
+					}
 				}
 			}
 			foreach ( $menu['items'] as $item ) {
@@ -401,8 +406,9 @@ final class Models {
 				// WordPress itself only ever resolves a link for a post/term whose
 				// target still exists; one that never resolved carries no URL to
 				// fall back to, not an empty string a `url` field would reject.
-				if ( ! empty( $item['url'] ) ) {
-					$data['url'] = $item['url'];
+				$url = self::menu_url( (string) ( $item['url'] ?? '' ) );
+				if ( null !== $url ) {
+					$data['url'] = $url;
 				}
 				if ( $menu_locations ) {
 					$data['location'] = implode( ',', $menu_locations );
@@ -438,6 +444,21 @@ final class Models {
 	}
 
 	/**
+	 * A menu item's address as a `url` field holds it: a site-relative one
+	 * (`/about/`) made absolute; a placeholder (`#`, `#section`) or anything
+	 * else that is no address has none — RawIR keeps it as written.
+	 */
+	private static function menu_url( $url ) {
+		if ( '' === $url || '#' === $url[0] ) {
+			return null;
+		}
+		if ( '/' === $url[0] && ( ! isset( $url[1] ) || '/' !== $url[1] ) ) {
+			$url = home_url( $url );
+		}
+		return false !== filter_var( $url, FILTER_VALIDATE_URL ) ? $url : null;
+	}
+
+	/**
 	 * One Options Page becomes one singleton, its fields whatever the site
 	 * actually configured — arbitrary, unlike a post's fixed title/body. A
 	 * `page_title` field is always present so the model always has a valid
@@ -453,18 +474,19 @@ final class Models {
 		foreach ( $excluded as $warning ) {
 			Jobs::warning( $job, $warning );
 		}
-		$schema = Policy::clean( $schema, $excluded, 'acf-options-schema/' . $slug );
+		// Keyed by field name, like the values: judged by `secret_name()`, or `contact_email` would lose its schema.
+		$schema = Policy::clean( $schema, $excluded, 'acf-options-schema/' . $slug, 0, true );
 		$mid = 'acf-options-' . $slug;
 		$fields = array( 'page_title' => array( 'type' => 'string', 'required' => true ) );
 		$data = array( 'page_title' => $page['page_title'] ?: $page['menu_slug'] ?: $slug );
 		foreach ( $raw as $key => $acf ) {
 			$name = 'acf_' . str_replace( '-', '_', sanitize_key( $key ) );
 			$source = 'acf-options/' . $slug . '/' . $key;
-			// An Options Page's own singleton is `i18n: false` (see below); a
-			// repeater/group/flexible_content field belonging to it must create
-			// its own collection model the same way, or the validator demands a
-			// same-language copy this export never writes for it either.
-			$modelled = isset( $schema[ $key ] ) ? Acf::field( $job, $schema[ $key ], $acf['value'], $job['default_locale'], $source, false ) : null;
+			// An Options Page's own singleton is JSON, so structured ACF fields are
+			// written in place (`$inline`). `i18n: false` still reaches any model a
+			// field creates (a reference fallback), or the validator demands a
+			// same-language copy this export never writes for it.
+			$modelled = isset( $schema[ $key ] ) ? Acf::field( $job, $schema[ $key ], $acf['value'], $job['default_locale'], $source, false, true ) : null;
 			if ( null === $modelled ) {
 				Jobs::warning( $job, array( 'source' => $source, 'reason' => 'acf-shape-not-modelled: exported as structured values' ) );
 				$modelled = self::value( $job, $acf['value'], $job['default_locale'], $source );
@@ -474,7 +496,9 @@ final class Models {
 				continue;
 			}
 			$fields[ $name ] = $field;
-			$data[ $name ] = $content;
+			if ( null !== $content ) {
+				$data[ $name ] = $content;
+			}
 		}
 		// ACF/SCF's own Options Page storage has no per-language copy — one
 		// `options_{name}` (or `{post_id}_{name}`) row per field, not one per
