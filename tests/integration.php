@@ -102,6 +102,10 @@ if ( $has_acf ) {
 			// below, which save by key for exactly this reason.
 			array( 'key' => 'field_bridge_person', 'name' => 'person', 'label' => 'Person', 'type' => 'user' ),
 			array( 'key' => 'field_bridge_cta', 'name' => 'cta_link', 'label' => 'CTA link', 'type' => 'link' ),
+			// B1: a page_link stores the linked post's ID; modelled as a URL, it
+			// once failed the whole export's validation.
+			array( 'key' => 'field_bridge_landing', 'name' => 'landing', 'label' => 'Landing page', 'type' => 'page_link' ),
+			array( 'key' => 'field_bridge_landing_draft', 'name' => 'landing_draft', 'label' => 'Draft landing page', 'type' => 'page_link' ),
 			array(
 				'key' => 'field_bridge_sections', 'name' => 'sections', 'label' => 'Sections', 'type' => 'flexible_content',
 				'layouts' => array(
@@ -133,6 +137,8 @@ if ( $has_acf ) {
 	update_field( 'gallery', array( $attachment, $ghost ), $page );
 	update_field( 'field_bridge_person', $admin->ID, $page );
 	update_field( 'cta_link', array( 'title' => 'Read more', 'url' => 'https://example.test/read-more', 'target' => '_blank' ), $page );
+	update_field( 'landing', $post, $page );
+	update_field( 'landing_draft', $draft, $page );
 	update_field( 'sections', array(
 		array( 'acf_fc_layout' => 'text_block', 'heading' => 'Intro', 'body' => 'Welcome copy' ),
 		array( 'acf_fc_layout' => 'quote_block', 'heading' => 'Praise', 'quote' => 'It just works.' ),
@@ -478,6 +484,9 @@ $acf_class = '\Contentrain\Bridge\Acf';
 check( $acf_class::model_id( 'hero', 'field_a' ) !== $acf_class::model_id( 'hero', 'field_b' ), 'same-name ACF models have stable distinct identities' );
 check( '2026-09-11' === $acf_class::cast( array( 'type' => 'date' ), '20260911' ), 'ACF stored dates normalize to ISO date' );
 check( null === $acf_class::scalar( array( 'type' => 'select', 'multiple' => true, 'choices' => array( 'a' => 'A', 'b' => 'B' ) ) ), 'multi-select cannot be treated as a scalar select' );
+check( get_permalink( $page ) === $acf_class::cast( array( 'type' => 'url' ), (string) $page ), 'a page_link post ID casts to its public address' );
+check( null === $acf_class::cast( array( 'type' => 'url' ), $draft ) && null === $acf_class::cast( array( 'type' => 'url' ), 999999 ), 'a page_link to a draft or missing post has no address to give' );
+check( null === $acf_class::scalar( array( 'type' => 'page_link', 'multiple' => true ) ), 'a multiple page_link is not one URL' );
 $link_schema = array( 'type' => 'link', 'key' => 'field_probe_link', 'name' => 'link' );
 $result = $acf_class::field( $probe, $link_schema, array( 'url' => 'https://example.test', 'title' => 'Read more', 'target' => '_blank' ), $job['default_locale'], 'link' );
 $link_model = $acf_class::model_id( 'link', 'field_probe_link' );
@@ -690,6 +699,9 @@ if ( $has_acf ) {
 	check( 'relation' === $job['models']['wp-page']['fields']['acf_cta_link']['type'] && $link_model === $job['models']['wp-page']['fields']['acf_cta_link']['model'], 'link becomes its own model' );
 	$link_row = json_decode( Files::read( $dir, Models::content_path( $job, $link_model, $job['default_locale'] ) ), true )[ $page_entry['acf_cta_link'] ];
 	check( 'https://example.test/read-more' === $link_row['url'] && 'Read more' === $link_row['title'] && '_blank' === $link_row['target'], 'a link keeps its label and target alongside the URL' );
+	check( 'url' === $job['models']['wp-page']['fields']['acf_landing']['type'] && get_permalink( $post ) === $page_entry['acf_landing'], 'a page_link becomes the linked post\'s address, not its ID' );
+	check( ! isset( $page_entry['acf_landing_draft'] ), 'a page_link to a draft is left out: its address is not public' );
+	check( in_array( 'acf-page-link-target-not-public', array_column( json_decode( Files::read( $dir, 'bridge/warnings.json' ), true ), 'reason' ), true ), 'and the export says so' );
 	$sections_model = \Contentrain\Bridge\Acf::model_id( 'sections', 'field_bridge_sections' );
 	check( 'relations' === $job['models']['wp-page']['fields']['acf_sections']['type'] && $sections_model === $job['models']['wp-page']['fields']['acf_sections']['model'], 'flexible_content becomes its own collection' );
 	$sections = json_decode( Files::read( $dir, Models::content_path( $job, $sections_model, $job['default_locale'] ) ), true );
