@@ -51,7 +51,11 @@ final class Jobs {
 		Models::file( $job, 'bridge/routing.json', Policy::json( Routing::document() ) );
 		Models::model( $job, 'site', 'singleton', 'site', 'Site', array( 'title' => array( 'type' => 'string' ), 'description' => array( 'type' => 'text' ), 'source_url' => array( 'type' => 'url' ) ), 'title', false );
 		Models::entry( $job, 'site', $locale, '', array( 'title' => $site['title'], 'description' => $site['description'], 'source_url' => $site['url'] ) );
-		$menus = Exporter::menus();
+		$dropped_links = 0;
+		$menus = Exporter::menus( $dropped_links );
+		if ( $dropped_links ) {
+			self::warning( $job, array( 'source' => 'menus', 'reason' => 'menu-link-target-not-public: ' . $dropped_links . ' block navigation link(s) left out' ) );
+		}
 		Models::file( $job, 'bridge/raw-menus.json', Policy::json( $menus ) );
 		Models::menus( $job, $menus, $inventory['menu_locations'] );
 		foreach ( $menus as $menu ) {

@@ -383,10 +383,13 @@ final class Models {
 			'parent' => array( 'type' => 'relation', 'model' => 'wp-menu-items' ),
 		), 'title', false );
 		foreach ( $menus as $menu ) {
-			$menu_locations = array();
-			foreach ( (array) $locations as $slug => $assigned ) {
-				if ( (int) $assigned === (int) $menu['id'] ) {
-					$menu_locations[] = $slug;
+			// Exporter::menus() names each menu's locations (classic theme locations, block template-part areas).
+			$menu_locations = $menu['locations'] ?? array();
+			if ( ! isset( $menu['locations'] ) ) {
+				foreach ( (array) $locations as $slug => $assigned ) {
+					if ( (int) $assigned === (int) $menu['id'] ) {
+						$menu_locations[] = $slug;
+					}
 				}
 			}
 			foreach ( $menu['items'] as $item ) {
