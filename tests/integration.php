@@ -602,8 +602,8 @@ $tt5_navs = array(
 );
 $block_menus = \Contentrain\Bridge\Menus::from_blocks( $tt5_templates, $tt5_parts, $tt5_navs, array( 'navigation' ), array( \Contentrain\Bridge\Menus::class, 'target' ) );
 $by_slug = array_column( $block_menus['menus'], null, 'slug' );
-check( array( 'navigation-2', 'old-nav', 'utility', 'footer-navigation-1', 'footer-navigation-2' ) === array_column( $block_menus['menus'], 'slug' ), 'block menus: wp_navigation posts, then inline navigation by area; slugs unique against classic menus: ' . implode( ',', array_column( $block_menus['menus'], 'slug' ) ) );
-check( array( 'header' ) === ( $by_slug['navigation-2']['locations'] ?? null ) && ! isset( $by_slug['old-nav']['locations'] ), 'a ref gives its navigation the part\'s area; an unreferenced one has no location' );
+check( array( 'navigation-nav', 'old-nav', 'utility', 'footer-navigation-1', 'footer-navigation-2' ) === array_column( $block_menus['menus'], 'slug' ), 'block menus: wp_navigation posts, then inline navigation by area; slugs unique against classic menus: ' . implode( ',', array_column( $block_menus['menus'], 'slug' ) ) );
+check( array( 'header' ) === ( $by_slug['navigation-nav']['locations'] ?? null ) && ! isset( $by_slug['old-nav']['locations'] ), 'a ref gives its navigation the part\'s area; an unreferenced one has no location' );
 check( array( 'header' ) === $by_slug['utility']['locations'] && 'Utility' === $by_slug['utility']['name'], 'a part used inside a used part is opened in place (its area is the outer part\'s), and an aria label names its navigation' );
 $looped = array( array( 'slug' => 'header', 'area' => 'header', 'content' => '<!-- wp:template-part {"slug":"header"} /--><!-- wp:navigation -->' . $nav_link( 'Once', 'https://example.test/once' ) . '<!-- /wp:navigation -->' ) );
 check( 1 === count( \Contentrain\Bridge\Menus::from_blocks( array(), $looped, array(), array(), array( \Contentrain\Bridge\Menus::class, 'target' ) )['menus'] ), 'a part naming itself is opened once' );
@@ -611,7 +611,7 @@ check( 'Footer navigation 1' === $by_slug['footer-navigation-1']['name'] && arra
 check( array( 'Blog' ) === array_column( $by_slug['footer-navigation-1']['items'], 'title' ) && 1 === $block_menus['dropped'], 'a link to a draft is left out and counted' );
 check( '#' === $by_slug['footer-navigation-2']['items'][1]['url'], 'a placeholder # link stays #' );
 check( ! in_array( 'Never shown', array_merge( ...array_map( static function ( $m ) { return array_column( $m['items'], 'title' ); }, $block_menus['menus'] ) ), true ), 'an unused template part (footer-columns) gives no menu' );
-$nav_items = $by_slug['navigation-2']['items'];
+$nav_items = $by_slug['navigation-nav']['items'];
 check( array( 'About', 'More', 'Team' ) === array_column( $nav_items, 'title' ) && $nav_items[1]['id'] === $nav_items[2]['parent'] && $nav_items[0]['id'] < 0, 'block items keep order and nesting, with negative ids' );
 check( 'post' === $nav_items[0]['target']['kind'] && $page === $nav_items[0]['target']['id'] && get_permalink( $page ) === $nav_items[0]['url'], 'a post link is a post target with its public address' );
 // A hand-typed ?page_id= link on this site is checked like a post link; another site's is a plain URL.
@@ -628,6 +628,8 @@ check( true === $elsewhere_public && 'url' === $elsewhere['kind'], 'another site
 $fallback = \Contentrain\Bridge\Menus::locations( array( array( 'slug' => 'header', 'area' => 'header', 'content' => '<!-- wp:navigation /-->' ) ), $tt5_navs );
 check( array( 501 => array( 'header' ) ) === $fallback, 'an empty navigation block shows the most recent published navigation' );
 check( array( 'header', 'footer' ) === array_column( \Contentrain\Bridge\Menus::used_parts( array(), $tt5_parts ), 'slug' ), 'without templates, the parts named after their area count' );
+// The same rules as @contentrain/wp-import, case by case (tests/fixtures/menu-parity.json).
+require __DIR__ . '/menu-parity.php';
 
 Files::remove( Files::dir( $probe['id'] ) );
 
