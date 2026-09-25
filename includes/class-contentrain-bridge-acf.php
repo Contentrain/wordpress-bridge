@@ -498,6 +498,9 @@ final class Acf {
 				return self::row( $job, $field['sub_fields'] ?? array(), $definition['fields'], $raw, $source );
 			case 'array':
 				if ( 'repeater' === $type || 'flexible_content' === $type ) {
+					if ( ! is_array( $raw ) && ! $raw ) {
+						return null; // An unformatted list with no rows is stored as its row count: 0.
+					}
 					if ( ! is_array( $raw ) ) {
 						throw new \UnexpectedValueException( $source ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Internal control flow, never shown.
 					}
