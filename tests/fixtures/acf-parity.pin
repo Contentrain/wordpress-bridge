@@ -1,0 +1,2 @@
+Contentrain/ai packages/wp-import/src/fixtures/acf-parity.json @ 01c0065b29054a71cdd05551f763dd4274c3880e
+# Copied unchanged. Re-copy from the merged main commit when wp-import changes the table; tests/acf-parity.php runs every case through Acf::field.
