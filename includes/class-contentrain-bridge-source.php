@@ -170,7 +170,7 @@ final class Source {
 		if ( $acf ) {
 			$raw['acf'] = $acf;
 		}
-		return array( 'raw' => $raw, 'acf_schema' => Policy::clean( $schema, $excluded, 'acf-schema/' . $post->ID ), 'address' => self::address( $post ), 'translations' => self::translations( $post ) );
+		return array( 'raw' => $raw, 'acf_schema' => Policy::clean( $schema, $excluded, 'acf-schema/' . $post->ID, 0, true ), 'address' => self::address( $post ), 'translations' => self::translations( $post ) );
 	}
 
 	/** ACF/SCF field objects for a real post: every field group whose location rule matches it, exactly what `get_field_objects()` already scopes correctly for a single, ordinary post. */

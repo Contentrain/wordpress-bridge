@@ -453,7 +453,8 @@ final class Models {
 		foreach ( $excluded as $warning ) {
 			Jobs::warning( $job, $warning );
 		}
-		$schema = Policy::clean( $schema, $excluded, 'acf-options-schema/' . $slug );
+		// Keyed by field name, like the values: judged by `secret_name()`, or `contact_email` would lose its schema.
+		$schema = Policy::clean( $schema, $excluded, 'acf-options-schema/' . $slug, 0, true );
 		$mid = 'acf-options-' . $slug;
 		$fields = array( 'page_title' => array( 'type' => 'string', 'required' => true ) );
 		$data = array( 'page_title' => $page['page_title'] ?: $page['menu_slug'] ?: $slug );
