@@ -32,7 +32,6 @@ final class Policy {
 		return (bool) preg_match( '/pass(word|wd)?|secret|token|credential|api[_-]?key|private[_-]?key|authorization|cookie|session|email|webhook|hook_url|(^|_)ip($|_)|user_agent/i', $key );
 	}
 
-	/** Never export secrets nested inside selected fields either. */
 	/**
 	 * Nesting a builder tree may reach: Elementor spends about two levels per container step
 	 * (`elements` → index) plus repeaters inside widget settings, so twelve cut a widget five
@@ -40,7 +39,26 @@ final class Policy {
 	 */
 	const BUILDER_DEPTH = 64;
 
-	public static function clean( $value, &$excluded, $path = '', $depth = 0, $max_depth = 12 ) {
+	/**
+	 * A name that only a secret carries. For an ACF field the type says what it
+	 * holds — `password` is never content — and a field the site owner built as
+	 * `contact_email` or `office_ip` is content they publish, so the broad
+	 * `sensitive()` name rule (built for unknown post meta) does not apply to it;
+	 * a field or sub-field named like a credential still never leaves.
+	 */
+	public static function secret_name( $key ) {
+		// Word-bounded, the same rule as @contentrain/wp-import's ACF reader: `user_pass`,
+		// `apiKey`, `access_token` are secrets; `passage`, `session_title`, `cookie_recipe` are content.
+		$words = str_replace( '-', '_', preg_replace( '/([a-z0-9])([A-Z])/', '$1_$2', (string) $key ) );
+		return (bool) preg_match( '/(?:^|_)(?:pass(?:word|wd)?|secret|token|api_?key|private_?key|credentials?)(?:_|$)/i', $words );
+	}
+
+	/**
+	 * Never export secrets nested inside selected fields either. `$field_names`
+	 * marks the keys as ACF sub-field names, judged by `secret_name()`; `$max_depth`
+	 * is twelve except for builder data (`BUILDER_DEPTH`).
+	 */
+	public static function clean( $value, &$excluded, $path = '', $depth = 0, $field_names = false, $max_depth = 12 ) {
 		if ( $depth > $max_depth || is_object( $value ) || is_resource( $value ) ) {
 			$excluded[] = array( 'source' => $path, 'reason' => 'unsupported-value' );
 			return null;
@@ -49,11 +67,11 @@ final class Policy {
 			$out = array();
 			foreach ( $value as $key => $item ) {
 				$child = $path . '/' . $key;
-				if ( self::sensitive( (string) $key ) ) {
+				if ( $field_names ? self::secret_name( (string) $key ) : self::sensitive( (string) $key ) ) {
 					$excluded[] = array( 'source' => $child, 'reason' => 'sensitive-key' );
 					continue;
 				}
-				$out[ $key ] = self::clean( $item, $excluded, $child, $depth + 1, $max_depth );
+				$out[ $key ] = self::clean( $item, $excluded, $child, $depth + 1, $field_names, $max_depth );
 			}
 			return $out;
 		}
@@ -94,7 +112,7 @@ final class Policy {
 					continue;
 				}
 			}
-			$out[ $key ] = self::clean( $value, $excluded, $prefix . '/' . $key, 0, $builder ? self::BUILDER_DEPTH : 12 );
+			$out[ $key ] = self::clean( $value, $excluded, $prefix . '/' . $key, 0, false, $builder ? self::BUILDER_DEPTH : 12 );
 		}
 		return $out;
 	}
