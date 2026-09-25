@@ -272,9 +272,17 @@ list is shown on the Bridge screen and reaches Migrate's intake as an
 
 ACF shapes that cannot be fully represented use a reported structured fallback;
 partial named models are not accepted. Same-name groups use a stable field-key
-suffix. Nested sensitive ACF values are removed before RawIR is written. Advanced
-builder runtime, widget/theme settings extraction, rendered-state coverage and
-source-code reuse are not yet complete.
+suffix. Nested sensitive ACF values are removed before RawIR is written.
+
+Page-builder layout is exported as data, not rendered: Elementor's element tree
+(`_elementor_data`, decoded) and page settings, Divi's builder switches, the raw
+Gutenberg/Divi body, and in `options` the site's design system — the active
+theme, block-theme global settings and styles, block templates and template
+parts, the Elementor kit and Divi's theme options. Keys that look like secrets
+are removed at every depth (a form widget's recipient, an integration's API
+key), and a password-protected post carries no builder tree. Builder runtime
+(widget PHP, dynamic tags), rendered-state coverage and source-code reuse are
+not yet complete.
 
 Every manifest carries `complete_source_coverage: false`. That flag is the
 honest answer to "is this everything?", and it is set on every export rather

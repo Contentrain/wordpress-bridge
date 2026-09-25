@@ -100,6 +100,9 @@ jobs:
       # @contentrain/types. It decides whether escape-bearing metadata survives,
       # so a reader regression fails here rather than in a customer's store.
       - run: npm run test:reader
+      # Page-builder layout meta and the design system (global settings, Elementor kit, Divi options,
+      # block templates) reach RawIR; secrets inside them and protected posts' trees do not.
+      - run: npm run test:builder
       - run: npm test
       - name: WordPress uninstall cleanup
         run: docker compose -f tests/compose.yml run --rm -T cli eval-file /var/www/html/wp-content/plugins/contentrain-bridge/tests/uninstall.php
