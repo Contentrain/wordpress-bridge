@@ -461,10 +461,10 @@ final class Models {
 		foreach ( $raw as $key => $acf ) {
 			$name = 'acf_' . str_replace( '-', '_', sanitize_key( $key ) );
 			$source = 'acf-options/' . $slug . '/' . $key;
-			// An Options Page's own singleton is `i18n: false` (see below); a
-			// repeater/group/flexible_content field belonging to it must create
-			// its own collection model the same way, or the validator demands a
-			// same-language copy this export never writes for it either.
+			// An Options Page's own singleton is JSON, so structured ACF fields are
+			// written in place (`$inline`). `i18n: false` still reaches any model a
+			// field creates (a reference fallback), or the validator demands a
+			// same-language copy this export never writes for it.
 			$modelled = isset( $schema[ $key ] ) ? Acf::field( $job, $schema[ $key ], $acf['value'], $job['default_locale'], $source, false, true ) : null;
 			if ( null === $modelled ) {
 				Jobs::warning( $job, array( 'source' => $source, 'reason' => 'acf-shape-not-modelled: exported as structured values' ) );

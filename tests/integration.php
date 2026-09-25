@@ -369,11 +369,9 @@ if ( $has_polylang ) {
 			array( 'acf_fc_layout' => 'quote_block', 'heading' => 'Ros', 'quote' => 'Det virker bare.' ),
 		), $page_da );
 	}
-	// A group-display clone becomes its own nested collection model (like a
-	// native `group` field), so it carries the same cross-locale requirement:
-	// a translated page needs its own entry, not a same-language gap. The
-	// seamless clone above needs no mirror — its fields flatten onto the page
-	// document itself, where an unset scalar is not a parity error.
+	// A group-display clone is an object on the page, like a native `group`
+	// field; the translated page carries its own copy. The seamless clone
+	// above needs no mirror — its fields flatten onto the page itself.
 	if ( $has_scf_pro ) {
 		update_field( 'field_bridge_clone_group', array( 'note' => 'Grupperet note', 'priority' => 5 ), $page_da );
 	}
