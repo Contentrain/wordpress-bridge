@@ -263,6 +263,11 @@ final class Menus {
 		);
 	}
 
+	/** A host without case or a leading `www.`: example.com and www.example.com are one site. */
+	private static function bare_host( $host ) {
+		return preg_replace( '/^www\./', '', strtolower( $host ) );
+	}
+
 	/** The post id a same-site `?page_id=N` / `?p=N` address names, or 0. */
 	public static function query_post_id( $url ) {
 		$parts = wp_parse_url( $url );
@@ -270,7 +275,7 @@ final class Menus {
 			return 0;
 		}
 		$home = wp_parse_url( home_url( '/' ) );
-		if ( isset( $parts['host'] ) && strtolower( $parts['host'] ) !== strtolower( (string) ( $home['host'] ?? '' ) ) ) {
+		if ( isset( $parts['host'] ) && self::bare_host( $parts['host'] ) !== self::bare_host( (string) ( $home['host'] ?? '' ) ) ) {
 			return 0;
 		}
 		parse_str( $parts['query'], $query );
