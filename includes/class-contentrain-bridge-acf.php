@@ -66,11 +66,15 @@ final class Acf {
 			$options = array_values( array_map( 'strval', array_keys( (array) ( $field['choices'] ?? array() ) ) ) );
 			return $options ? array( 'type' => 'select', 'options' => $options ) : array( 'type' => 'string' );
 		}
+		if ( 'page_link' === $type && ! empty( $field['multiple'] ) ) {
+			return null; // Several addresses are not one URL; keep them through the structured fallback.
+		}
 		if ( ! isset( self::SCALARS[ $type ] ) ) {
 			return null;
 		}
 		$definition = array( 'type' => self::SCALARS[ $type ] );
-		if ( ! empty( $field['required'] ) ) {
+		// A page_link's target can be unpublished at export time; its value is then left out, so it cannot be required.
+		if ( ! empty( $field['required'] ) && 'page_link' !== $type ) {
 			$definition['required'] = true;
 		}
 		return $definition;
@@ -106,11 +110,34 @@ final class Acf {
 			case 'url':
 				if ( is_array( $value ) ) {
 					$value = $value['url'] ?? null;
+				} elseif ( is_numeric( $value ) ) {
+					// Only a page_link stores a number in a URL field: the linked post's ID.
+					$value = self::page_address( (int) $value );
 				}
 				return is_string( $value ) && '' !== $value ? $value : null;
 			default:
 				return is_scalar( $value ) ? (string) $value : null;
 		}
+	}
+
+	/**
+	 * A page_link's post ID → that post's public address. A draft, private,
+	 * password-protected or trashed target has no public address to give, and
+	 * resolving it would leak one; it stays unresolved (see `unresolved_page_link()`).
+	 */
+	private static function page_address( $post_id ) {
+		$post = get_post( $post_id );
+		if ( ! $post || $post->post_password || ! in_array( $post->post_status, array( 'publish', 'inherit' ), true ) ) {
+			return null;
+		}
+		// An attachment inherits its parent's status, and its address carries the parent's slug.
+		if ( 'inherit' === $post->post_status && $post->post_parent ) {
+			$parent = get_post( $post->post_parent );
+			if ( ! $parent || $parent->post_password || 'publish' !== $parent->post_status ) {
+				return null;
+			}
+		}
+		return get_permalink( $post ) ?: null;
 	}
 
 	/**
@@ -230,7 +257,7 @@ final class Acf {
 					$cast = self::cast( $definition, $raw );
 					if ( null !== $cast ) {
 						$data[ $key ] = $cast;
-					} elseif ( null !== $raw && '' !== $raw ) {
+					} elseif ( null !== $raw && '' !== $raw && ! self::unresolved_page_link( $job, $definition, $raw, $source . '/' . $index . '/' . $key ) ) {
 						return null; // Never silently drop a non-empty value during conversion.
 					}
 				}
@@ -264,7 +291,24 @@ final class Acf {
 			return null;
 		}
 		$cast = self::cast( $definition, $value );
+		if ( null === $cast && self::unresolved_page_link( $job, $definition, $value, $source ) ) {
+			return array( null, null );
+		}
 		return null === $cast ? ( null === $value || '' === $value ? array( null, null ) : null ) : array( $definition, $cast );
+	}
+
+	/**
+	 * A page_link (a post ID in a URL field) whose target has no public address.
+	 * Its value is left out with a warning instead of the field falling back:
+	 * a fallback would give the same field a different type in another entry,
+	 * and a model with inconsistent field types fails the whole export.
+	 */
+	private static function unresolved_page_link( &$job, $definition, $raw, $source ) {
+		if ( 'url' !== $definition['type'] || ! is_numeric( $raw ) ) {
+			return false;
+		}
+		Jobs::warning( $job, array( 'source' => $source, 'reason' => 'acf-page-link-target-not-public' ) );
+		return true;
 	}
 
 	/**
@@ -420,7 +464,7 @@ final class Acf {
 				$cast = self::cast( $definition, $raw );
 				if ( null !== $cast ) {
 					$data[ $key ] = $cast;
-				} elseif ( null !== $raw && '' !== $raw ) {
+				} elseif ( null !== $raw && '' !== $raw && ! self::unresolved_page_link( $job, $definition, $raw, $source . '/' . $index . '/' . $key ) ) {
 					return null;
 				}
 			}
