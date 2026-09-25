@@ -364,6 +364,8 @@ if ( $has_polylang ) {
 		update_field( 'gallery', array( $attachment, $ghost ), $page_da );
 		update_field( 'field_bridge_person', $admin->ID, $page_da );
 		update_field( 'cta_link', array( 'title' => 'Læs mere', 'url' => 'https://example.test/read-more', 'target' => '_blank' ), $page_da );
+		// Its three-deep group falls back to structured values, which the store expects in every locale.
+		update_field( 'deep', array( 'inner' => array( 'innermost' => array( 'text' => 'Tre niveauer nede' ) ) ), $page_da );
 		update_field( 'sections', array(
 			array( 'acf_fc_layout' => 'text_block', 'heading' => 'Intro', 'body' => 'Velkomst' ),
 			array( 'acf_fc_layout' => 'quote_block', 'heading' => 'Ros', 'quote' => 'Det virker bare.' ),
