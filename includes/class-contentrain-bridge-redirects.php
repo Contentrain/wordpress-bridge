@@ -84,7 +84,12 @@ final class Redirects {
 				self::exclude( $doc, $rule, 'not-a-redirect:' . $row['action_type'] );
 			} elseif ( 'url' !== $row['match_type'] ) {
 				// Login, referrer, agent, cookie, header, IP, server…: the target depends on the request.
-				$rule['condition'] = self::decode( $row['action_data'] );
+				// Only a login rule's condition is its two targets; every other one (cookie, header, IP,
+				// role, agent, server…) holds the values it matches, which may be secrets: its type is the reason.
+				if ( 'login' === $row['match_type'] ) {
+					$data = self::decode( $row['action_data'] );
+					$rule['condition'] = array_intersect_key( is_array( $data ) ? $data : array(), array_flip( array( 'logged_in', 'logged_out' ) ) );
+				}
 				$rule['status'] = (int) $row['action_code'];
 				self::exclude( $doc, $rule, 'conditional-match:' . $row['match_type'] );
 			} else {
@@ -305,7 +310,8 @@ final class Redirects {
 				$rule += self::alias_rule( $directive, array_slice( $words, 1 ) );
 			}
 			if ( $pending || $blocks ) {
-				$rule['condition'] = array_merge( $blocks, $pending );
+				// What the rule depends on, by type only: a cookie's, header's or address's value stays out.
+				$rule['condition'] = array_values( array_unique( array_map( array( self::class, 'condition_type' ), array_merge( $blocks, $pending ) ) ) );
 				if ( isset( $rule['status_code'] ) ) {
 					$rule['status'] = $rule['status_code'];
 					$rule['to'] = $rule['target'];
@@ -390,6 +396,48 @@ final class Redirects {
 			return $rule + array( 'excluded' => 'not-a-redirect:status-' . $status );
 		}
 		return $rule + array( 'status_code' => $status, 'target' => $target );
+	}
+
+	/**
+	 * The kind of request data a `RewriteCond` or `<If>`/`<Files>` line tests
+	 * (`cookie`, `header`, `ip`, `host`…), never the value it compares with.
+	 */
+	private static function condition_type( $line ) {
+		if ( preg_match( '#^<(Files|FilesMatch)\b#i', $line ) ) {
+			return 'file';
+		}
+		if ( ! preg_match( '/%\{([^}]+)\}/', $line, $m ) ) {
+			return 'other';
+		}
+		$var = strtoupper( $m[1] );
+		$types = array(
+			'HTTP_COOKIE' => 'cookie',
+			'REMOTE_ADDR' => 'ip',
+			'REMOTE_HOST' => 'ip',
+			'HTTP_HOST' => 'host',
+			'SERVER_NAME' => 'host',
+			'QUERY_STRING' => 'query',
+			'REQUEST_URI' => 'path',
+			'REQUEST_FILENAME' => 'path',
+			'SCRIPT_FILENAME' => 'path',
+			'HTTPS' => 'scheme',
+			'REQUEST_SCHEME' => 'scheme',
+			'SERVER_PORT' => 'scheme',
+			'HTTP_USER_AGENT' => 'agent',
+			'HTTP_REFERER' => 'referrer',
+			'REQUEST_METHOD' => 'method',
+			'REMOTE_USER' => 'user',
+		);
+		if ( isset( $types[ $var ] ) ) {
+			return $types[ $var ];
+		}
+		if ( 0 === strpos( $var, 'HTTP:' ) || 0 === strpos( $var, 'HTTP_' ) ) {
+			return 'header';
+		}
+		if ( 0 === strpos( $var, 'TIME' ) ) {
+			return 'time';
+		}
+		return 'other';
 	}
 
 	/** A directive's words; double quotes group, as Apache reads them. */
