@@ -9,6 +9,10 @@ if ( 'local' !== wp_get_environment_type() || 'Bridge Acceptance' !== get_option
 }
 require_once WP_PLUGIN_DIR . '/contentrain-bridge/contentrain-bridge.php';
 use Contentrain\Bridge\Exporter;
+use Contentrain\Bridge\Files;
+use Contentrain\Bridge\Jobs;
+use Contentrain\Bridge\Models;
+use Contentrain\Bridge\Source;
 
 $checks = 0;
 function check( $value, $message ) {
@@ -36,6 +40,17 @@ for ( $i = 0; $i < 6; $i++ ) {
 	$deep = array( 'id' => 'c' . $i, 'elType' => 'container', 'settings' => array(), 'elements' => array( $deep ) );
 }
 $tree[] = $deep;
+// A golden Elementor page nests far deeper than content modelling goes: twelve containers.
+$golden = array( 'id' => 'g12', 'elType' => 'widget', 'widgetType' => 'heading', 'settings' => array( 'title' => 'Golden deep' ), 'elements' => array() );
+for ( $i = 0; $i < 12; $i++ ) {
+	$golden = array( 'id' => 'gc' . $i, 'elType' => 'container', 'settings' => array(), 'elements' => array( $golden ) );
+}
+$tree[] = $golden;
+// Selected, non-builder meta twelve arrays deep: past the modelling depth (the array at depth eleven).
+$deep_meta = 'bottom';
+for ( $i = 11; $i >= 0; $i-- ) {
+	$deep_meta = array( 'l' . $i => $deep_meta );
+}
 $created = array();
 $open = wp_insert_post( array( 'post_type' => 'page', 'post_title' => 'Builder page', 'post_content' => '<h1>Welcome</h1>', 'post_status' => 'publish' ) );
 $locked = wp_insert_post( array( 'post_type' => 'page', 'post_title' => 'Builder locked', 'post_content' => '<p>Members</p>', 'post_status' => 'publish', 'post_password' => 'let-me-in' ) );
@@ -48,6 +63,7 @@ foreach ( array( $open, $locked ) as $id ) {
 	update_post_meta( $id, '_elementor_page_settings', array( 'hide_title' => 'yes' ) );
 }
 update_post_meta( $divi, '_et_pb_use_builder', 'on' );
+update_post_meta( $divi, 'bridge_deep_meta', $deep_meta );
 update_post_meta( $divi, '_et_pb_old_content', '<p>Before Divi</p>' );
 update_post_meta( $kit, '_elementor_page_settings', array( 'system_colors' => array( array( '_id' => 'primary', 'title' => 'Primary', 'color' => '#6EC1E4' ) ), 'container_width' => array( 'size' => 1140 ), 'recaptcha_secret_key' => 'shh' ) );
 $previous_kit  = get_option( 'elementor_active_kit' );
@@ -93,6 +109,54 @@ try {
 	} else {
 		check( ! isset( $options['block_templates'] ), 'no block templates for a classic theme' );
 	}
+	// A full export: builder meta stays raw evidence, never content fields; too-deep content is kept as JSON text.
+	$admin = get_user_by( 'login', 'bridge-admin' );
+	wp_set_current_user( $admin->ID );
+	$previous_job = get_user_meta( $admin->ID, 'contentrain_bridge_job_1', true );
+	delete_user_meta( $admin->ID, 'contentrain_bridge_job_1' );
+	$export = null;
+	try {
+		$s = Jobs::create( array( 'types' => array( 'page' ), 'private' => false, 'scan_sources' => false, 'selected_meta' => array( 'bridge_deep_meta' ) ) );
+		$export = $s['id'];
+		for ( $i = 0; $i < 500 && ! in_array( $s['phase'], array( 'review', 'failed' ), true ); ++$i ) { $s = Jobs::step( $export, $s['step'] ); }
+		check( 'review' === $s['phase'], 'a page with a twelve-container Elementor tree exports without error' );
+		$job = Jobs::read( $export );
+		$address = Source::address( get_post( $open ) );
+		$page_fields = $job['models'][ $address['model_id'] ]['fields'];
+		$builder_fields = array_filter( array_keys( $page_fields ), static function ( $f ) { return 0 === strpos( $f, 'meta_elementor_' ) || 0 === strpos( $f, 'meta_et_pb_' ); } );
+		check( ! $builder_fields, 'builder meta is not modelled as content fields (wp-import parity)' );
+		$raw_open = json_decode( Files::read( Files::dir( $export ), Models::row_file( 'bridge/raw-posts.json', $open ) ), true );
+		$node = $raw_open['meta']['_elementor_data'][2] ?? array();
+		for ( $i = 0; $i < 12; $i++ ) {
+			$node = $node['elements'][0] ?? array();
+		}
+		check( 'Golden deep' === ( $node['settings']['title'] ?? '' ), 'the whole Elementor tree still travels in raw-posts' );
+		$raw_divi = json_decode( Files::read( Files::dir( $export ), Models::row_file( 'bridge/raw-posts.json', $divi ) ), true );
+		check( 'on' === ( $raw_divi['meta']['_et_pb_use_builder'] ?? '' ), 'Divi builder switch stays in raw-posts' );
+		$divi_address = Source::address( get_post( $divi ) );
+		$source = $divi_address['model_id'] . '/' . $divi_address['entry_id'] . '/bridge_deep_meta';
+		check( 'wp-structured-values' === ( $page_fields['meta_bridge_deep_meta']['model'] ?? null ), 'deep non-builder meta is still modelled as structured values' );
+		$path = $source;
+		for ( $i = 0; $i <= 10; $i++ ) {
+			$path .= '/l' . $i;
+		}
+		$row = json_decode( Files::read( Files::dir( $export ), Models::row_file( Models::content_path( $job, 'wp-structured-values', $divi_address['locale'] ), substr( hash( 'sha256', $path ), 0, 12 ) ) ), true );
+		check( '{"l11":"bottom"}' === ( $row['text'] ?? null ), 'past the modelling depth the subtree is kept as JSON text' );
+		$warnings = array();
+		foreach ( array_keys( $job['tables']['bridge/warnings.json'] ?? array() ) as $key ) {
+			$warnings[] = json_decode( Files::read( Files::dir( $export ), Models::row_file( 'bridge/warnings.json', $key ) ), true );
+		}
+		$gap = array_filter( $warnings, static function ( $w ) use ( $path ) { return $path === ( $w['source'] ?? '' ) && 'nesting-too-deep: kept as JSON text' === ( $w['reason'] ?? '' ); } );
+		check( 1 === count( $gap ), 'and the gap is reported as a warning' );
+	} finally {
+		if ( $export ) {
+			Jobs::delete( $export );
+		}
+		if ( $previous_job ) {
+			update_user_meta( $admin->ID, 'contentrain_bridge_job_1', $previous_job );
+		}
+	}
+
 	$json = wp_json_encode( $options ) . wp_json_encode( Exporter::map_post( get_post( $open ) ) );
 	$planted = array( 'planted-key', 'abc123-us1', 'owner@example.test', 'let-me-in', 'planted-zap', 'planted-discord', 'planted-slack' );
 	check( array() === array_filter( $planted, static function ( $p ) use ( $json ) { return false !== strpos( $json, $p ); } ), 'no planted secret anywhere in the output' );
