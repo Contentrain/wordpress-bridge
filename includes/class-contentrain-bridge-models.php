@@ -473,6 +473,9 @@ final class Models {
 	 * title field regardless of what those configured fields are named; ACF
 	 * fields are prefixed the same way a post's own are, so a field legitimately
 	 * named `page_title` cannot collide with it.
+	 *
+	 * Returns the page as RawIR carries it (`RawAcfOptionsPage`): the same
+	 * secret-filtered values, keyed by field name, for the REST-path conversion.
 	 */
 	public static function options_page( &$job, $page ) {
 		$post_id = $page['post_id'] ?: 'options';
@@ -522,6 +525,7 @@ final class Models {
 		} elseif ( defined( 'BEA_ACF_OPTIONS_FOR_POLYLANG_VERSION' ) ) {
 			Jobs::warning( $job, array( 'source' => 'acf-options/' . $slug, 'reason' => 'acf-options-translation-plugin-detected: ACF Options for Polylang can translate this Options Page; only its default-language values are exported' ) );
 		}
+		return array( 'slug' => $slug, 'title' => $page['page_title'] ?: $page['menu_slug'] ?: $slug, 'post_id' => (string) $post_id, 'fields' => (object) $raw );
 	}
 
 	/** Check short writes so disk exhaustion cannot produce a successful truncated table. */

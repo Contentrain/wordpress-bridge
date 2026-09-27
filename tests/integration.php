@@ -930,6 +930,16 @@ if ( $has_scf_pro ) {
 	$locale_options_id = 'acf-options-bridge-locale-options';
 	$locale_entry = json_decode( Files::read( $dir, Models::content_path( $job, $locale_options_id, $job['default_locale'] ) ), true );
 	check( 'Default language value' === $locale_entry['acf_locale_note'], 'an Options Page with a detected per-language copy still exports only its default-language value' );
+
+	// RawIR carries every Options Page too (`acf_options`), for the REST-path conversion: the same values, keyed by
+	// field name like a post's `acf`, each page with its own fields only.
+	$raw_options = array_column( json_decode( Files::read( $dir, 'bridge/acf-options.json' ), true ), null, 'slug' );
+	check( array( 'bridge-footer', 'bridge-header', 'bridge-locale-options', 'bridge-options' ) === array_values( array_intersect( array( 'bridge-footer', 'bridge-header', 'bridge-locale-options', 'bridge-options' ), array_keys( $raw_options ) ) ), 'RawIR acf_options carries every Options Page' );
+	$raw_site_options = $raw_options['bridge-options'] ?? array();
+	check( 'Bridge Options' === ( $raw_site_options['title'] ?? null ) && 'options' === ( $raw_site_options['post_id'] ?? null ), 'an Options Page in RawIR keeps its title and storage post_id' );
+	check( 'Owns its content' === ( $raw_site_options['fields']['site_wide_tagline']['value'] ?? null ) && 'field_bridge_opt_tagline' === ( $raw_site_options['fields']['site_wide_tagline']['field_key'] ?? null ) && 'text' === ( $raw_site_options['fields']['site_wide_tagline']['type'] ?? null ), 'an Options Page field in RawIR has its value, field key and type' );
+	check( 2 === count( $raw_site_options['fields']['social_links']['value'] ?? array() ), 'a repeater on an Options Page keeps its rows in RawIR' );
+	check( array( 'header_text' ) === array_keys( $raw_options['bridge-header']['fields'] ?? array() ) && 'bridge_locale_options' === ( $raw_options['bridge-locale-options']['post_id'] ?? null ), 'each Options Page in RawIR carries only its own fields, and a custom post_id as set' );
 }
 
 if ( $has_polylang ) {

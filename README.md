@@ -86,6 +86,12 @@ this adapter builds from the raw files, so its reader needs no assembler of its
 own. The admin screen's export, its ZIP and GitHub delivery never carry it: the
 site's repository holds the store, not a raw copy of every record.
 
+ACF Options Pages reach RawIR as `acf_options` (from `bridge/acf-options.json`):
+each page's slug, title, storage `post_id` and fields — the same
+secret-filtered, default-language values its own `acf-options-*` singleton
+holds, keyed by field name like a post's `acf`, with each field's ACF type and
+label.
+
 ## REST export API (for Migrate)
 
 An administrator's application password is enough to start, advance and read an
