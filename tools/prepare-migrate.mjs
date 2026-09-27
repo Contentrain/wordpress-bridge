@@ -50,6 +50,9 @@ export function prepareMigrate(source, destination) {
   if (seo) raw.seo = { ...seo, entries: json('bridge/seo-entries.json', {}) }
   const routing = json('bridge/routing.json', null)
   if (routing) raw.routing = routing
+  // RawAcfOptionsPage[]: each ACF Options Page's site-wide fields, default language only.
+  const acfOptions = json('bridge/acf-options.json', null)
+  if (acfOptions) raw.acf_options = acfOptions
   // B-08: every interface-text candidate with its one outcome; not yet a RawIR field (proposed).
   // B-07: services to reconnect; not yet a RawIR field (proposed).
   const integrations = json('bridge/integrations.json', null)

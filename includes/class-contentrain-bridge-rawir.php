@@ -52,6 +52,11 @@ final class Rawir {
 			$field( 'language_pairs' );
 			self::rows( $stream, $job, 'bridge/language-pairs.json', false );
 			$field( 'options', $file( 'bridge/options.json' ) ?? '{}' );
+			// RawAcfOptionsPage[]: each ACF Options Page's site-wide fields, default language only.
+			$acf_options = $file( 'bridge/acf-options.json' );
+			if ( null !== $acf_options ) {
+				$field( 'acf_options', $acf_options );
+			}
 			// RawIR.redirects is RawRedirect[]: what the site serves; redirects_excluded what it holds but does not
 			// serve as a plain redirect, each with its reason. Sources and counts stay in bridge/redirects.json.
 			$redirects = json_decode( $file( 'bridge/redirects.json' ) ?? '{}' );

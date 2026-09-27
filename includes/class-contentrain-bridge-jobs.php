@@ -61,8 +61,12 @@ final class Jobs {
 		foreach ( $menus as $menu ) {
 			Coverage::tally( $job, array( 'menu_items' ), 'exported', count( $menu['items'] ) );
 		}
+		$acf_options = array();
 		foreach ( Source::options_pages() as $options_page ) {
-			Models::options_page( $job, $options_page );
+			$acf_options[] = Models::options_page( $job, $options_page );
+		}
+		if ( $acf_options ) {
+			Models::file( $job, 'bridge/acf-options.json', Policy::json( $acf_options ) );
 		}
 		self::warning( $job, array( 'source' => 'rendered-states', 'reason' => 'Source scan does not execute dynamic WordPress/plugin states. Rendered coverage requires the Migrate capture adapter.' ) );
 		self::save( $job );

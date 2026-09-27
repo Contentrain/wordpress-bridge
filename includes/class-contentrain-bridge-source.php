@@ -230,7 +230,7 @@ final class Source {
 						$excluded[] = array( 'source' => $source_prefix . '/' . $name, 'reason' => 'sensitive-field' );
 						continue;
 					}
-					$raw[ $name ] = array( 'value' => self::acf_value( $loaded, $loaded['value'], $excluded, $source_prefix . '/' . $name ), 'field_key' => $loaded['key'] );
+					$raw[ $name ] = array( 'value' => self::acf_value( $loaded, $loaded['value'], $excluded, $source_prefix . '/' . $name ), 'field_key' => $loaded['key'], 'type' => $loaded['type'], 'label' => $loaded['label'] );
 					$schema[ $name ] = self::schema( $loaded );
 				}
 			}
