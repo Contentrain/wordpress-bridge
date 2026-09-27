@@ -221,7 +221,10 @@ final class Models {
 			$data[ $key ][] = $target['id'];
 		}
 		foreach ( $p['meta'] as $key => $value ) {
-			if ( null === $value || in_array( $key, Policy::CORE, true ) ) {
+			// Builder layout meta (Elementor tree, Divi switches) is not content: it travels only in
+			// raw-posts / RawIR, where a migration rebuilds the page from it. `@contentrain/wp-import`
+			// drops it the same way, so it never becomes a `meta_*` field or structured-value rows.
+			if ( null === $value || in_array( $key, Policy::CORE, true ) || preg_match( Policy::BUILDER, $key ) ) {
 				continue;
 			}
 			$name = 'meta_' . str_replace( '-', '_', sanitize_key( ltrim( $key, '_' ) ) );
@@ -285,11 +288,16 @@ final class Models {
 		}
 	}
 
-	/** Complex fields become editable, ordered related records instead of opaque JSON blobs. */
+	/**
+	 * Complex fields become editable, ordered related records instead of opaque JSON blobs.
+	 * Past the modelling depth the rest of the subtree is kept as JSON text and reported:
+	 * a visible gap, not a failed export.
+	 */
 	private static function value( &$job, $value, $locale, $source, $depth = 0 ) {
 		if ( is_array( $value ) ) {
 			if ( $depth > 10 ) {
-				throw new \RuntimeException( 'Content nesting exceeds the supported modelling depth.' );
+				Jobs::warning( $job, array( 'source' => $source, 'reason' => 'nesting-too-deep: kept as JSON text' ) );
+				return array( array( 'type' => 'text' ), (string) wp_json_encode( $value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) );
 			}
 			$fields = array( 'name' => array( 'type' => 'string' ), 'position' => array( 'type' => 'integer' ), 'text' => array( 'type' => 'text' ), 'number' => array( 'type' => 'number' ), 'boolean' => array( 'type' => 'boolean' ), 'children' => array( 'type' => 'relations', 'model' => 'wp-structured-values' ) );
 			self::model( $job, 'wp-structured-values', 'collection', 'site', 'Structured fields', $fields, 'name' );
