@@ -315,22 +315,37 @@ final class Source {
 			foreach ( $field['layouts'] ?? array() as $layout ) {
 				$sub_fields = array_merge( $sub_fields, $layout['sub_fields'] ?? array() );
 			}
+			$by_key = array();
+			foreach ( $sub_fields as $sub ) {
+				$by_key[ (string) ( $sub['key'] ?? '' ) ] = $sub;
+			}
+			$by_name = array();
+			foreach ( $sub_fields as $sub ) {
+				$by_name[ (string) ( $sub['name'] ?? '' ) ] = $sub;
+			}
 			foreach ( $rows as &$row ) {
 				if ( ! is_array( $row ) ) {
 					continue;
 				}
-				foreach ( $sub_fields as $sub ) {
-					foreach ( array_unique( array( $sub['name'] ?? '', $sub['key'] ?? '' ) ) as $key ) {
-						if ( array_key_exists( $key, $row ) ) {
-							$clean = self::acf_value( $sub, $row[ $key ], $excluded, $path . '/' . $key );
-							if ( null === $clean ) {
-								unset( $row[ $key ] );
-							} else {
-								$row[ $key ] = $clean;
-							}
+				// ACF hands unformatted rows keyed by sub-field KEY (`field_5f3…`); the REST API and every
+				// editor know the NAME. Rows leave here under names, at every depth, so both read alike.
+				$named = array();
+				foreach ( $row as $key => $cell ) {
+					$sub = $by_name[ (string) $key ] ?? $by_key[ (string) $key ] ?? null;
+					if ( ! $sub ) {
+						if ( is_string( $key ) && preg_match( '/^field_/', $key ) ) {
+							$excluded[] = array( 'source' => $path . '/' . $key, 'reason' => 'acf-key-unmapped' );
 						}
+						$named[ $key ] = $cell;
+						continue;
+					}
+					$name = '' !== (string) ( $sub['name'] ?? '' ) ? $sub['name'] : $key;
+					$clean = self::acf_value( $sub, $cell, $excluded, $path . '/' . $name );
+					if ( null !== $clean ) {
+						$named[ $name ] = $clean;
 					}
 				}
+				$row = $named;
 			}
 			unset( $row );
 			$value = in_array( $field['type'] ?? '', array( 'repeater', 'flexible_content' ), true ) ? $rows : $rows[0];

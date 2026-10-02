@@ -571,10 +571,24 @@ check( null === $result && $models_before === $probe['models'], 'untitled row ke
 $redactions = array();
 $private_schema = array( 'type' => 'group', 'name' => 'public_group', 'sub_fields' => array( array( 'key' => 'field_opaque', 'name' => 'connection', 'type' => 'password' ), array( 'key' => 'field_heading', 'name' => 'heading', 'type' => 'text' ) ) );
 $clean_acf = Source::acf_value( $private_schema, array( 'field_opaque' => 'hidden-credential', 'field_heading' => 'Safe headline' ), $redactions, 'acf' );
-check( ! isset( $clean_acf['field_opaque'] ) && 'Safe headline' === $clean_acf['field_heading'], 'nested ACF password is removed by its type even behind an opaque field key' );
+check( ! isset( $clean_acf['field_opaque'] ) && ! isset( $clean_acf['connection'] ) && 'Safe headline' === $clean_acf['heading'] && ! isset( $clean_acf['field_heading'] ), 'nested ACF password is removed by its type even behind an opaque field key, and the rest comes out under its name' );
 $team_schema = array( 'type' => 'repeater', 'name' => 'team', 'sub_fields' => array( array( 'key' => 'field_team_name', 'name' => 'name', 'type' => 'text' ), array( 'key' => 'field_team_email', 'name' => 'email', 'type' => 'email' ), array( 'key' => 'field_team_secret', 'name' => 'secret', 'type' => 'text' ) ) );
 $clean_team = Source::acf_value( $team_schema, array( array( 'name' => 'Ada', 'email' => 'ada@example.test', 'secret' => 'planted' ) ), $redactions, 'acf' );
 check( 'ada@example.test' === $clean_team[0]['email'] && ! isset( $clean_team[0]['secret'] ), 'a nested ACF email sub-field is content; a secret-named one is not' );
+// Rows come from ACF keyed by sub-field key; they leave under names, at every depth.
+$keyed = array();
+$soc_schema = array( 'type' => 'repeater', 'name' => 'socials', 'sub_fields' => array( array( 'key' => 'field_soc_label', 'name' => 'label', 'type' => 'text' ), array( 'key' => 'field_soc_url', 'name' => 'url', 'type' => 'url' ) ) );
+$clean_soc = Source::acf_value( $soc_schema, array( array( 'field_soc_label' => 'LinkedIn', 'field_soc_url' => 'https://example.test/in' ), array( 'label' => 'Named', 'url' => 'https://example.test/n' ) ), $keyed, 'acf/socials' );
+check( array( array( 'label' => 'LinkedIn', 'url' => 'https://example.test/in' ), array( 'label' => 'Named', 'url' => 'https://example.test/n' ) ) === $clean_soc && array() === $keyed, 'a repeater row keyed by sub-field key comes out under names; a row already named is unchanged' );
+$group_schema = array( 'type' => 'group', 'name' => 'office', 'sub_fields' => array( array( 'key' => 'field_o_city', 'name' => 'city', 'type' => 'text' ), array( 'key' => 'field_o_phones', 'name' => 'phones', 'type' => 'repeater', 'sub_fields' => array( array( 'key' => 'field_o_num', 'name' => 'number', 'type' => 'text' ) ) ) ) );
+$clean_group = Source::acf_value( $group_schema, array( 'field_o_city' => 'Istanbul', 'field_o_phones' => array( array( 'field_o_num' => '+90 212 000 00 00' ) ) ), $keyed, 'acf/office' );
+check( array( 'city' => 'Istanbul', 'phones' => array( array( 'number' => '+90 212 000 00 00' ) ) ) === $clean_group, 'a group and the repeater nested in it come out under names' );
+$flex_keyed = array( 'type' => 'flexible_content', 'name' => 'blocks', 'layouts' => array( array( 'name' => 'quote', 'sub_fields' => array( array( 'key' => 'field_q_text', 'name' => 'text', 'type' => 'text' ) ) ) ) );
+$clean_flex = Source::acf_value( $flex_keyed, array( array( 'acf_fc_layout' => 'quote', 'field_q_text' => 'Hello' ) ), $keyed, 'acf/blocks' );
+check( array( array( 'acf_fc_layout' => 'quote', 'text' => 'Hello' ) ) === $clean_flex && array() === $keyed, 'a flexible content row keyed by key comes out under names and keeps its layout marker, uncounted' );
+$unknown = array();
+$clean_unknown = Source::acf_value( $soc_schema, array( array( 'field_soc_label' => 'LinkedIn', 'field_gone' => 'orphan' ) ), $unknown, 'acf/socials' );
+check( 'LinkedIn' === $clean_unknown[0]['label'] && 'orphan' === $clean_unknown[0]['field_gone'] && array( array( 'source' => 'acf/socials/field_gone', 'reason' => 'acf-key-unmapped' ) ) === $unknown, 'a key no sub-field owns stays as it is and is counted, not given a name' );
 check( array() === Policy::clean( array( 'customer_email' => 'x@example.test' ), $redactions, 'meta' ), 'unknown meta keeps the broad name rule' );
 foreach ( array( 'user_pass', 'apiKey', 'access_token', 'client-secret', 'credentials', 'private_key' ) as $name ) {
 	check( Policy::secret_name( $name ), $name . ' is a credential name' );
