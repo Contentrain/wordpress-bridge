@@ -79,7 +79,7 @@ The plugin stores export ownership and a source revision marker. It sends nothin
 = 0.6.0 =
 
 * Advanced Custom Fields options pages ("Site settings", footer, contact details) are exported as site-wide fields in the migration data, typed like the fields of a post. They were already in the export as their own entry; a migration could not use them until now.
-* Contentrain Migrate now asks for the "private content" scope when it reads an export through the REST API, so drafts, pending, scheduled, private and password-protected posts come with their own status and are never published. A password-protected post keeps `[protected]`; the password itself never leaves WordPress. The plugin's behaviour is unchanged: the scope is chosen by whoever starts the export, and exports you start yourself are unaffected.
+* Contentrain Migrate now asks for the "private content" scope when it reads an export through the REST API, so drafts, private and password-protected posts stay drafts, pending posts arrive in review, and a scheduled post keeps its publication date. A password-protected post keeps `[protected]`; the password itself never leaves WordPress. The plugin's behaviour is unchanged: the scope is chosen by whoever starts the export, and exports you start yourself are unaffected.
 
 = 0.5.0 =
 
