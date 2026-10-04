@@ -20,9 +20,6 @@ defined( 'ABSPATH' ) || exit;
  *  - a part may hold only `<!-- wp:pattern -->` blocks (Twenty Twenty-Five's
  *    footer is one): the registered pattern's markup is opened in place,
  *    once, as WordPress does when it serves the part over REST;
- *  - a part may hold only `<!-- wp:pattern -->` blocks (Twenty Twenty-Five's
- *    footer is one): the registered pattern's markup is opened in place,
- *    once, as WordPress does when it serves the part over REST;
  *  - an inline navigation is a menu of its part's area, named
  *    `<Area> navigation[ N]` or by its own `ariaLabel`, slugs unique;
  *  - items and inline menus have no WordPress record: negative ids, unique
