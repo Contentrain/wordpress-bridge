@@ -621,6 +621,21 @@ check( array( 'header' ) === ( $by_slug['navigation-nav']['locations'] ?? null )
 check( array( 'header' ) === $by_slug['utility']['locations'] && 'Utility' === $by_slug['utility']['name'], 'a part used inside a used part is opened in place (its area is the outer part\'s), and an aria label names its navigation' );
 $looped = array( array( 'slug' => 'header', 'area' => 'header', 'content' => '<!-- wp:template-part {"slug":"header"} /--><!-- wp:navigation -->' . $nav_link( 'Once', 'https://example.test/once' ) . '<!-- /wp:navigation -->' ) );
 check( 1 === count( \Contentrain\Bridge\Menus::from_blocks( array(), $looped, array(), array(), array( \Contentrain\Bridge\Menus::class, 'target' ) )['menus'] ), 'a part naming itself is opened once' );
+// A part that is only a pattern block (Twenty Twenty-Five's footer): its navigations live in the pattern.
+$patterns = array(
+	'theme/footer' => '<!-- wp:group --><div class="wp-block-group"><!-- wp:columns --><div class="wp-block-columns"><!-- wp:column --><div class="wp-block-column"><!-- wp:navigation {"ariaLabel":"Footer navigation"} -->' . $nav_link( 'Blog', 'https://example.test/blog' ) . '<!-- /wp:navigation --></div><!-- /wp:column --><!-- wp:column --><div class="wp-block-column"><!-- wp:pattern {"slug":"theme/social"} /--></div><!-- /wp:column --></div><!-- /wp:columns --></div><!-- /wp:group -->',
+	'theme/social' => '<!-- wp:navigation {"ariaLabel":"Social"} -->' . $nav_link( 'Events', 'https://example.test/events' ) . '<!-- /wp:navigation --><!-- wp:pattern {"slug":"theme/footer"} /-->',
+);
+$by_pattern = static function ( $slug ) use ( $patterns ) { return $patterns[ $slug ] ?? null; };
+$pattern_part = \Contentrain\Bridge\Menus::resolve_patterns( '<!-- wp:pattern {"slug":"theme/footer"} /-->', $by_pattern );
+check( false === strpos( $pattern_part, 'wp:pattern' ) && 2 === substr_count( $pattern_part, '<!-- wp:navigation ' ), 'a pattern block is opened in place, nested patterns too, a pattern inside itself dropped' );
+check( '<!-- wp:pattern {"slug":"nowhere/known"} /-->' === \Contentrain\Bridge\Menus::resolve_patterns( '<!-- wp:pattern {"slug":"nowhere/known"} /-->', $by_pattern ), 'an unknown pattern stays as it is' );
+$from_pattern = \Contentrain\Bridge\Menus::from_blocks( array(), array( array( 'slug' => 'footer', 'area' => 'footer', 'content' => $pattern_part ) ), array(), array(), array( \Contentrain\Bridge\Menus::class, 'target' ) );
+check( array( 'footer-navigation', 'social' ) === array_column( $from_pattern['menus'], 'slug' ) && array( 'footer' ) === $from_pattern['menus'][1]['locations'] && array( 'Events' ) === array_column( $from_pattern['menus'][1]['items'], 'title' ), 'the navigations of a footer that is only a pattern are menus of the footer: ' . implode( ',', array_column( $from_pattern['menus'], 'slug' ) ) );
+// The site's own registry is the default source.
+register_block_pattern( 'contentrain-test/footer-links', array( 'title' => 'Footer links', 'content' => '<!-- wp:navigation {"ariaLabel":"Registry links"} -->' . $nav_link( 'Docs', 'https://example.test/docs' ) . '<!-- /wp:navigation -->' ) );
+check( false !== strpos( \Contentrain\Bridge\Menus::resolve_patterns( '<!-- wp:pattern {"slug":"contentrain-test/footer-links"} /-->' ), 'Registry links' ), 'a registered pattern resolves from the site registry' );
+unregister_block_pattern( 'contentrain-test/footer-links' );
 check( 'Footer navigation 1' === $by_slug['footer-navigation-1']['name'] && array( 'footer' ) === $by_slug['footer-navigation-2']['locations'], 'inline footer columns are numbered menus of the footer' );
 check( array( 'Blog' ) === array_column( $by_slug['footer-navigation-1']['items'], 'title' ) && 1 === $block_menus['dropped'], 'a link to a draft is left out and counted' );
 check( '#' === $by_slug['footer-navigation-2']['items'][1]['url'], 'a placeholder # link stays #' );
