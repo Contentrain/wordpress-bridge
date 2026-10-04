@@ -80,7 +80,7 @@ The plugin stores export ownership and a source revision marker. It sends nothin
 
 * Block themes whose footer is a block pattern (Twenty Twenty-Five's, for one) now export the footer's navigation menus. They sat inside the pattern, which the export did not open, so a migrated site printed the main menu in its footer instead of its footer links. They arrive as before, as menus of the footer.
 * Advanced Custom Fields fields of a post now carry their type and label in the migration data, as the fields of an options page already did, so a migration no longer has to guess from the value what a field is (an image field holding a number is an image, not text).
-* When a program such as Contentrain Migrate reads an export through the REST API, an export older than a day now answers "expired" and an unknown one "not found", instead of a generic bad request, and a request with no sign-in at all is told to use the connection key (some hosts strip the Authorization header). Nothing changes for exports you start yourself.
+* When a program such as Contentrain Migrate reads an export through the REST API, an export older than a day now answers "expired" and an unknown one "not found", instead of a generic bad request, and a request with no sign-in at all is told to use the connection key (some hosts strip the Authorization header). The download of an export you start yourself answers a missing or expired export the same way: "not found" or "expired", not a generic bad request.
 
 = 0.6.1 =
 
