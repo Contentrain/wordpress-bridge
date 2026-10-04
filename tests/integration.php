@@ -511,6 +511,12 @@ if ( $has_acf ) {
 	// link are values with parts, written in place — not models of their own.
 	$acf_models = array_filter( array_keys( $job['models'] ), static function ( $m ) { return 0 === strpos( $m, 'acf-' ) && 0 !== strpos( $m, 'acf-options-' ); } );
 	check( array() === array_values( $acf_models ), 'a page\'s ACF fields create no models of their own: ' . implode( ',', $acf_models ) );
+	// A post's ACF field in RawIR says what it is, as an Options Page's does: a reader no longer guesses the type from the value
+	// (an image field holding "84" is an attachment id, not text).
+	$post_acf_excluded = array();
+	list( $post_acf_raw, ) = Source::acf_fields( $page, 'acf/' . $page, $post_acf_excluded );
+	check( 'text' === ( $post_acf_raw['tagline']['type'] ?? null ) && 'Tagline' === ( $post_acf_raw['tagline']['label'] ?? null ) && 'field_bridge_tagline' === ( $post_acf_raw['tagline']['field_key'] ?? null ) && 'Content you own' === ( $post_acf_raw['tagline']['value'] ?? null ), 'a post ACF field in RawIR has its value, field key, type and label' );
+	check( 'group' === ( $post_acf_raw['hero']['type'] ?? null ) && 'repeater' === ( $post_acf_raw['quotes']['type'] ?? null ), 'a group and a repeater say so, whatever their values look like' );
 }
 // Adversarial ACF shapes must either model losslessly or use the explicit fallback.
 $probe = $job;
