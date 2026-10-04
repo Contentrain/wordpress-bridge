@@ -184,7 +184,7 @@ final class Source {
 					$excluded[] = array( 'source' => $source_prefix . '/' . $name, 'reason' => 'sensitive-field' );
 					continue;
 				}
-				$raw[ $name ] = array( 'value' => self::acf_value( $field, $field['value'], $excluded, $source_prefix . '/' . $name ), 'field_key' => $field['key'] );
+				$raw[ $name ] = array( 'value' => self::acf_value( $field, $field['value'], $excluded, $source_prefix . '/' . $name ), 'field_key' => $field['key'], 'type' => $field['type'], 'label' => $field['label'] );
 				$schema[ $name ] = self::schema( $field );
 			}
 		}
