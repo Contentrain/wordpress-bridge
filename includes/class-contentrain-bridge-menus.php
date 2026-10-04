@@ -17,6 +17,9 @@ defined( 'ABSPATH' ) || exit;
  *  - a navigation block's `ref` gives that menu the part's area as a
  *    location; one with neither `ref` nor links shows the most recent
  *    published navigation, as WordPress does;
+ *  - a part may hold only `<!-- wp:pattern -->` blocks (Twenty Twenty-Five's
+ *    footer is one): the registered pattern's markup is opened in place,
+ *    once, as WordPress does when it serves the part over REST;
  *  - an inline navigation is a menu of its part's area, named
  *    `<Area> navigation[ N]` or by its own `ariaLabel`, slugs unique;
  *  - items and inline menus have no WordPress record: negative ids, unique
@@ -34,7 +37,7 @@ final class Menus {
 			return array( 'menus' => array(), 'dropped' => 0 );
 		}
 		$markup = static function ( $template ) {
-			return array( 'slug' => $template->slug, 'area' => $template->area ?? '', 'content' => (string) $template->content );
+			return array( 'slug' => $template->slug, 'area' => $template->area ?? '', 'content' => self::resolve_patterns( (string) $template->content ) );
 		};
 		$templates = array_map( $markup, get_block_templates( array(), 'wp_template' ) );
 		$parts = array_map( $markup, get_block_templates( array(), 'wp_template_part' ) );
@@ -45,6 +48,62 @@ final class Menus {
 			get_posts( array( 'post_type' => 'wp_navigation', 'post_status' => 'publish', 'numberposts' => -1, 'orderby' => 'ID', 'order' => 'ASC' ) )
 		);
 		return self::from_blocks( $templates, $parts, $navigations, $taken, array( self::class, 'target' ) );
+	}
+
+	/**
+	 * `$content` with every pattern block replaced by the pattern's own markup,
+	 * recursively; a pattern met again inside itself is dropped, an unknown one
+	 * stays as it is. `$pattern` maps a slug to markup or null (the site's
+	 * pattern registry by default).
+	 */
+	public static function resolve_patterns( $content, $pattern = null ) {
+		if ( false === strpos( $content, 'wp:pattern' ) ) {
+			return $content;
+		}
+		$pattern = $pattern ?: array( self::class, 'registered_pattern' );
+		// One group of blocks per input block: itself, a pattern's blocks, or none.
+		$open = static function ( $blocks, $seen ) use ( &$open, $pattern ) {
+			$groups = array();
+			foreach ( $blocks as $block ) {
+				$slug = 'core/pattern' === $block['blockName'] ? (string) ( $block['attrs']['slug'] ?? '' ) : '';
+				if ( '' !== $slug ) {
+					if ( isset( $seen[ $slug ] ) ) {
+						$groups[] = array();
+						continue;
+					}
+					$markup = call_user_func( $pattern, $slug );
+					if ( is_string( $markup ) && '' !== trim( $markup ) ) {
+						$groups[] = array_merge( array(), ...$open( parse_blocks( trim( $markup ) ), $seen + array( $slug => true ) ) );
+						continue;
+					}
+				}
+				// innerContent holds one null per child; a child may now be several, or none.
+				$inner = $open( $block['innerBlocks'], $seen );
+				$chunks = array();
+				$at = 0;
+				foreach ( $block['innerContent'] as $chunk ) {
+					if ( null !== $chunk ) {
+						$chunks[] = $chunk;
+						continue;
+					}
+					$chunks = array_merge( $chunks, array_fill( 0, count( $inner[ $at++ ] ?? array() ), null ) );
+				}
+				$block['innerContent'] = $chunks;
+				$block['innerBlocks'] = array_merge( array(), ...$inner );
+				$groups[] = array( $block );
+			}
+			return $groups;
+		};
+		return serialize_blocks( array_merge( array(), ...$open( parse_blocks( $content ), array() ) ) );
+	}
+
+	/** The markup of a registered block pattern, or null. */
+	private static function registered_pattern( $slug ) {
+		if ( ! class_exists( '\WP_Block_Patterns_Registry' ) ) {
+			return null;
+		}
+		$found = \WP_Block_Patterns_Registry::get_instance()->get_registered( $slug );
+		return is_array( $found ) && isset( $found['content'] ) ? (string) $found['content'] : null;
 	}
 
 	/**
