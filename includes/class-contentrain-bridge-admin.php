@@ -259,6 +259,11 @@ final class Admin {
 	public static function read_export( $request ) {
 		try {
 			$job = Jobs::read( $request['id'] );
+		} catch ( \Throwable $error ) {
+			// Gone and expired are told apart (404 / 410); every other refusal below stays a 400.
+			return Remote::missing( $error );
+		}
+		try {
 			if ( 'ready' !== $job['phase'] ) {
 				throw new \RuntimeException( 'Export is not ready.' );
 			}

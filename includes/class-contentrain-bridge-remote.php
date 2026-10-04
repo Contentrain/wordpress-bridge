@@ -28,6 +28,10 @@ defined( 'ABSPATH' ) || exit;
  * With a key every call carries `X-Contentrain-Key` (and, in a POST body,
  * `contentrain_key`) and `contentrain_pairing`; its refusals are `bridge_key_*`.
  *
+ * Refusals a caller can act on: `bridge_auth_missing` 401 (nobody signed in: the host may strip the Authorization
+ * header; use a connection key), `bridge_not_found` 404 (no such export for this user), `bridge_export_expired` 410
+ * (its 24 hours are over; start again). A read of something the snapshot does not have stays 400.
+ *
  * `export` is `Jobs::summary`: `id`, `phase`, `step`, `cursor`, `counts`, `files`,
  * `scope`, `created_at`, `expires_at` (24 hours), and `error { code, message }`
  * when failed. `phase` ends in `ready` (read it with GET /exports/{id}) or
@@ -66,7 +70,16 @@ final class Remote {
 		if ( is_wp_error( $key ) ) {
 			return $key;
 		}
-		return null === $key ? Admin::permitted() : Key::authorize( $request, $key );
+		if ( null !== $key ) {
+			return Key::authorize( $request, $key );
+		}
+		// Nobody signed in: either no credentials were sent, or the host removed the Authorization header on the way
+		// (some shared hosts do). WordPress answers both with its generic 401; this one names the second so the reader
+		// can offer the connection key instead of calling the password wrong.
+		if ( ! is_user_logged_in() ) {
+			return self::error( 'auth_missing', 'No sign-in reached WordPress. If the application password was sent, the host removed the Authorization header: create a connection key on the Contentrain Bridge screen and send it as X-Contentrain-Key.', 401 );
+		}
+		return Admin::permitted();
 	}
 
 	public static function about() {
@@ -165,7 +178,7 @@ final class Remote {
 		try {
 			$job = Jobs::read( $id );
 		} catch ( \Throwable $error ) {
-			return false !== strpos( $error->getMessage(), 'expired' ) ? self::error( 'export_expired', $error->getMessage(), 410 ) : self::error( 'not_found', 'No such export for this user.', 404 );
+			return self::missing( $error );
 		}
 		if ( empty( $job['remote'] ) ) {
 			return self::error( 'not_remote', 'This export belongs to the admin screen; continue it there.', 409 );
@@ -230,6 +243,14 @@ final class Remote {
 		}
 		update_user_meta( get_current_user_id(), self::META . get_current_blog_id(), array_values( array_diff( self::ids(), array( $id ) ) ) );
 		return true;
+	}
+
+	/**
+	 * Why an export cannot be read, as the caller can act on it: 410 when it existed and its 24 hours are over (start
+	 * again), 404 when this user has no such export (never existed, deleted, or someone else's: not told apart).
+	 */
+	public static function missing( \Throwable $error ) {
+		return false !== strpos( $error->getMessage(), 'expired' ) ? self::error( 'export_expired', $error->getMessage(), 410 ) : self::error( 'not_found', 'No such export for this user.', 404 );
 	}
 
 	/** A stable code for a step's failure; the message stays for people. */
