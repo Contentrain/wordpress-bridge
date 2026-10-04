@@ -4,7 +4,7 @@ Tags: export, migration, headless, astro, content
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 0.6.1
+Stable tag: 0.6.2
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -75,6 +75,12 @@ The active theme and child theme, and optionally the source files of active plug
 The plugin stores export ownership and a source revision marker. It sends nothing anywhere on its own; an export leaves the site only when you download it, deliver it to GitHub, or authorize a program to read it through the REST export API with an administrator's application password or a Contentrain Migrate connection key. For a connection key the plugin stores a fingerprint of the key (never the key), the Migrate order it is paired with, and the time and IP address of its last use; creating a new key or revoking it, and uninstalling the plugin, removes them. Export files are written to a private, per-administrator directory, are removed on uninstall, and expire after a day. An export can contain site content, author display names, selected post metadata and, if you or the program you authorized chose it, privacy-minimized comments and draft, pending, scheduled, private and password-protected posts (never the password). A program authorized through the REST API chooses the scope; Contentrain Migrate asks for private content. Treat a downloaded export as you would a WordPress export file. If you deliver to GitHub, the exported content is sent to GitHub under the account whose token you provide; choose a private repository when the export includes draft or private content.
 
 == Changelog ==
+
+= 0.6.2 =
+
+* Block themes whose footer is a block pattern (Twenty Twenty-Five's, for one) now export the footer's navigation menus. They sat inside the pattern, which the export did not open, so a migrated site printed the main menu in its footer instead of its footer links. They arrive as before, as menus of the footer.
+* Advanced Custom Fields fields of a post now carry their type and label in the migration data, as the fields of an options page already did, so a migration no longer has to guess from the value what a field is (an image field holding a number is an image, not text).
+* When a program such as Contentrain Migrate reads an export through the REST API, an export older than a day now answers "expired" and an unknown one "not found", instead of a generic bad request, and a request with no sign-in at all is told to use the connection key (some hosts strip the Authorization header). Nothing changes for exports you start yourself.
 
 = 0.6.1 =
 
