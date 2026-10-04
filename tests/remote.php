@@ -179,6 +179,32 @@ if ( $previous ) { update_user_meta( $admin->ID, $key, $previous ); }
 list( $status ) = call( 'POST', '/exports/' . str_repeat( '0', 32 ) . '/advance' );
 check( 404 === $status, 'an unknown export is a 404' );
 
+// ---- Refusals a caller can act on (E1-b): gone 404, expired 410, nobody signed in 401. ----
+list( $status, $body ) = call( 'GET', '/exports/' . str_repeat( '0', 32 ) );
+check( 404 === $status && 'bridge_not_found' === $body['code'], 'reading an unknown export is a 404 bridge_not_found, not a 400' );
+$old = Jobs::create( array( 'types' => array( 'post' ), 'private' => false, 'comments' => false, 'media_files' => false ), true )['id'];
+$state = json_decode( Files::read( Files::dir( $old ), 'state.json' ), true );
+$state['created_at'] = gmdate( 'c', time() - DAY_IN_SECONDS - 60 );
+Files::put( Files::dir( $old ), 'state.json', wp_json_encode( $state ) );
+list( $status, $body ) = call( 'GET', "/exports/$old" );
+check( 410 === $status && 'bridge_export_expired' === $body['code'], 'reading an export past its 24 hours is a 410 bridge_export_expired, not a 400' );
+list( $status, $body ) = call( 'POST', "/exports/$old/read", array( 'file' => 'bridge/rawir.json' ) );
+check( 410 === $status && 'bridge_export_expired' === $body['code'], 'the body-signed read says the same' );
+list( $status, $body ) = call( 'POST', "/exports/$old/advance" );
+check( 410 === $status && 'bridge_export_expired' === $body['code'], 'and advance (as before)' );
+Files::remove( Files::dir( $old ) );
+list( $status, $body ) = call( 'GET', "/exports/$a", array( 'file' => 'bridge/no-such-file.json' ) );
+check( 400 === $status, 'a file the snapshot does not have stays a 400 (the caller asked for something wrong, the export is fine)' );
+wp_set_current_user( 0 );
+list( $status, $body ) = call( 'GET', '/exports' );
+check( 401 === $status && 'bridge_auth_missing' === $body['code'], 'nobody signed in (a host that strips the Authorization header): 401 bridge_auth_missing, naming the connection key' );
+list( $status, $body ) = call( 'GET', "/exports/$a" );
+check( 401 === $status && 'bridge_auth_missing' === $body['code'], 'the same on the read route' );
+wp_set_current_user( $reader->ID );
+list( $status, $body ) = call( 'GET', '/exports' );
+check( 403 === $status, 'a signed-in user who may not export is still a 403, not "no sign-in"' );
+wp_set_current_user( $admin->ID );
+
 // Export A's snapshot, for coverage-rawir.mjs to compare with what prepare-migrate builds.
 $keep = '/tmp/bridge-coverage/remote/store';
 Files::remove( dirname( $keep ) );
