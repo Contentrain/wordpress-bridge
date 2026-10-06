@@ -52,7 +52,7 @@
     $('scope').hidden = Boolean(job);
     $('delete').hidden = !job;
     $('pause').hidden = !running;
-    $('resume').hidden = !job || running || ['ready', 'review'].includes(job.phase);
+    $('resume').hidden = !job || running || ['ready', 'review', 'failed'].includes(job.phase);
     $('review').hidden = !job || job.phase !== 'review';
     $('delivery').hidden = !job || job.phase !== 'ready';
     if (!job) return;
@@ -76,7 +76,7 @@
     try {
       render();
       let failures = 0;
-      while (running && !['review', 'ready'].includes(job.phase)) {
+      while (running && !['review', 'ready', 'failed'].includes(job.phase)) {
         try {
           job = await api({ op: 'step', id: job.id, step: job.step }, STEP_TIMEOUT);
           failures = 0;
@@ -93,6 +93,8 @@
         }
       }
     } finally { running = false; render(); }
+    // The server gave the export up (a step that ended the request again and again): its reason says what to do.
+    if (job.phase === 'failed') error(new Error(job.error?.message || __('The export failed.', 'contentrain-bridge')));
     if (job.phase === 'review') await loadCandidates();
     if (job.phase === 'ready') { renderIntegrations(); await loadCoverage(); }
   }

@@ -92,3 +92,14 @@ test('an error the server explains is shown at once, not retried', async () => {
   assert.equal(h.calls.filter((c) => c.op === 'step').length, 1);
   assert.match(h.element('error').textContent, /content changed during export/);
 });
+
+test('an export the server gave up on stops the loop and shows the server\'s reason', async () => {
+  const failed = job({ phase: 'failed', step: 7, error: { code: 'step_repeatedly_killed', message: 'Step 7 of stage "media" stopped the request 6 times without finishing; raise the host\'s limits.' } });
+  const h = boot(server([ok(job({ phase: 'media', step: 7 })), ok(failed), ok(failed), ok(failed)]));
+  await settle();
+  await start(h);
+  assert.equal(h.calls.filter((c) => c.op === 'step').length, 2, 'the failed answer ends the loop: no further step is sent');
+  assert.equal(h.element('error').hidden, false);
+  assert.match(h.element('error').textContent, /Step 7 of stage "media".*6 times/);
+  assert.equal(h.element('resume').hidden, true, 'nothing to resume: the server refuses every later step');
+});

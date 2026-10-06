@@ -199,6 +199,7 @@ final class Jobs {
 			if ( (int) $expected !== $job['step'] ) {
 				return self::summary( $job );
 			}
+			self::$tries = 1;
 			self::tick( $job );
 		} );
 	}
@@ -249,7 +250,6 @@ final class Jobs {
 				return self::summary( $job );
 			}
 			self::$deadline = $deadline;
-			self::attempt( $job );
 			$saved = microtime( true );
 			$half = ( $deadline - $saved ) / 2;
 			$slowest = 0.0;
@@ -262,11 +262,29 @@ final class Jobs {
 						break;
 					}
 				}
+				self::$tries = self::attempt( $job );
+				if ( self::$tries > self::MAX_ATTEMPTS ) {
+					// The same step ended this many requests before any save could follow it: trying it once more
+					// would be the loop this guards against. Said once, with what to do; the admin screen stops here.
+					$job['error'] = array( 'code' => 'step_repeatedly_killed', 'message' => sprintf( 'Step %d of stage "%s" stopped the request %d times without finishing; the host\'s time or memory limit is probably too low for this site. Delete the export and start again with a smaller scope (fewer content types, or without media files), or raise the host\'s limits.', $job['step'], $job['phase'], self::MAX_ATTEMPTS ) );
+					$job['phase'] = 'failed';
+					break;
+				}
 				$started = microtime( true );
-				self::tick( $job );
+				try {
+					self::tick( $job );
+				} catch ( \Throwable $error ) {
+					// Refused, not killed (content changed, a file missing): the next try is not a repeat of a death.
+					wp_delete_file( Files::dir( $job['id'] ) . '/' . self::ATTEMPT_FILE );
+					throw $error;
+				}
 				++$taken;
-				// The step that was being tried is done: later steps of this request start from a clean count.
-				unset( $job['attempt'] );
+				if ( self::$tries > 1 ) {
+					// A step that only got through on a retry is saved before the next one can die: unsaved, the next
+					// request would replay it at full size (its record names a later step) and die there again.
+					self::save( $job );
+					$saved = microtime( true );
+				}
 				// Every post, term and meta row read stays in WordPress's in-request cache; over
 				// thousands of steps that alone exhausts a 64 MB host. A persistent cache is left alone.
 				if ( ! wp_using_ext_object_cache() ) {
@@ -279,27 +297,43 @@ final class Jobs {
 					$saved = microtime( true );
 				}
 			}
-			unset( $job['attempt'] );
+			// The run ended on its own, so no step is being tried any more.
+			wp_delete_file( Files::dir( $job['id'] ) . '/' . self::ATTEMPT_FILE );
 		} );
 	}
 
 	/** The request's own stop time, for a step that does a batch of work (media). */
 	private static $deadline = 0.0;
 
-	/**
-	 * Records, before the work, that this step is being tried: a request PHP kills never reaches a save, so
-	 * only what was saved first can tell the next one it is the same step again. Past the first try a step
-	 * shrinks its batch (`attempts()`), and the media phase finally keeps the files of an attachment that
-	 * will not copy, so a step that always dies cannot be retried for ever on the same cursor.
-	 */
-	private static function attempt( &$job ) {
-		$last = $job['attempt'] ?? array( 'step' => -1, 'n' => 0 );
-		$job['attempt'] = $last['step'] === $job['step'] ? array( 'step' => $job['step'], 'n' => $last['n'] + 1 ) : array( 'step' => $job['step'], 'n' => 1 );
-		self::save( $job );
-	}
+	/** How many times running the current step has ended the request so far, 1 on the first try (`attempt()`). */
+	private static $tries = 1;
 
-	private static function attempts( $job ) {
-		return (int) ( $job['attempt']['n'] ?? 1 );
+	/** Beside the state: `{"step":n,"n":tries}` for the step being tried. Written before each tick, never part of the state. */
+	const ATTEMPT_FILE = 'attempt';
+
+	/** A step that ended this many requests is not tried again: the export fails with what to do instead. */
+	const MAX_ATTEMPTS = 6;
+
+	/**
+	 * Records, before each tick, which step is being tried and how many times it has been tried: a request
+	 * PHP kills (time or memory limit, a proxy closing it) never reaches a save, so only something written
+	 * first can tell the next request it is the same step again. The record is a small file beside the state,
+	 * not a save of the state itself (a save per tick is the memory cost BR-24 removed), and it stands for
+	 * the furthest step that was tried: steps before it, replayed because their save was lost with the kill,
+	 * neither touch it nor count as retried. Past the first try a step shrinks its batch (media), then leaves
+	 * the attachment that will not go through on WordPress; past MAX_ATTEMPTS `run()` fails the export.
+	 */
+	private static function attempt( $job ) {
+		$dir = Files::dir( $job['id'] );
+		$last = is_file( $dir . '/' . self::ATTEMPT_FILE ) ? json_decode( Files::read( $dir, self::ATTEMPT_FILE ), true ) : null;
+		$step = (int) $job['step'];
+		$before = is_array( $last ) ? (int) ( $last['step'] ?? -1 ) : -1;
+		if ( $before > $step ) {
+			return 1;
+		}
+		$tries = $before === $step ? (int) ( $last['n'] ?? 0 ) + 1 : 1;
+		Files::put( $dir, self::ATTEMPT_FILE, (string) wp_json_encode( array( 'step' => $step, 'n' => $tries ) ) );
+		return $tries;
 	}
 
 	/** One step of the current phase. */
@@ -368,8 +402,9 @@ final class Jobs {
 			return;
 		}
 		// A step that died before saving is tried again with a smaller batch, then one attachment at a time,
-		// then with that attachment's files left on WordPress: the same cursor is never retried for ever.
-		$tries = self::attempts( $job );
+		// then with that attachment's files left on WordPress, then without the attachment at all: the same
+		// cursor is never retried for ever (`attempt()`).
+		$tries = self::$tries;
 		$batch = $tries >= 3 ? 1 : ( 2 === $tries ? 5 : 25 );
 		$ids = $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE ID > %d AND post_type = 'attachment' ORDER BY ID ASC LIMIT %d", $job['cursor'], $batch ) );
 		if ( $wpdb->last_error ) {
@@ -379,7 +414,17 @@ final class Jobs {
 		// Records without their files: the reader localizes media itself, and with nothing copied nothing is
 		// relinked, so the store keeps every WordPress URL (`Models::relink` rewrites only copied files).
 		$copy = $job['options']['media_files'] ?? true;
-		if ( $copy && $tries >= 4 && $ids ) {
+		if ( $ids && $tries >= 5 ) {
+			// Even alone and without its files this attachment ends the request: it is left out altogether, named,
+			// and content keeps its WordPress URL (nothing copied means nothing relinked). The export goes on.
+			$skipped = (int) $ids[0];
+			$job['cursor'] = $skipped;
+			$url = (string) $wpdb->get_var( $wpdb->prepare( "SELECT guid FROM {$wpdb->posts} WHERE ID = %d", $skipped ) );
+			self::warning( $job, array( 'source' => 'attachment/' . $skipped, 'reason' => 'media-skipped-after-repeated-failure: left out of the export after ' . ( $tries - 1 ) . ' requests ended on it; content keeps its WordPress URL' . ( '' !== $url ? ' (' . $url . ')' : '' ) ) );
+			++$job['counts']['media_kept_remote'];
+			return;
+		}
+		if ( $copy && $tries >= 4 ) {
 			$copy = false;
 			self::warning( $job, array( 'source' => 'attachment/' . $ids[0], 'reason' => 'media-files-skipped-after-repeated-failure: kept as WordPress URLs' ) );
 			++$job['counts']['media_kept_remote'];
