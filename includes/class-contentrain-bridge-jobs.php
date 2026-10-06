@@ -250,6 +250,14 @@ final class Jobs {
 				return self::summary( $job );
 			}
 			self::$deadline = $deadline;
+			$deaths = self::attempt( $job );
+			if ( $deaths > self::MAX_ATTEMPTS ) {
+				// This many requests started from this very state and none lived to save: one more would be the
+				// loop this guards against. Said once, with what to do; the admin screen stops here.
+				$job['error'] = array( 'code' => 'step_repeatedly_killed', 'message' => sprintf( 'Step %d of stage "%s" stopped the request %d times without finishing; the host\'s time or memory limit is probably too low for this site. Delete the export and start again with a smaller scope (fewer content types, or without media files), or raise the host\'s limits.', $job['step'], $job['phase'], self::MAX_ATTEMPTS ) );
+				$job['phase'] = 'failed';
+				return;
+			}
 			$saved = microtime( true );
 			$half = ( $deadline - $saved ) / 2;
 			$slowest = 0.0;
@@ -262,26 +270,21 @@ final class Jobs {
 						break;
 					}
 				}
-				self::$tries = self::attempt( $job );
-				if ( self::$tries > self::MAX_ATTEMPTS ) {
-					// The same step ended this many requests before any save could follow it: trying it once more
-					// would be the loop this guards against. Said once, with what to do; the admin screen stops here.
-					$job['error'] = array( 'code' => 'step_repeatedly_killed', 'message' => sprintf( 'Step %d of stage "%s" stopped the request %d times without finishing; the host\'s time or memory limit is probably too low for this site. Delete the export and start again with a smaller scope (fewer content types, or without media files), or raise the host\'s limits.', $job['step'], $job['phase'], self::MAX_ATTEMPTS ) );
-					$job['phase'] = 'failed';
-					break;
-				}
+				// The first step of a retried request is the one that killed the last (what came before it was saved
+				// at once); the steps after it stay small and saved too, but never give an attachment up.
+				self::$tries = 0 === $taken ? $deaths : min( $deaths, 3 );
 				$started = microtime( true );
 				try {
 					self::tick( $job );
 				} catch ( \Throwable $error ) {
-					// Refused, not killed (content changed, a file missing): the next try is not a repeat of a death.
+					// Refused, not killed (content changed, a file missing): the next request is not a repeat of a death.
 					wp_delete_file( Files::dir( $job['id'] ) . '/' . self::ATTEMPT_FILE );
 					throw $error;
 				}
 				++$taken;
 				if ( self::$tries > 1 ) {
-					// A step that only got through on a retry is saved before the next one can die: unsaved, the next
-					// request would replay it at full size (its record names a later step) and die there again.
+					// A step that got through where the last request died is saved before the next one can die:
+					// unsaved, the next request would start from the same state and replay it at full size.
 					self::save( $job );
 					$saved = microtime( true );
 				}
@@ -297,7 +300,7 @@ final class Jobs {
 					$saved = microtime( true );
 				}
 			}
-			// The run ended on its own, so no step is being tried any more.
+			// The request ended on its own: the state it leaves has not killed anything.
 			wp_delete_file( Files::dir( $job['id'] ) . '/' . self::ATTEMPT_FILE );
 		} );
 	}
@@ -305,35 +308,33 @@ final class Jobs {
 	/** The request's own stop time, for a step that does a batch of work (media). */
 	private static $deadline = 0.0;
 
-	/** How many times running the current step has ended the request so far, 1 on the first try (`attempt()`). */
+	/** How many requests, this one included, have started from the saved state the current step works on (`attempt()`). */
 	private static $tries = 1;
 
-	/** Beside the state: `{"step":n,"n":tries}` for the step being tried. Written before each tick, never part of the state. */
+	/** Beside the state: `{"step":n,"n":requests}`, the saved step a request started from and how many started there. */
 	const ATTEMPT_FILE = 'attempt';
 
-	/** A step that ended this many requests is not tried again: the export fails with what to do instead. */
+	/** When this many requests started from one saved state and none lived to save, the export fails rather than try again. */
 	const MAX_ATTEMPTS = 6;
 
 	/**
-	 * Records, before each tick, which step is being tried and how many times it has been tried: a request
-	 * PHP kills (time or memory limit, a proxy closing it) never reaches a save, so only something written
-	 * first can tell the next request it is the same step again. The record is a small file beside the state,
-	 * not a save of the state itself (a save per tick is the memory cost BR-24 removed), and it stands for
-	 * the furthest step that was tried: steps before it, replayed because their save was lost with the kill,
-	 * neither touch it nor count as retried. Past the first try a step shrinks its batch (media), then leaves
-	 * the attachment that will not go through on WordPress; past MAX_ATTEMPTS `run()` fails the export.
+	 * Records, before any work, the saved step this request starts from and how many requests have started
+	 * from it: a request PHP kills (time or memory limit, a proxy closing it) never reaches a save, so only
+	 * something written first can tell the next request that it starts where the last one died. A request
+	 * that saves moves the state on, and the count starts over. The record is one small file beside the state,
+	 * written once per request (a save per step is the memory cost BR-24 removed), and it does not care which
+	 * step died: whatever the host kills, the count grows until the state moves. From the second request on
+	 * the media phase shrinks its batch and `run()` saves after every step, so the state reaches the step that
+	 * kills; that one then runs alone, then without its files, then is left out; past MAX_ATTEMPTS the export
+	 * fails with what to do.
 	 */
 	private static function attempt( $job ) {
 		$dir = Files::dir( $job['id'] );
 		$last = is_file( $dir . '/' . self::ATTEMPT_FILE ) ? json_decode( Files::read( $dir, self::ATTEMPT_FILE ), true ) : null;
 		$step = (int) $job['step'];
-		$before = is_array( $last ) ? (int) ( $last['step'] ?? -1 ) : -1;
-		if ( $before > $step ) {
-			return 1;
-		}
-		$tries = $before === $step ? (int) ( $last['n'] ?? 0 ) + 1 : 1;
-		Files::put( $dir, self::ATTEMPT_FILE, (string) wp_json_encode( array( 'step' => $step, 'n' => $tries ) ) );
-		return $tries;
+		$deaths = is_array( $last ) && (int) ( $last['step'] ?? -1 ) === $step ? (int) ( $last['n'] ?? 0 ) + 1 : 1;
+		Files::put( $dir, self::ATTEMPT_FILE, (string) wp_json_encode( array( 'step' => $step, 'n' => $deaths ) ) );
+		return $deaths;
 	}
 
 	/** One step of the current phase. */
@@ -401,9 +402,9 @@ final class Jobs {
 			$job['cursor'] = 0;
 			return;
 		}
-		// A step that died before saving is tried again with a smaller batch, then one attachment at a time,
-		// then with that attachment's files left on WordPress, then without the attachment at all: the same
-		// cursor is never retried for ever (`attempt()`).
+		// A request that died before saving is followed by one with a smaller batch, then one attachment at a
+		// time (each saved), then the attachment that kills with its files left on WordPress, then without it
+		// at all: the same cursor is never retried for ever (`attempt()`).
 		$tries = self::$tries;
 		$batch = $tries >= 3 ? 1 : ( 2 === $tries ? 5 : 25 );
 		$ids = $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE ID > %d AND post_type = 'attachment' ORDER BY ID ASC LIMIT %d", $job['cursor'], $batch ) );
@@ -419,12 +420,12 @@ final class Jobs {
 			// and content keeps its WordPress URL (nothing copied means nothing relinked). The export goes on.
 			$skipped = (int) $ids[0];
 			$job['cursor'] = $skipped;
-			$url = (string) $wpdb->get_var( $wpdb->prepare( "SELECT guid FROM {$wpdb->posts} WHERE ID = %d", $skipped ) );
+			$url = (string) wp_get_attachment_url( $skipped );
 			self::warning( $job, array( 'source' => 'attachment/' . $skipped, 'reason' => 'media-skipped-after-repeated-failure: left out of the export after ' . ( $tries - 1 ) . ' requests ended on it; content keeps its WordPress URL' . ( '' !== $url ? ' (' . $url . ')' : '' ) ) );
 			++$job['counts']['media_kept_remote'];
 			return;
 		}
-		if ( $copy && $tries >= 4 ) {
+		if ( $copy && $tries >= 4 && $ids ) {
 			$copy = false;
 			self::warning( $job, array( 'source' => 'attachment/' . $ids[0], 'reason' => 'media-files-skipped-after-repeated-failure: kept as WordPress URLs' ) );
 			++$job['counts']['media_kept_remote'];
