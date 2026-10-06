@@ -53,11 +53,15 @@ function request( $id, $mode, $poison, $frame, $memory = '128M', $budget = 12 ) 
 function state( $id ) {
 	return json_decode( Files::read( Files::dir( $id ), 'state.json' ), true );
 }
-/** Every warning row the export wrote so far (the aggregated bridge/warnings.json only exists at the end). */
+/**
+ * Every warning reason the export wrote so far, by source (the aggregated bridge/warnings.json only exists at
+ * the end; a row written by a request that then died is on disk too, so one source can carry several).
+ */
 function warnings( $id ) {
 	$rows = array();
 	foreach ( glob( Files::dir( $id ) . '/rows/' . hash( 'sha256', 'bridge/warnings.json' ) . '/*.json' ) ?: array() as $file ) {
-		$rows[] = json_decode( file_get_contents( $file ), true ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- Test harness reading its own output.
+		$row = json_decode( file_get_contents( $file ), true ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- Test harness reading its own output.
+		$rows[ $row['source'] ][] = $row['reason'];
 	}
 	return $rows;
 }
@@ -100,9 +104,9 @@ try {
 	// nothing would read its meta. Runs right after the acceptance fixture, so the fourth is the first of the
 	// thirty added here.
 	$order = array_map( 'intval', $wpdb->get_col( "SELECT ID FROM {$wpdb->posts} WHERE post_type = 'attachment' ORDER BY ID ASC" ) );
-	check( count( $order ) >= 30, 'the site has at least 30 attachments (' . count( $order ) . ')' );
-	$poison = $order[3];
-	check( in_array( $poison, $added, true ), "the fourth attachment ($poison) is one added here, so it is read and copied" );
+	$poison = $added[0];
+	$at = array_search( $poison, $order, true );
+	check( $at >= 1 && $at <= 4, "the first attachment added here is the " . ( $at + 1 ) . "th the export walks: inside the first batch of 5, not first (the fixture has $at before it; the counts below assume 1–4)" );
 
 	// 1. The single tick per request: the hang.
 	$input = array( 'types' => array( 'attachment', 'post' ), 'private' => false, 'comments' => false );
@@ -126,11 +130,12 @@ try {
 	// Three requests die at the saved start (batches 25, 5, then 1 with each attachment before the poison saved
 	// as it goes), four at the poison itself (25, 5, 1, 1 without its files), and the fifth leaves it out.
 	check( 7 === $deaths( $runs ), 'the poison kills exactly 7 requests: 3 from the start, 4 at the poison, then it is left out' );
-	$reasons = array_column( warnings( $fixed ), 'reason', 'source' );
-	check( isset( $reasons[ 'attachment/' . $poison ] ) && 0 === strpos( $reasons[ 'attachment/' . $poison ], 'media-skipped-after-repeated-failure' ), 'the attachment that kept killing the request is named in a warning with its reason' );
-	check( false !== strpos( $reasons[ 'attachment/' . $poison ], wp_get_attachment_url( $poison ) ), 'and the warning carries its WordPress URL' );
+	$mine = warnings( $fixed )[ 'attachment/' . $poison ] ?? array();
+	$skipped = preg_grep( '/^media-skipped-after-repeated-failure/', $mine );
+	check( 1 === count( $skipped ), 'the attachment that kept killing the request is named in a warning with its reason (' . implode( ' | ', $mine ) . ')' );
+	check( false !== strpos( reset( $skipped ), get_post_field( 'guid', $poison ) ), 'and the warning carries its WordPress URL' );
 	check( $final['counts']['media_kept_remote'] >= 1, 'the kept-remote count includes it' );
-	check( $final['counts']['media'] >= count( $order ) - 1 - 1, 'every other attachment was exported (' . $final['counts']['media'] . ' of ' . count( $order ) . ', one poison, one ghost without a file)' );
+	check( $final['counts']['media'] >= count( $order ) - 2, 'every other attachment was exported (' . $final['counts']['media'] . ' of ' . count( $order ) . ': the poison left out, the fixture\'s draft child excluded)' );
 	check( ! is_file( Files::dir( $fixed ) . '/' . Jobs::ATTEMPT_FILE ), 'no try is left recorded once the export has ended' );
 
 	// 3. A post that kills every request, with nothing left to shrink: the export fails, says why, and stays failed.
@@ -163,7 +168,7 @@ try {
 		check( 0 === $run[0], "request $i exited 0 (" . ( $run[2] ?: 'no stderr' ) . ')' );
 	}
 	check( '64M' === ( $runs[0][1]['memory_limit'] ?? '' ), 'the limit really was 64M inside the request' );
-	$reasons = array_column( warnings( $clean ), 'reason' );
+	$reasons = array_merge( array(), ...array_values( warnings( $clean ) ?: array( array() ) ) );
 	check( ! preg_grep( '/skipped-after-repeated-failure/', $reasons ), 'no attachment was left out or kept remote for a retry' );
 	check( ! is_file( Files::dir( $clean ) . '/' . Jobs::ATTEMPT_FILE ), 'no try is left recorded' );
 } finally {

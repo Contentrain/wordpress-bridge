@@ -420,7 +420,8 @@ final class Jobs {
 			// and content keeps its WordPress URL (nothing copied means nothing relinked). The export goes on.
 			$skipped = (int) $ids[0];
 			$job['cursor'] = $skipped;
-			$url = (string) wp_get_attachment_url( $skipped );
+			// The URL from the row itself: reading the attachment's meta is what may be killing the request.
+			$url = (string) $wpdb->get_var( $wpdb->prepare( "SELECT guid FROM {$wpdb->posts} WHERE ID = %d", $skipped ) );
 			self::warning( $job, array( 'source' => 'attachment/' . $skipped, 'reason' => 'media-skipped-after-repeated-failure: left out of the export after ' . ( $tries - 1 ) . ' requests ended on it; content keeps its WordPress URL' . ( '' !== $url ? ' (' . $url . ')' : '' ) ) );
 			++$job['counts']['media_kept_remote'];
 			return;
