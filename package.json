@@ -21,9 +21,9 @@
     "test:builder": "tests/builder.sh"
   },
   "devDependencies": {
-    "@contentrain/types": "1.14.0",
+    "@contentrain/types": "1.59.0",
     "@contentrain/verify": "0.2.0",
-    "@contentrain/wp-import": "0.5.7",
-    "contentrain": "0.13.1"
+    "@contentrain/wp-import": "0.11.27",
+    "contentrain": "0.15.39"
   }
 }

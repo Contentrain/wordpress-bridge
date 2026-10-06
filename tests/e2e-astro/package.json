@@ -6,7 +6,7 @@
     "build": "astro build"
   },
   "dependencies": {
-    "@contentrain/query": "7.3.4",
+    "@contentrain/query": "7.6.38",
     "astro": "5.18.2"
   }
 }
