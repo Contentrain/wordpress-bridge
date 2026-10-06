@@ -63,6 +63,12 @@ jobs:
       - run: npm run test:wordpress
         env:
           KEEP: 1
+      # BR-25: requests the host kills mid-step (a child PHP process per request, ended the way a time or
+      # memory limit ends one). The single tick wp-admin used to send never moves; `Jobs::run` shrinks,
+      # leaves the attachment that kills out, and ends; a post that kills every request fails the export
+      # after MAX_ATTEMPTS; a clean export finishes under memory_limit=64M. Right after the fixture, before
+      # the gates that count this site's content: it adds thirty attachments and removes them again.
+      - run: npm run test:hang
       - run: npm run test:plugin
       # B-04: no-plugin case, then Yoast SEO + Redirection. Every exported head
       # value is compared with the page WordPress serves, every redirect is

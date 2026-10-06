@@ -115,32 +115,69 @@ final class Jobs {
 		}
 		$dir = Files::dir( $id );
 		if ( is_dir( $dir ) ) {
-			$lock = fopen( $dir . '/lock', 'c' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Native advisory locking has no WP_Filesystem equivalent.
-			if ( ! $lock || ! flock( $lock, LOCK_EX | LOCK_NB ) ) {
-				if ( $lock ) {
-					fclose( $lock ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Native advisory lock handle.
-				}
+			$lock = self::acquire( $dir );
+			if ( ! $lock ) {
 				throw new \RuntimeException( 'Export is busy. Stop the running operation and retry deletion.' );
 			}
 			try {
 				Files::remove( $dir );
 			} finally {
-				flock( $lock, LOCK_UN );
-				fclose( $lock ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Native advisory lock handle.
+				self::release( $lock );
 			}
 		}
 		delete_user_meta( get_current_user_id(), $key );
 		return array( 'deleted' => true );
 	}
 
+	/** Seconds after which an expiring lock marker (hosts without flock) counts as left behind by a killed request. */
+	const LOCK_TTL = 120;
+
+	/**
+	 * Takes the export's lock: `array( flock handle|null, marker path|null )`, or null when another request
+	 * holds it. flock is released by the kernel when a request dies. Where it cannot be taken for any other
+	 * reason (a filesystem without flock, a job folder PHP cannot write the lock into) it is not
+	 * contention, so an expiring marker file stands in rather than answering "busy" for ever.
+	 */
+	private static function acquire( $dir ) {
+		$handle = @fopen( $dir . '/lock', 'c' ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Native advisory locking has no WP_Filesystem equivalent.
+		if ( $handle ) {
+			$contended = 0;
+			if ( flock( $handle, LOCK_EX | LOCK_NB, $contended ) ) {
+				return array( $handle, null );
+			}
+			fclose( $handle ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Native advisory lock handle.
+			if ( $contended ) {
+				return null;
+			}
+		}
+		$marker = $dir . '/lock.held';
+		clearstatcache( true, $marker );
+		if ( is_file( $marker ) && time() - (int) filemtime( $marker ) > self::LOCK_TTL ) {
+			wp_delete_file( $marker );
+		}
+		$taken = @fopen( $marker, 'x' ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Exclusive create is the atomic test.
+		if ( ! $taken ) {
+			return null;
+		}
+		fclose( $taken ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Native marker handle.
+		return array( null, $marker );
+	}
+
+	private static function release( $lock ) {
+		if ( $lock[0] ) {
+			flock( $lock[0], LOCK_UN );
+			fclose( $lock[0] ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Native advisory lock handle.
+		}
+		if ( $lock[1] ) {
+			wp_delete_file( $lock[1] );
+		}
+	}
+
 	/** Serialize all mutations, including repeated or concurrent browser requests. */
 	public static function mutate( $id, $callback ) {
 		self::read( $id );
-		$lock = fopen( Files::dir( $id ) . '/lock', 'c' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Native stream required for bounded output or advisory locking; WP_Filesystem has no equivalent.
-		if ( ! $lock || ! flock( $lock, LOCK_EX | LOCK_NB ) ) {
-			if ( $lock ) {
-				fclose( $lock ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Native stream required for bounded output or advisory locking; WP_Filesystem has no equivalent.
-			}
+		$lock = self::acquire( Files::dir( $id ) );
+		if ( ! $lock ) {
 			// 409: another request holds this export; nothing failed, retry.
 			throw new \RuntimeException( 'Export is busy. Retry this step.', 409 );
 		}
@@ -153,8 +190,7 @@ final class Jobs {
 			self::save( $job );
 			return $result ?? self::summary( $job );
 		} finally {
-			flock( $lock, LOCK_UN );
-			fclose( $lock ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Native stream required for bounded output or advisory locking; WP_Filesystem has no equivalent.
+			self::release( $lock );
 		}
 	}
 
@@ -163,8 +199,21 @@ final class Jobs {
 			if ( (int) $expected !== $job['step'] ) {
 				return self::summary( $job );
 			}
+			self::$tries = 1;
 			self::tick( $job );
 		} );
+	}
+
+	/** Seconds one wp-admin request may keep stepping: well inside the 30 s of a low-limit host and a proxy's timeout. */
+	const STEP_BUDGET = 12;
+
+	/**
+	 * What the wp-admin screen sends: the steps that fit in STEP_BUDGET (and in PHP's own limits), saved as
+	 * it goes, not a single tick per request. `$expected` is the step the browser last saw; a repeated or
+	 * late request changes nothing.
+	 */
+	public static function advance( $id, $expected ) {
+		return self::run( $id, microtime( true ) + self::STEP_BUDGET, true, (int) $expected );
 	}
 
 	/** Seconds between intermediate saves in `run()`: what a killed request can lose. */
@@ -193,10 +242,22 @@ final class Jobs {
 	 * steps before it, only while half of the run's time is left. `$first`: this run begins
 	 * the call, so its first step always runs and every call makes progress.
 	 */
-	public static function run( $id, $deadline, $first = true ) {
+	public static function run( $id, $deadline, $first = true, $expected = null ) {
 		$limit = wp_convert_hr_to_bytes( (string) ini_get( 'memory_limit' ) );
 		$deadline = min( $deadline, self::time_limit() );
-		return self::mutate( $id, static function ( &$job ) use ( $deadline, $limit, $first ) {
+		return self::mutate( $id, static function ( &$job ) use ( $deadline, $limit, $first, $expected ) {
+			if ( null !== $expected && $expected !== $job['step'] ) {
+				return self::summary( $job );
+			}
+			self::$deadline = $deadline;
+			$deaths = self::attempt( $job );
+			if ( $deaths > self::MAX_ATTEMPTS ) {
+				// This many requests started from this very state and none lived to save: one more would be the
+				// loop this guards against. Said once, with what to do; the admin screen stops here.
+				$job['error'] = array( 'code' => 'step_repeatedly_killed', 'message' => sprintf( 'Step %d of stage "%s" stopped the request %d times without finishing; the host\'s time or memory limit is probably too low for this site. Delete the export and start again with a smaller scope (fewer content types, or without media files), or raise the host\'s limits.', $job['step'], $job['phase'], self::MAX_ATTEMPTS ) );
+				$job['phase'] = 'failed';
+				return;
+			}
 			$saved = microtime( true );
 			$half = ( $deadline - $saved ) / 2;
 			$slowest = 0.0;
@@ -209,9 +270,24 @@ final class Jobs {
 						break;
 					}
 				}
+				// The first step of a retried request is the one that killed the last (what came before it was saved
+				// at once); the steps after it stay small and saved too, but never give an attachment up.
+				self::$tries = 0 === $taken ? $deaths : min( $deaths, 3 );
 				$started = microtime( true );
-				self::tick( $job );
+				try {
+					self::tick( $job );
+				} catch ( \Throwable $error ) {
+					// Refused, not killed (content changed, a file missing): the next request is not a repeat of a death.
+					wp_delete_file( Files::dir( $job['id'] ) . '/' . self::ATTEMPT_FILE );
+					throw $error;
+				}
 				++$taken;
+				if ( self::$tries > 1 ) {
+					// A step that got through where the last request died is saved before the next one can die:
+					// unsaved, the next request would start from the same state and replay it at full size.
+					self::save( $job );
+					$saved = microtime( true );
+				}
 				// Every post, term and meta row read stays in WordPress's in-request cache; over
 				// thousands of steps that alone exhausts a 64 MB host. A persistent cache is left alone.
 				if ( ! wp_using_ext_object_cache() ) {
@@ -224,7 +300,41 @@ final class Jobs {
 					$saved = microtime( true );
 				}
 			}
+			// The request ended on its own: the state it leaves has not killed anything.
+			wp_delete_file( Files::dir( $job['id'] ) . '/' . self::ATTEMPT_FILE );
 		} );
+	}
+
+	/** The request's own stop time, for a step that does a batch of work (media). */
+	private static $deadline = 0.0;
+
+	/** How many requests, this one included, have started from the saved state the current step works on (`attempt()`). */
+	private static $tries = 1;
+
+	/** Beside the state: `{"step":n,"n":requests}`, the saved step a request started from and how many started there. */
+	const ATTEMPT_FILE = 'attempt';
+
+	/** When this many requests started from one saved state and none lived to save, the export fails rather than try again. */
+	const MAX_ATTEMPTS = 6;
+
+	/**
+	 * Records, before any work, the saved step this request starts from and how many requests have started
+	 * from it: a request PHP kills (time or memory limit, a proxy closing it) never reaches a save, so only
+	 * something written first can tell the next request that it starts where the last one died. A request
+	 * that saves moves the state on, and the count starts over. The record is one small file beside the state,
+	 * written once per request (a save per step is the memory cost BR-24 removed), and it does not care which
+	 * step died: whatever the host kills, the count grows until the state moves. From the second request on
+	 * the media phase shrinks its batch and `run()` saves after every step, so the state reaches the step that
+	 * kills; that one then runs alone, then without its files, then is left out; past MAX_ATTEMPTS the export
+	 * fails with what to do.
+	 */
+	private static function attempt( $job ) {
+		$dir = Files::dir( $job['id'] );
+		$last = is_file( $dir . '/' . self::ATTEMPT_FILE ) ? json_decode( Files::read( $dir, self::ATTEMPT_FILE ), true ) : null;
+		$step = (int) $job['step'];
+		$deaths = is_array( $last ) && (int) ( $last['step'] ?? -1 ) === $step ? (int) ( $last['n'] ?? 0 ) + 1 : 1;
+		Files::put( $dir, self::ATTEMPT_FILE, (string) wp_json_encode( array( 'step' => $step, 'n' => $deaths ) ) );
+		return $deaths;
 	}
 
 	/** One step of the current phase. */
@@ -292,7 +402,12 @@ final class Jobs {
 			$job['cursor'] = 0;
 			return;
 		}
-		$ids = $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE ID > %d AND post_type = 'attachment' ORDER BY ID ASC LIMIT 25", $job['cursor'] ) );
+		// A request that died before saving is followed by one with a smaller batch, then one attachment at a
+		// time (each saved), then the attachment that kills with its files left on WordPress, then without it
+		// at all: the same cursor is never retried for ever (`attempt()`).
+		$tries = self::$tries;
+		$batch = $tries >= 3 ? 1 : ( 2 === $tries ? 5 : 25 );
+		$ids = $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE ID > %d AND post_type = 'attachment' ORDER BY ID ASC LIMIT %d", $job['cursor'], $batch ) );
 		if ( $wpdb->last_error ) {
 			throw new \RuntimeException( 'Cannot enumerate media.' );
 		}
@@ -300,7 +415,31 @@ final class Jobs {
 		// Records without their files: the reader localizes media itself, and with nothing copied nothing is
 		// relinked, so the store keeps every WordPress URL (`Models::relink` rewrites only copied files).
 		$copy = $job['options']['media_files'] ?? true;
-		foreach ( $ids as $id ) {
+		if ( $ids && $tries >= 5 ) {
+			// Even alone and without its files this attachment ends the request: it is left out altogether, named,
+			// and content keeps its WordPress URL (nothing copied means nothing relinked). The export goes on.
+			$skipped = (int) $ids[0];
+			$job['cursor'] = $skipped;
+			// The URL from the row itself: reading the attachment's meta is what may be killing the request.
+			$url = (string) $wpdb->get_var( $wpdb->prepare( "SELECT guid FROM {$wpdb->posts} WHERE ID = %d", $skipped ) );
+			self::warning( $job, array( 'source' => 'attachment/' . $skipped, 'reason' => 'media-skipped-after-repeated-failure: left out of the export after ' . ( $tries - 1 ) . ' requests ended on it; content keeps its WordPress URL' . ( '' !== $url ? ' (' . $url . ')' : '' ) ) );
+			++$job['counts']['media_kept_remote'];
+			return;
+		}
+		if ( $copy && $tries >= 4 && $ids ) {
+			$copy = false;
+			self::warning( $job, array( 'source' => 'attachment/' . $ids[0], 'reason' => 'media-files-skipped-after-repeated-failure: kept as WordPress URLs' ) );
+			++$job['counts']['media_kept_remote'];
+		}
+		$limit = wp_convert_hr_to_bytes( (string) ini_get( 'memory_limit' ) );
+		$stopped = false;
+		foreach ( $ids as $position => $id ) {
+			// Stop between attachments, not inside one, when the request is about to run out of time or memory;
+			// the cursor already names the last one finished, so the next request carries on from there.
+			if ( $position > 0 && ( ( self::$deadline && microtime( true ) + 3 >= self::$deadline ) || ( $limit > 0 && memory_get_usage() > 0.7 * $limit ) ) ) {
+				$stopped = true;
+				break;
+			}
 			$p = get_post( $id );
 			$job['cursor'] = (int) $id;
 			if ( ! $p ) {
@@ -352,7 +491,7 @@ final class Jobs {
 			Models::entry( $job, 'wp-media', $job['default_locale'], substr( hash( 'sha256', 'media:' . $id ), 0, 12 ), $data );
 			++$job['counts']['media'];
 		}
-		if ( count( $ids ) < 25 ) {
+		if ( ! $stopped && count( $ids ) < $batch ) {
 			$job['phase'] = 'posts';
 			$job['cursor'] = 0;
 		}

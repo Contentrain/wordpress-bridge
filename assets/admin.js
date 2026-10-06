@@ -8,20 +8,51 @@
   let busy = false;
   let offset = 0;
   let candidates = [];
-  async function api(payload) {
+  // A request the host cut short, an HTML error page, a busy export: the export is saved, so these are retried.
+  const HOST_STATUS = [500, 502, 503, 504, 520, 521, 522, 524];
+  const RETRY_AFTER = [2000, 5000, 10000];
+  const STEP_TIMEOUT = 120000;
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  function retryable(message) { return Object.assign(new Error(message), { retryable: true }); }
+  async function api(payload, timeout = 0) {
     const body = new URLSearchParams({ action: 'contentrain_bridge', nonce: ContentrainBridge.nonce, payload: JSON.stringify(payload) });
-    const response = await fetch(ContentrainBridge.ajax, { method: 'POST', credentials: 'same-origin', body });
+    const controller = new AbortController();
+    const timer = timeout ? setTimeout(() => controller.abort(), timeout) : 0;
+    let response;
+    let text;
+    try {
+      response = await fetch(ContentrainBridge.ajax, { method: 'POST', credentials: 'same-origin', body, signal: controller.signal });
+      text = await response.text();
+    } catch (err) {
+      throw retryable(controller.signal.aborted ? __('the server did not answer in time', 'contentrain-bridge') : __('the connection to the server was lost', 'contentrain-bridge'));
+    } finally { clearTimeout(timer); }
     let result;
-    try { result = await response.json(); } catch { throw new Error(__('WordPress returned an invalid response. Retry to resume your export.', 'contentrain-bridge')); }
-    if (!response.ok || !result.success) throw new Error(result.data?.message || __('Request failed. Please retry.', 'contentrain-bridge'));
+    try { result = JSON.parse(text); } catch {
+      if (HOST_STATUS.includes(response.status) || response.ok) throw retryable(sprintf(__('the host answered with an error page (HTTP %d)', 'contentrain-bridge'), response.status));
+      throw new Error(sprintf(__('WordPress returned an invalid response (HTTP %d). Retry to resume your export.', 'contentrain-bridge'), response.status));
+    }
+    if (!response.ok || !result.success) {
+      if (result.data?.busy) throw retryable(result.data.message || __('the export is busy', 'contentrain-bridge'));
+      if (HOST_STATUS.includes(response.status)) throw retryable(sprintf(__('the server answered with HTTP %d', 'contentrain-bridge'), response.status));
+      throw new Error(result.data?.message || __('Request failed. Please retry.', 'contentrain-bridge'));
+    }
     return result.data;
+  }
+  // The same position three times running means the server is not advancing: say so instead of looping.
+  function stall(label) {
+    let last; let same = 0;
+    return (position) => {
+      same = position === last ? same + 1 : 0;
+      last = position;
+      if (same >= 3) throw new Error(sprintf(__('The %s did not advance. Stop and retry; if it repeats, delete the export and start again.', 'contentrain-bridge'), label));
+    };
   }
   function error(err) { $('error').textContent = err.message; $('error').hidden = false; }
   function render() {
     $('scope').hidden = Boolean(job);
     $('delete').hidden = !job;
     $('pause').hidden = !running;
-    $('resume').hidden = !job || running || ['ready', 'review'].includes(job.phase);
+    $('resume').hidden = !job || running || ['ready', 'review', 'failed'].includes(job.phase);
     $('review').hidden = !job || job.phase !== 'review';
     $('delivery').hidden = !job || job.phase !== 'ready';
     if (!job) return;
@@ -44,11 +75,26 @@
     running = true;
     try {
       render();
-      while (running && !['review', 'ready'].includes(job.phase)) {
-        job = await api({ op: 'step', id: job.id, step: job.step });
-        render();
+      let failures = 0;
+      while (running && !['review', 'ready', 'failed'].includes(job.phase)) {
+        try {
+          job = await api({ op: 'step', id: job.id, step: job.step }, STEP_TIMEOUT);
+          failures = 0;
+          $('error').hidden = true;
+          render();
+        } catch (err) {
+          if (!err.retryable) throw err;
+          if (failures >= RETRY_AFTER.length) {
+            throw new Error(sprintf(__('The export stopped at stage “%1$s” because %2$s. Your progress is saved: use Resume to continue. If this repeats, the host’s time or memory limit is probably too low for this site.', 'contentrain-bridge'), job.phase, err.message));
+          }
+          const delay = RETRY_AFTER[failures++];
+          $('status').textContent = sprintf(__('Stage %1$s: %2$s. Retrying in %3$d s…', 'contentrain-bridge'), job.phase, err.message, delay / 1000);
+          await wait(delay);
+        }
       }
     } finally { running = false; render(); }
+    // The server gave the export up (a step that ended the request again and again): its reason says what to do.
+    if (job.phase === 'failed') error(new Error(job.error?.message || __('The export failed.', 'contentrain-bridge')));
     if (job.phase === 'review') await loadCandidates();
     if (job.phase === 'ready') { renderIntegrations(); await loadCoverage(); }
   }
@@ -139,7 +185,8 @@
   action('finish', async () => { await saveReview(true); await loop(); });
   action('zip', async () => {
     let result;
-    do { result = await api({ op: 'zip', id: job.id }); $('status').textContent = sprintf(__('Preparing archive: %d files', 'contentrain-bridge'), result.cursor); } while (!result.done);
+    const advanced = stall(__('archive', 'contentrain-bridge'));
+    do { result = await api({ op: 'zip', id: job.id }); advanced(result.cursor); $('status').textContent = sprintf(__('Preparing archive: %d files', 'contentrain-bridge'), result.cursor); } while (!result.done);
     const url = new URL(ContentrainBridge.download);
     url.search = new URLSearchParams({ action: 'contentrain_bridge_download', id: job.id, _wpnonce: ContentrainBridge.downloadNonce });
     $('download').href = url.href; $('download').hidden = false;
@@ -152,7 +199,9 @@
     $('token').value = '';
     try {
       job = await api({ op: 'github-start', id: job.id, token, repository: $('repo').value.trim(), base_branch: $('base').value.trim(), consent: true, on_conflict: $('conflict').value });
+      const advanced = stall(__('delivery', 'contentrain-bridge'));
       while (job.github.phase !== 'done') {
+        advanced(`${job.github.phase}:${job.github.cursor}`);
         job = await api({ op: 'github-step', id: job.id, token, cursor: job.github.cursor });
         $('status').textContent = sprintf(__('Delivering file step %d', 'contentrain-bridge'), job.github.cursor);
       }

@@ -141,7 +141,7 @@ final class Admin {
 					break;
 				case 'create': $result = Jobs::create( $input ); break;
 				case 'status': $result = Jobs::summary( Jobs::read( $id ) ); break;
-				case 'step': $result = Jobs::step( $id, $input['step'] ?? -1 ); break;
+				case 'step': $result = Jobs::advance( $id, $input['step'] ?? -1 ); break;
 				case 'candidates':
 					$job = Jobs::read( $id );
 					$result = array_slice( array_values( $job['candidates'] ), max( 0, (int) ( $input['offset'] ?? 0 ) ), 30 );
@@ -187,7 +187,9 @@ final class Admin {
 			}
 			wp_send_json_success( $result );
 		} catch ( \Throwable $error ) {
-			wp_send_json_error( array( 'message' => $error->getMessage() ), 400 );
+			// 409 is a busy export, not a failure: the browser retries it, so it must reach the browser as one.
+			$busy = 409 === $error->getCode();
+			wp_send_json_error( array( 'message' => $error->getMessage(), 'busy' => $busy ), $busy ? 409 : 400 );
 		}
 	}
 
