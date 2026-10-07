@@ -76,6 +76,13 @@ The plugin stores export ownership and a source revision marker. It sends nothin
 
 == Changelog ==
 
+= 0.6.4 =
+
+* The export screen (Tools > Contentrain Bridge) is laid out in WordPress's own cards and shows where the export is: the nine stages as a list with the current one marked, a progress bar with a percentage, the item being worked on, and the counts so far. A stage the chosen scope leaves out (media, comments) is shown as skipped.
+* When the export stops, the screen says what happened and what to do: a stop the screen can retry (an interrupted or busy request, an archive or delivery that did not advance) offers Retry; an export the server gave up on offers deleting it and starting again with a smaller scope. Keyboard and screen-reader users land on the message, and progress is announced on a stage change and every quarter of the way rather than on every batch.
+* A finished export opens with its totals and the two ways to take it, the ZIP download and GitHub delivery, with the coverage table folded away until wanted. Before an export the screen says what will happen.
+* Each stage records its progress (items done, items in all, the latest item) in the export's state, so a screen opened later shows it too. An export started by an earlier version shows its stages without a count until its next stage begins.
+
 = 0.6.3 =
 
 * The export from the plugin's own screen no longer hangs on a host whose time or memory limit ends the request mid-step. Each request now does as many steps as fit in twelve seconds and saves as it goes; a request the host kills is counted, the next one works in smaller batches and saves after every step, an attachment that ends the request again and again is left out with a notice (its WordPress address is kept), and after six killed requests from the same point the export stops with a message saying what to do instead of retrying for ever. The screen retries a busy or interrupted request by itself, with a timeout, and shows the reason when it gives up.
