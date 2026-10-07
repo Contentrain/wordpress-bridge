@@ -29,7 +29,27 @@ final class Admin {
 		wp_enqueue_style( 'contentrain-bridge', plugins_url( 'assets/admin.css', CONTENTRAIN_BRIDGE_FILE ), array(), CONTENTRAIN_BRIDGE_VERSION );
 		wp_enqueue_script( 'contentrain-bridge', plugins_url( 'assets/admin.js', CONTENTRAIN_BRIDGE_FILE ), array( 'wp-i18n' ), CONTENTRAIN_BRIDGE_VERSION, true );
 		wp_set_script_translations( 'contentrain-bridge', 'contentrain-bridge' );
-		wp_localize_script( 'contentrain-bridge', 'ContentrainBridge', array( 'secure' => is_ssl() || 'local' === wp_get_environment_type(), 'ajax' => admin_url( 'admin-ajax.php' ), 'nonce' => wp_create_nonce( 'contentrain_bridge' ), 'download' => admin_url( 'admin-post.php' ), 'downloadNonce' => wp_create_nonce( 'contentrain_bridge_download' ) ) );
+		wp_localize_script( 'contentrain-bridge', 'ContentrainBridge', array( 'secure' => is_ssl() || 'local' === wp_get_environment_type(), 'ajax' => admin_url( 'admin-ajax.php' ), 'nonce' => wp_create_nonce( 'contentrain_bridge' ), 'download' => admin_url( 'admin-post.php' ), 'downloadNonce' => wp_create_nonce( 'contentrain_bridge_download' ), 'stages' => self::stages() ) );
+	}
+
+	/** The export's stages in order, named for the screen: what the progress list shows and what the script announces. */
+	public static function stages() {
+		return array(
+			array( 'id' => 'media', 'label' => __( 'Media', 'contentrain-bridge' ) ),
+			array( 'id' => 'posts', 'label' => __( 'Content', 'contentrain-bridge' ) ),
+			array( 'id' => 'terms', 'label' => __( 'Categories and tags', 'contentrain-bridge' ) ),
+			array( 'id' => 'inventory', 'label' => __( 'Inventory', 'contentrain-bridge' ) ),
+			array( 'id' => 'comments', 'label' => __( 'Comments', 'contentrain-bridge' ) ),
+			array( 'id' => 'sources', 'label' => __( 'Interface text', 'contentrain-bridge' ) ),
+			array( 'id' => 'tables', 'label' => __( 'Files', 'contentrain-bridge' ) ),
+			array( 'id' => 'review', 'label' => __( 'Your review', 'contentrain-bridge' ) ),
+			array( 'id' => 'ready', 'label' => __( 'Ready', 'contentrain-bridge' ) ),
+		);
+	}
+
+	/** A card heading with a Dashicon in front of it. */
+	private static function heading( $icon, $text ) {
+		printf( '<h2 class="cr-card-title"><span class="dashicons dashicons-%s" aria-hidden="true"></span> %s</h2>', esc_attr( $icon ), esc_html( $text ) );
 	}
 
 	public static function page() {
@@ -41,8 +61,8 @@ final class Admin {
 			<h1><?php esc_html_e( 'Contentrain Bridge', 'contentrain-bridge' ); ?></h1>
 			<p><?php esc_html_e( 'Turn your WordPress content into editable Contentrain JSON and Markdown. Local export and GitHub delivery are free.', 'contentrain-bridge' ); ?></p>
 			<p><?php esc_html_e( 'Your WordPress site stays as it is. Review the content models and interface text before downloading or sending anything to GitHub.', 'contentrain-bridge' ); ?></p>
-			<section id="cr-connect">
-				<h2><?php esc_html_e( 'Connect to Contentrain Migrate', 'contentrain-bridge' ); ?></h2>
+			<section id="cr-connect" class="card cr-card">
+				<?php self::heading( 'admin-links', __( 'Connect to Contentrain Migrate', 'contentrain-bridge' ) ); ?>
 				<p><?php esc_html_e( 'Moving this site with Contentrain Migrate? Create a connection key and paste it into Migrate. It lets Migrate start and read content exports of this site as you, nothing else, and works where your host blocks application passwords.', 'contentrain-bridge' ); ?></p>
 				<p><?php esc_html_e( 'The key is shown once; only a fingerprint of it is stored. Paste it into Migrate within an hour. Once Migrate has used it, it works for that one move until 14 days after it was created, until Migrate closes it when the move is done, or until you revoke it or create a new one.', 'contentrain-bridge' ); ?></p>
 				<p id="cr-key-state" role="status" aria-live="polite"></p>
@@ -54,10 +74,44 @@ final class Admin {
 				<button type="button" id="cr-key-create" class="button"><?php esc_html_e( 'Create connection key', 'contentrain-bridge' ); ?></button>
 				<button type="button" id="cr-key-revoke" class="button" hidden><?php esc_html_e( 'Revoke key', 'contentrain-bridge' ); ?></button>
 			</section>
-			<div id="cr-status" role="status" aria-live="polite"></div>
-			<div id="cr-error" class="notice notice-error" role="alert" hidden></div>
-			<section id="cr-scope">
-				<h2><?php esc_html_e( '1. Choose content', 'contentrain-bridge' ); ?></h2>
+			<div id="cr-error" class="notice notice-error inline cr-error" role="alert" hidden>
+				<h2 id="cr-error-title" class="cr-error-title" tabindex="-1"><span class="dashicons dashicons-warning" aria-hidden="true"></span> <span id="cr-error-heading"></span></h2>
+				<p id="cr-error-message"></p>
+				<p id="cr-error-hint" hidden></p>
+				<p class="cr-error-actions">
+					<button type="button" id="cr-retry" class="button button-primary" hidden><?php esc_html_e( 'Retry', 'contentrain-bridge' ); ?></button>
+					<button type="button" id="cr-restart" class="button" hidden><?php esc_html_e( 'Delete export and start again', 'contentrain-bridge' ); ?></button>
+				</p>
+			</div>
+			<section id="cr-progress" class="card cr-card" hidden>
+				<?php self::heading( 'update', __( 'Export progress', 'contentrain-bridge' ) ); ?>
+				<ol id="cr-steps" class="cr-steps">
+					<?php foreach ( self::stages() as $stage ) : ?>
+						<li data-stage="<?php echo esc_attr( $stage['id'] ); ?>" class="cr-step"><span class="cr-step-mark" aria-hidden="true"></span><span class="cr-step-label"><?php echo esc_html( $stage['label'] ); ?></span><span class="cr-step-state screen-reader-text"></span></li>
+					<?php endforeach; ?>
+				</ol>
+				<div class="cr-bar">
+					<progress id="cr-bar" max="100" value="0" aria-labelledby="cr-current"></progress>
+					<span id="cr-percent" class="cr-percent" aria-hidden="true">0%</span>
+				</div>
+				<p id="cr-current" class="cr-current"></p>
+				<div id="cr-status" class="screen-reader-text" role="status" aria-live="polite"></div>
+				<dl class="cr-counts">
+					<div><dt><?php esc_html_e( 'Content', 'contentrain-bridge' ); ?></dt><dd id="cr-count-posts">0</dd></div>
+					<div><dt><?php esc_html_e( 'Media', 'contentrain-bridge' ); ?></dt><dd id="cr-count-media">0</dd></div>
+					<div><dt><?php esc_html_e( 'Files', 'contentrain-bridge' ); ?></dt><dd id="cr-count-files">0</dd></div>
+					<div><dt><?php esc_html_e( 'Texts to review', 'contentrain-bridge' ); ?></dt><dd id="cr-count-texts">0</dd></div>
+					<div><dt><?php esc_html_e( 'Coverage notices', 'contentrain-bridge' ); ?></dt><dd id="cr-count-warnings">0</dd></div>
+				</dl>
+				<div class="cr-actions">
+					<button type="button" id="cr-resume" class="button button-primary" hidden><?php esc_html_e( 'Continue', 'contentrain-bridge' ); ?></button>
+					<button type="button" id="cr-pause" class="button" hidden><?php esc_html_e( 'Pause', 'contentrain-bridge' ); ?></button>
+					<button type="button" id="cr-delete" class="button-link button-link-delete" hidden><?php esc_html_e( 'Delete temporary export', 'contentrain-bridge' ); ?></button>
+				</div>
+			</section>
+			<section id="cr-scope" class="card cr-card">
+				<?php self::heading( 'database-export', __( '1. Choose content', 'contentrain-bridge' ) ); ?>
+				<p class="cr-empty"><?php esc_html_e( 'No export yet. Choose what to include and prepare the content; the export runs in this tab and saves its progress as it goes, so it can be paused and continued.', 'contentrain-bridge' ); ?></p>
 				<div id="cr-types"></div>
 				<label><input type="checkbox" id="cr-private" /> <?php esc_html_e( 'Include draft, scheduled, private and password-protected content (requires a private GitHub repository)', 'contentrain-bridge' ); ?></label>
 				<label><input type="checkbox" id="cr-comments" /> <?php esc_html_e( 'Include comment archive: names, links and text; no email, IP address or comment metadata', 'contentrain-bridge' ); ?></label>
@@ -68,34 +122,39 @@ final class Admin {
 				<label for="cr-meta"><?php esc_html_e( 'Additional post metadata keys to include, separated by commas. Secret-like keys are always excluded.', 'contentrain-bridge' ); ?></label>
 				<input type="text" id="cr-meta" class="large-text" autocomplete="off" />
 				<p><?php esc_html_e( 'ACF content, supported SEO metadata and core media fields are discovered automatically. Complex fields become editable related records. Unknown metadata and unsupported dynamic states are listed in the coverage report.', 'contentrain-bridge' ); ?></p>
-				<button type="button" id="cr-create" class="button button-primary"><?php esc_html_e( 'Prepare content', 'contentrain-bridge' ); ?></button>
+				<p class="cr-actions"><button type="button" id="cr-create" class="button button-primary button-hero"><?php esc_html_e( 'Prepare content', 'contentrain-bridge' ); ?></button></p>
 			</section>
-			<div class="cr-actions">
-				<button type="button" id="cr-resume" class="button" hidden><?php esc_html_e( 'Continue', 'contentrain-bridge' ); ?></button>
-				<button type="button" id="cr-pause" class="button" hidden><?php esc_html_e( 'Pause', 'contentrain-bridge' ); ?></button>
-				<button type="button" id="cr-delete" class="button" hidden><?php esc_html_e( 'Delete temporary export', 'contentrain-bridge' ); ?></button>
-			</div>
-			<section id="cr-review" hidden>
-				<h2><?php esc_html_e( '2. Review models and interface text', 'contentrain-bridge' ); ?></h2>
+			<section id="cr-review" class="card cr-card" hidden>
+				<h2 id="cr-review-title" class="cr-card-title" tabindex="-1"><span class="dashicons dashicons-edit" aria-hidden="true"></span> <?php esc_html_e( '2. Review models and interface text', 'contentrain-bridge' ); ?></h2>
 				<div id="cr-models"></div>
 				<p><?php esc_html_e( 'Review each candidate in context. Change the key to group equivalent messages. Exclude code constants and unrelated text. Source code is never patched by this export.', 'contentrain-bridge' ); ?></p>
 				<div id="cr-candidates"></div>
-				<button type="button" id="cr-save-review" class="button"><?php esc_html_e( 'Save this page', 'contentrain-bridge' ); ?></button>
-				<button type="button" id="cr-prev" class="button"><?php esc_html_e( 'Previous', 'contentrain-bridge' ); ?></button>
-				<button type="button" id="cr-next" class="button"><?php esc_html_e( 'Next', 'contentrain-bridge' ); ?></button>
-				<button type="button" id="cr-finish" class="button button-primary"><?php esc_html_e( 'Validate and finalize', 'contentrain-bridge' ); ?></button>
+				<p class="cr-actions">
+					<button type="button" id="cr-save-review" class="button"><?php esc_html_e( 'Save this page', 'contentrain-bridge' ); ?></button>
+					<button type="button" id="cr-prev" class="button"><?php esc_html_e( 'Previous', 'contentrain-bridge' ); ?></button>
+					<button type="button" id="cr-next" class="button"><?php esc_html_e( 'Next', 'contentrain-bridge' ); ?></button>
+					<button type="button" id="cr-finish" class="button button-primary"><?php esc_html_e( 'Validate and finalize', 'contentrain-bridge' ); ?></button>
+				</p>
 			</section>
-			<section id="cr-delivery" hidden>
-				<h2><?php esc_html_e( '3. Get your content', 'contentrain-bridge' ); ?></h2>
+			<section id="cr-delivery" class="card cr-card" hidden>
+				<h2 id="cr-done-title" class="cr-card-title" tabindex="-1"><span class="dashicons dashicons-yes-alt" aria-hidden="true"></span> <?php esc_html_e( '3. Your content is ready', 'contentrain-bridge' ); ?></h2>
+				<div class="notice notice-success inline cr-done">
+					<p id="cr-done-summary"></p>
+					<p><?php esc_html_e( 'Download it as a ZIP, deliver it to a GitHub repository, or both. The temporary export is kept for a day.', 'contentrain-bridge' ); ?></p>
+				</div>
 				<p><?php esc_html_e( 'Review the coverage report: copied media is included; missing or oversized files may still use WordPress URLs. Dynamic WordPress behavior needs a renderer.', 'contentrain-bridge' ); ?></p>
 				<h3><?php esc_html_e( 'Services to reconnect', 'contentrain-bridge' ); ?></h3>
 				<p><?php esc_html_e( 'Outside services this site is connected to. No keys or tokens were exported: connect each one again on the new site with its own credentials.', 'contentrain-bridge' ); ?></p>
 				<ul id="cr-integrations"></ul>
 				<h3><?php esc_html_e( 'Source coverage', 'contentrain-bridge' ); ?></h3>
 				<p><?php esc_html_e( 'Every place WordPress keeps content, counted in the database and split into what was exported, what was left out and why, and what this export cannot read. The same report is in the export as bridge/coverage.json.', 'contentrain-bridge' ); ?></p>
-				<div id="cr-coverage"></div>
-				<button type="button" id="cr-zip" class="button"><?php esc_html_e( 'Prepare ZIP download', 'contentrain-bridge' ); ?></button>
-				<a id="cr-download" class="button" hidden><?php esc_html_e( 'Download JSON / Markdown ZIP', 'contentrain-bridge' ); ?></a>
+				<details class="cr-coverage"><summary><?php esc_html_e( 'Show the full coverage table', 'contentrain-bridge' ); ?></summary><div id="cr-coverage"></div></details>
+				<h3><?php esc_html_e( 'Download', 'contentrain-bridge' ); ?></h3>
+				<p class="cr-actions">
+					<button type="button" id="cr-zip" class="button button-primary"><?php esc_html_e( 'Prepare ZIP download', 'contentrain-bridge' ); ?></button>
+					<a id="cr-download" class="button button-primary" hidden><?php esc_html_e( 'Download JSON / Markdown ZIP', 'contentrain-bridge' ); ?></a>
+				</p>
+				<h3><?php esc_html_e( 'Deliver to GitHub', 'contentrain-bridge' ); ?></h3>
 				<label for="cr-repo"><?php esc_html_e( 'GitHub repository (owner/repository, initialized with a README)', 'contentrain-bridge' ); ?></label>
 				<input id="cr-repo" type="text" class="regular-text" autocomplete="off" />
 				<label for="cr-base"><?php esc_html_e( 'Base branch (optional; empty uses the repository\'s default branch). Delivery reads it and never writes it.', 'contentrain-bridge' ); ?></label>
@@ -110,11 +169,11 @@ final class Admin {
 					<option value="keep-repository"><?php esc_html_e( 'Keep the repository version, deliver everything else', 'contentrain-bridge' ); ?></option>
 					<option value="use-wordpress"><?php esc_html_e( 'Use the WordPress version on the delivery branch, for review', 'contentrain-bridge' ); ?></option>
 				</select>
-				<button id="cr-github" type="button" class="button button-primary"><?php esc_html_e( 'Deliver to GitHub', 'contentrain-bridge' ); ?></button>
+				<p class="cr-actions"><button id="cr-github" type="button" class="button"><?php esc_html_e( 'Deliver to GitHub', 'contentrain-bridge' ); ?></button></p>
 				<p><a id="cr-receipt" target="_blank" rel="noopener noreferrer" hidden><?php esc_html_e( 'View delivered commit', 'contentrain-bridge' ); ?></a></p>
 			</section>
-			<section id="cr-migrate" hidden>
-				<h2><?php esc_html_e( 'Want an Astro website?', 'contentrain-bridge' ); ?></h2>
+			<section id="cr-migrate" class="card cr-card" hidden>
+				<?php self::heading( 'admin-site-alt3', __( 'Want an Astro website?', 'contentrain-bridge' ) ); ?>
 				<p><?php esc_html_e( 'Your content export is already yours. Migrate can use the content models, source mappings and WordPress inventory to build an Astro website. No data is sent by opening this link; connect your export in Migrate when you choose to continue.', 'contentrain-bridge' ); ?></p>
 				<a class="button" href="https://migrate.contentrain.io/?source=wordpress-bridge" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Explore Astro migration', 'contentrain-bridge' ); ?></a>
 			</section>

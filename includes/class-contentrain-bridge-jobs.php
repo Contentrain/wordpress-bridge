@@ -254,7 +254,7 @@ final class Jobs {
 			if ( $deaths > self::MAX_ATTEMPTS ) {
 				// This many requests started from this very state and none lived to save: one more would be the
 				// loop this guards against. Said once, with what to do; the admin screen stops here.
-				$job['error'] = array( 'code' => 'step_repeatedly_killed', 'message' => sprintf( 'Step %d of stage "%s" stopped the request %d times without finishing; the host\'s time or memory limit is probably too low for this site. Delete the export and start again with a smaller scope (fewer content types, or without media files), or raise the host\'s limits.', $job['step'], $job['phase'], self::MAX_ATTEMPTS ) );
+				$job['error'] = array( 'code' => 'step_repeatedly_killed', 'stage' => $job['phase'], 'message' => sprintf( 'Step %d of stage "%s" stopped the request %d times without finishing; the host\'s time or memory limit is probably too low for this site. Delete the export and start again with a smaller scope (fewer content types, or without media files), or raise the host\'s limits.', $job['step'], $job['phase'], self::MAX_ATTEMPTS ) );
 				$job['phase'] = 'failed';
 				return;
 			}
@@ -337,6 +337,34 @@ final class Jobs {
 		return $deaths;
 	}
 
+	/**
+	 * How far the current stage is, for the admin screen's progress bar: items done, items in all
+	 * (null when a stage cannot count ahead) and the item being worked on. Set once per stage, by
+	 * the stage itself; an export saved by an older version has none until its stage changes, and
+	 * the screen then shows the stages without a bar.
+	 */
+	private static function progress( &$job, $total ) {
+		if ( ! isset( $job['progress'] ) && 0 !== (int) $job['cursor'] ) {
+			return; // An older version's export, part way through this stage: nothing done is known, so no count is claimed.
+		}
+		if ( ( $job['progress']['phase'] ?? null ) !== $job['phase'] ) {
+			$job['progress'] = array( 'phase' => $job['phase'], 'done' => 0, 'total' => null === $total ? null : (int) $total, 'current' => '' );
+		}
+	}
+
+	/** A record's name for the screen: its title, or its slug, or its id when it has neither. */
+	private static function name( $p ) {
+		return '' !== (string) $p->post_title ? (string) $p->post_title : ( '' !== (string) $p->post_name ? (string) $p->post_name : '#' . $p->ID );
+	}
+
+	/** One more item of the current stage is done; `$current` names it for the screen. */
+	private static function progressed( &$job, $current = '' ) {
+		if ( isset( $job['progress'] ) ) {
+			++$job['progress']['done'];
+			$job['progress']['current'] = (string) $current;
+		}
+	}
+
 	/** One step of the current phase. */
 	private static function tick( &$job ) {
 		self::snapshot( $job );
@@ -354,8 +382,11 @@ final class Jobs {
 			self::sources( $job );
 		} elseif ( 'tables' === $job['phase'] ) {
 			$paths = array_keys( $job['tables'] );
+			self::progress( $job, count( $paths ) );
 			if ( isset( $paths[ $job['cursor'] ] ) ) {
-				Models::table( $job, $paths[ $job['cursor']++ ] );
+				$path = $paths[ $job['cursor']++ ];
+				Models::table( $job, $path );
+				self::progressed( $job, $path );
 			} else {
 				self::finish( $job );
 			}
@@ -407,6 +438,9 @@ final class Jobs {
 		// at all: the same cursor is never retried for ever (`attempt()`).
 		$tries = self::$tries;
 		$batch = $tries >= 3 ? 1 : ( 2 === $tries ? 5 : 25 );
+		if ( ( $job['progress']['phase'] ?? null ) !== 'media' ) {
+			self::progress( $job, (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type = 'attachment'" ) );
+		}
 		$ids = $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE ID > %d AND post_type = 'attachment' ORDER BY ID ASC LIMIT %d", $job['cursor'], $batch ) );
 		if ( $wpdb->last_error ) {
 			throw new \RuntimeException( 'Cannot enumerate media.' );
@@ -424,6 +458,7 @@ final class Jobs {
 			$url = (string) $wpdb->get_var( $wpdb->prepare( "SELECT guid FROM {$wpdb->posts} WHERE ID = %d", $skipped ) );
 			self::warning( $job, array( 'source' => 'attachment/' . $skipped, 'reason' => 'media-skipped-after-repeated-failure: left out of the export after ' . ( $tries - 1 ) . ' requests ended on it; content keeps its WordPress URL' . ( '' !== $url ? ' (' . $url . ')' : '' ) ) );
 			++$job['counts']['media_kept_remote'];
+			self::progressed( $job, basename( $url ) );
 			return;
 		}
 		if ( $copy && $tries >= 4 && $ids ) {
@@ -453,6 +488,7 @@ final class Jobs {
 			if ( $reason ) {
 				Coverage::tally( $job, array( 'posts', 'attachment', $p->post_status ), 'excluded:' . $reason );
 				self::warning( $job, array( 'source' => 'attachment/' . $id, 'reason' => 'excluded-by-status-scope' ) );
+				self::progressed( $job, self::name( $p ) );
 				continue;
 			}
 			Coverage::tally( $job, array( 'posts', 'attachment', $p->post_status ), 'exported' );
@@ -490,6 +526,7 @@ final class Jobs {
 			}
 			Models::entry( $job, 'wp-media', $job['default_locale'], substr( hash( 'sha256', 'media:' . $id ), 0, 12 ), $data );
 			++$job['counts']['media'];
+			self::progressed( $job, self::name( $p ) );
 		}
 		if ( ! $stopped && count( $ids ) < $batch ) {
 			$job['phase'] = 'posts';
@@ -546,6 +583,9 @@ final class Jobs {
 			return;
 		}
 		$placeholders = implode( ',', array_fill( 0, count( $types ), '%s' ) );
+		if ( ( $job['progress']['phase'] ?? null ) !== 'posts' ) {
+			self::progress( $job, (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type IN ($placeholders)", $types ) ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Placeholder list contains no user data.
+		}
 		$args = array_merge( array( $job['cursor'] ), $types );
 		$sql = "SELECT ID FROM {$wpdb->posts} WHERE ID > %d AND post_type IN ($placeholders) ORDER BY ID ASC LIMIT 25";
 		$ids = $wpdb->get_col( $wpdb->prepare( $sql, $args ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Placeholder list contains no user data.
@@ -568,6 +608,7 @@ final class Jobs {
 			if ( $reason ) {
 				Coverage::tally( $job, array( 'posts', $p->post_type, $p->post_status ), 'excluded:' . $reason );
 				self::warning( $job, array( 'source' => 'post/' . $id, 'reason' => 'excluded-by-status-scope' ) );
+				self::progressed( $job, self::name( $p ) );
 				continue;
 			}
 			$excluded = array();
@@ -583,6 +624,7 @@ final class Jobs {
 				Models::row( $job, 'bridge/seo-entries.json', 'post:' . $id, $seo );
 			}
 			++$job['counts']['posts'];
+			self::progressed( $job, self::name( $p ) );
 		}
 		if ( count( $ids ) < 25 ) {
 			$job['phase'] = 'terms';
@@ -592,6 +634,10 @@ final class Jobs {
 
 	private static function terms( &$job ) {
 		global $wpdb;
+		if ( ( $job['progress']['phase'] ?? null ) !== 'terms' ) {
+			// The same join as the enumeration below: a term_taxonomy row without its term is never listed, so never counted.
+			self::progress( $job, (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->term_taxonomy} tt JOIN {$wpdb->terms} t ON t.term_id = tt.term_id" ) );
+		}
 		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT tt.term_taxonomy_id, tt.taxonomy, tt.description, tt.parent, t.term_id, t.name, t.slug FROM {$wpdb->term_taxonomy} tt JOIN {$wpdb->terms} t ON t.term_id = tt.term_id WHERE tt.term_taxonomy_id > %d ORDER BY tt.term_taxonomy_id LIMIT 50", $job['cursor'] ) );
 		if ( $wpdb->last_error ) {
 			throw new \RuntimeException( 'Cannot enumerate taxonomies.' );
@@ -608,6 +654,7 @@ final class Jobs {
 				Models::term_raw( $job, (object) array( 'term_id' => (int) $row->term_id, 'taxonomy' => $row->taxonomy, 'slug' => $row->slug, 'name' => $row->name, 'description' => $row->description, 'parent' => (int) $row->parent ) );
 				Coverage::tally( $job, array( 'terms', $row->taxonomy ), 'excluded:taxonomy-not-registered' );
 				$job['cursor'] = $id;
+				self::progressed( $job, $row->name );
 				continue;
 			}
 			$t = Source::term_by( 'term_taxonomy_id', $id );
@@ -634,6 +681,7 @@ final class Jobs {
 				Coverage::tally( $job, array( 'terms', $t->taxonomy ), 'excluded:non-public-taxonomy' );
 			}
 			$job['cursor'] = $id;
+			self::progressed( $job, $t->name );
 		}
 		if ( count( $rows ) < 50 ) {
 			$job['phase'] = 'inventory';
@@ -647,7 +695,9 @@ final class Jobs {
 	 * measured from. Taken inside the same revision-checked snapshot as the content.
 	 */
 	private static function inventory( &$job ) {
+		self::progress( $job, null );
 		list( $records, $job['inventory_cursor'] ) = Inventory::page( $job['record_scope'], $job['inventory_cursor'] );
+		self::progressed( $job, (string) ( $job['inventory_cursor']['stage'] ?? '' ) );
 		// Beside the state, one JSON line per record: a large site's inventory would not fit in the state
 		// that every step reads and writes (BR-24). Pages are disjoint, and a request that died after
 		// appending but before saving left lines the saved cursor does not know: they are cut off
@@ -665,6 +715,9 @@ final class Jobs {
 
 	private static function comments( &$job ) {
 		global $wpdb;
+		if ( ( $job['progress']['phase'] ?? null ) !== 'comments' ) {
+			self::progress( $job, $job['options']['comments'] ? (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->comments}" ) : 0 );
+		}
 		$ids = $job['options']['comments'] ? $wpdb->get_col( $wpdb->prepare( "SELECT comment_ID FROM {$wpdb->comments} WHERE comment_ID > %d ORDER BY comment_ID LIMIT 50", $job['cursor'] ) ) : array();
 		if ( $wpdb->last_error ) {
 			throw new \RuntimeException( 'Cannot enumerate comments.' );
@@ -675,12 +728,14 @@ final class Jobs {
 			if ( ! isset( $job['tables']['bridge/entry-source-map.json'][ $c->comment_post_ID ] ) ) {
 				Coverage::tally( $job, array( 'comments', (string) $c->comment_approved ), 'excluded:post-not-in-scope' );
 				self::warning( $job, array( 'source' => 'comment/' . $id, 'reason' => 'post-not-in-scope' ) );
+				self::progressed( $job, $c->comment_author );
 				continue;
 			}
 			Coverage::tally( $job, array( 'comments', (string) $c->comment_approved ), 'exported' );
 			$data = array( 'id' => (int) $id, 'post' => (int) $c->comment_post_ID, 'post_type' => get_post_type( $c->comment_post_ID ), 'parent' => (int) $c->comment_parent ?: null, 'parent_resolved' => ! $c->comment_parent || null !== get_comment( $c->comment_parent ), 'author' => $c->comment_author, 'url' => $c->comment_author_url ?: null, 'date' => Exporter::utc_date( $c->comment_date_gmt ), 'content' => $c->comment_content, 'approved' => $c->comment_approved, 'type' => $c->comment_type, 'user_id' => null, 'meta' => (object) array() );
 			Models::row( $job, 'bridge/raw-comments.json', $id, $data );
 			++$job['counts']['comments'];
+			self::progressed( $job, $c->comment_author );
 		}
 		if ( count( $ids ) < 50 ) {
 			$job['phase'] = 'sources';
@@ -704,14 +759,18 @@ final class Jobs {
 		$files = $job['source_files'];
 		$states = $job['options']['scan_render'] ? ( $job['render_states'] = $job['render_states'] ?? Text::render_states() ) : array();
 		$step = $job['cursor'];
+		self::progress( $job, count( $files ) + 1 + count( $states ) );
 		$job['text'] = $job['text'] ?? array( 'occurrences' => array(), 'errors' => array(), 'counts' => array( 'unlisted_excluded' => 0, 'unlisted_by_reason' => array(), 'sources' => array( 'files' => count( $files ), 'settings' => 1, 'render_states' => count( $states ) ) ) );
 		if ( $step < count( $files ) ) {
 			$result = Scanner::scan( $files[ $step ], $job['default_locale'] );
+			self::progressed( $job, basename( $files[ $step ] ) );
 		} elseif ( $step === count( $files ) ) {
 			$result = Text::settings( $job['default_locale'] );
+			self::progressed( $job, 'settings' );
 		} elseif ( $step <= count( $files ) + count( $states ) ) {
 			$state = array_keys( $states )[ $step - count( $files ) - 1 ];
 			$result = Text::render( $state, $states[ $state ], $job['default_locale'] );
+			self::progressed( $job, $state );
 		} else {
 			$job['candidates'] = Text::merge( $job['text']['occurrences'], Text::content_texts() );
 			if ( count( $job['candidates'] ) > 20000 ) {
@@ -876,7 +935,7 @@ final class Jobs {
 	}
 
 	public static function summary( $job ) {
-		$result = array_intersect_key( $job, array_flip( array( 'id', 'phase', 'cursor', 'step', 'counts', 'created_at', 'error' ) ) ) + array( 'expires_at' => gmdate( 'c', strtotime( $job['created_at'] ) + DAY_IN_SECONDS ), 'scope' => array_intersect_key( $job['options'] + array( 'media_files' => true ), array_flip( array( 'types', 'private', 'comments', 'media_files' ) ) ), 'files' => count( $job['files'] ), 'models' => array_values( $job['models'] ), 'candidates' => count( $job['candidates'] ), 'unreviewed' => count( array_filter( $job['candidates'], static function ( $candidate ) { return 'review' === $candidate['decision']; } ) ) );
+		$result = array_intersect_key( $job, array_flip( array( 'id', 'phase', 'cursor', 'step', 'counts', 'created_at', 'error', 'progress' ) ) ) + array( 'expires_at' => gmdate( 'c', strtotime( $job['created_at'] ) + DAY_IN_SECONDS ), 'scope' => array_intersect_key( $job['options'] + array( 'media_files' => true ), array_flip( array( 'types', 'private', 'comments', 'media_files' ) ) ), 'files' => count( $job['files'] ), 'models' => array_values( $job['models'] ), 'candidates' => count( $job['candidates'] ), 'unreviewed' => count( array_filter( $job['candidates'], static function ( $candidate ) { return 'review' === $candidate['decision']; } ) ) );
 		if ( isset( $job['coverage_summary'] ) ) {
 			$result['coverage'] = $job['coverage_summary'];
 		}
