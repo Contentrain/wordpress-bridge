@@ -3,7 +3,7 @@
  * Plugin Name:       Contentrain Bridge
  * Plugin URI:        https://github.com/Contentrain/wordpress-bridge
  * Description:       Model and export WordPress content and interface text as Contentrain JSON/Markdown, with optional GitHub delivery.
- * Version:           0.6.2
+ * Version:           0.6.3
  * Requires at least: 6.2
  * Requires PHP:      7.4
  * Author:            Contentrain
@@ -16,7 +16,7 @@
  */
 
 defined( 'ABSPATH' ) || exit;
-define( 'CONTENTRAIN_BRIDGE_VERSION', '0.6.2' );
+define( 'CONTENTRAIN_BRIDGE_VERSION', '0.6.3' );
 define( 'CONTENTRAIN_BRIDGE_FILE', __FILE__ );
 
 foreach ( array( 'policy', 'files', 'exporter', 'menus', 'source', 'inventory', 'delta', 'seo-render', 'seo', 'redirects', 'routing', 'scanner', 'text', 'coverage', 'integrations', 'acf', 'models', 'validator', 'rawir', 'jobs', 'github', 'key', 'remote', 'admin' ) as $contentrain_bridge_class ) {
