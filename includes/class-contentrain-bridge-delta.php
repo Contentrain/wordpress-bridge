@@ -99,37 +99,51 @@ final class Delta {
 	}
 
 	/**
-	 * What a `modified_after` query alone reports: the REST API's view. It sees
+	 * What a `modified_after` cursor alone reports — the REST API's
+	 * `modified_after` view, taken over every type the inventory counts
+	 * (`Source::content_types()`), a type hidden from REST included. It sees
 	 * neither deletions nor a meta-only edit, and says so.
+	 *
+	 * Read in-process rather than through the REST routes: a type registered
+	 * without `show_in_rest` has no route, so a REST request for it answers
+	 * "no route" and its edits would go unreported — the inventory would hold
+	 * records this cursor never names.
 	 */
 	public static function rest_modified_after( $since ) {
 		$since_ts = strtotime( $since );
 		// `>=` with a second of overlap: post_modified has one-second resolution.
-		// The REST filter compares against post_modified, the site-local column.
-		$after = get_date_from_gmt( gmdate( 'Y-m-d H:i:s', $since_ts - 1 ), 'Y-m-d\TH:i:s' );
+		$after = gmdate( 'Y-m-d H:i:s', $since_ts - 1 );
 		$entries = array();
-		foreach ( get_post_types( array( 'show_in_rest' => true ), 'objects' ) as $type ) {
+		foreach ( Source::content_types() as $type ) {
 			if ( in_array( $type->name, array( 'attachment', 'nav_menu_item', 'wp_block', 'wp_template', 'wp_template_part', 'wp_navigation', 'wp_global_styles', 'wp_font_family', 'wp_font_face' ), true ) ) {
 				continue;
 			}
-			$route = '/' . ( $type->rest_namespace ?: 'wp/v2' ) . '/' . ( $type->rest_base ?: $type->name );
 			for ( $page = 1; $page < 1000; ++$page ) {
-				$request = new \WP_REST_Request( 'GET', $route );
-				$request->set_query_params( array( 'modified_after' => $after, 'status' => 'any', 'per_page' => 100, 'page' => $page, 'orderby' => 'id', 'order' => 'asc', 'context' => 'edit' ) );
-				$response = rest_do_request( $request );
-				if ( $response->is_error() ) {
-					break;
-				}
-				$rows = (array) $response->get_data();
-				foreach ( $rows as $row ) {
+				// `lang => ''`: Polylang would otherwise narrow the query to the admin's language filter (as `Source::term_by()`).
+				$query = new \WP_Query( array(
+					'post_type'              => $type->name,
+					'post_status'            => 'any',
+					'posts_per_page'         => 100,
+					'paged'                  => $page,
+					'orderby'                => 'ID',
+					'order'                  => 'ASC',
+					'date_query'             => array( array( 'column' => 'post_modified_gmt', 'after' => $after, 'inclusive' => true ) ),
+					'lang'                   => '',
+					'no_found_rows'          => true,
+					'ignore_sticky_posts'    => true,
+					'update_post_meta_cache' => false,
+					'update_post_term_cache' => false,
+				) );
+				foreach ( $query->posts as $post ) {
 					$entries[] = array(
-						'op'      => ! empty( $row['date_gmt'] ) && strtotime( $row['date_gmt'] . 'Z' ) >= $since_ts - 1 ? 'created' : 'updated',
-						'wp_id'   => (int) $row['id'],
+						// A draft has no GMT date of its own; `get_post_time()` derives one from the local date, as REST's `date_gmt` does.
+						'op'      => get_post_time( 'U', true, $post ) >= $since_ts - 1 ? 'created' : 'updated',
+						'wp_id'   => (int) $post->ID,
 						'wp_type' => $type->name,
-						'detail'  => 'modified_gmt ' . $row['modified_gmt'] . 'Z',
+						'detail'  => 'modified_gmt ' . get_post_modified_time( 'Y-m-d\TH:i:s', true, $post ) . 'Z',
 					);
 				}
-				if ( count( $rows ) < 100 ) {
+				if ( count( $query->posts ) < 100 ) {
 					break;
 				}
 			}

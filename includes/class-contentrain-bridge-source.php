@@ -5,15 +5,31 @@ namespace Contentrain\Bridge;
 defined( 'ABSPATH' ) || exit;
 
 final class Source {
-	public static function inventory() {
-		if ( ! function_exists( 'get_plugins' ) ) {
-			require_once ABSPATH . 'wp-admin/includes/plugin.php';
-		}
+	/**
+	 * The post types an export can hold: public or shown in the admin, plus the
+	 * block-theme types WordPress keeps out of both. Whether a type is in the
+	 * REST API plays no part — a classic theme's custom post type is registered
+	 * without `show_in_rest` more often than not, and it is content all the same.
+	 * Every reading of "which types" (the inventory, the REST-only delta) uses
+	 * this one rule, so none of them can quietly hold a narrower set.
+	 */
+	public static function content_types() {
 		$types = array();
 		foreach ( get_post_types( array(), 'objects' ) as $type ) {
 			if ( ! $type->public && ! $type->show_ui && ! in_array( $type->name, array( 'wp_block', 'wp_navigation', 'wp_template', 'wp_template_part' ), true ) ) {
 				continue;
 			}
+			$types[ $type->name ] = $type;
+		}
+		return $types;
+	}
+
+	public static function inventory() {
+		if ( ! function_exists( 'get_plugins' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/plugin.php';
+		}
+		$types = array();
+		foreach ( self::content_types() as $type ) {
 			$types[ $type->name ] = array( 'label' => $type->label, 'rest' => (bool) $type->show_in_rest, 'public' => (bool) $type->public, 'counts' => (array) wp_count_posts( $type->name ) );
 		}
 		$plugins = array();
