@@ -112,14 +112,20 @@ final class Delta {
 	public static function rest_modified_after( $since ) {
 		$since_ts = strtotime( $since );
 		// `>=` with a second of overlap: post_modified has one-second resolution.
-		$after = gmdate( 'Y-m-d H:i:s', $since_ts - 1 );
+		// The site-local column, as REST's `modified_after` filters it: a draft never saved since it was created
+		// carries `0000-00-00` in `post_modified_gmt` (wp_insert_post copies the floating date) and a GMT query misses it.
+		$after = get_date_from_gmt( gmdate( 'Y-m-d H:i:s', $since_ts - 1 ), 'Y-m-d H:i:s' );
+		// REST's reading of a floating date: the local column, converted, when the GMT one is empty.
+		$gmt_of = static function ( $local, $gmt ) {
+			return '0000-00-00 00:00:00' === $gmt ? get_gmt_from_date( $local ) : $gmt;
+		};
 		$entries = array();
 		foreach ( Source::content_types() as $type ) {
 			if ( in_array( $type->name, array( 'attachment', 'nav_menu_item', 'wp_block', 'wp_template', 'wp_template_part', 'wp_navigation', 'wp_global_styles', 'wp_font_family', 'wp_font_face' ), true ) ) {
 				continue;
 			}
 			for ( $page = 1; $page < 1000; ++$page ) {
-				// `lang => ''`: Polylang would otherwise narrow the query to the admin's language filter (as `Source::term_by()`).
+				// `lang => ''`: Polylang's query variable, empty so its language filter stays out (as `Source::term_by()` does for terms).
 				$query = new \WP_Query( array(
 					'post_type'              => $type->name,
 					'post_status'            => 'any',
@@ -127,7 +133,7 @@ final class Delta {
 					'paged'                  => $page,
 					'orderby'                => 'ID',
 					'order'                  => 'ASC',
-					'date_query'             => array( array( 'column' => 'post_modified_gmt', 'after' => $after, 'inclusive' => true ) ),
+					'date_query'             => array( array( 'column' => 'post_modified', 'after' => $after, 'inclusive' => true ) ),
 					'lang'                   => '',
 					'no_found_rows'          => true,
 					'ignore_sticky_posts'    => true,
@@ -136,11 +142,10 @@ final class Delta {
 				) );
 				foreach ( $query->posts as $post ) {
 					$entries[] = array(
-						// A draft has no GMT date of its own; `get_post_time()` derives one from the local date, as REST's `date_gmt` does.
-						'op'      => get_post_time( 'U', true, $post ) >= $since_ts - 1 ? 'created' : 'updated',
+						'op'      => strtotime( $gmt_of( $post->post_date, $post->post_date_gmt ) . ' UTC' ) >= $since_ts - 1 ? 'created' : 'updated',
 						'wp_id'   => (int) $post->ID,
 						'wp_type' => $type->name,
-						'detail'  => 'modified_gmt ' . get_post_modified_time( 'Y-m-d\TH:i:s', true, $post ) . 'Z',
+						'detail'  => 'modified_gmt ' . str_replace( ' ', 'T', $gmt_of( $post->post_modified, $post->post_modified_gmt ) ) . 'Z',
 					);
 				}
 				if ( count( $query->posts ) < 100 ) {

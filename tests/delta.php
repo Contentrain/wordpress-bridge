@@ -315,6 +315,16 @@ $rest_ids = array_column( $rest['entries'], 'wp_id' );
 check( ! in_array( $f['acf'], $rest_ids, true ), 'REST-only mode misses the ACF-only edit (proven)' );
 check( ! in_array( $f['purge'], $rest_ids, true ) && ! in_array( $f['trash'], $rest_ids, true ) && ! in_array( $f_media, $rest_ids, true ), 'REST-only mode misses purge, trash and attachment deletion (proven)' );
 check( ! in_array( $f_cat, $rest_ids, true ), 'REST-only mode cannot see a term move' );
+// A draft written after the cursor and never saved again: WordPress copies its floating date into post_modified_gmt
+// (`0000-00-00`), so only the site-local post_modified column, which REST's `modified_after` filters, can find it.
+$fresh_draft = $make( 'delta-fresh-draft', array( 'post_status' => 'draft' ) );
+clean_post_cache( $fresh_draft );
+check( '0000-00-00 00:00:00' === get_post( $fresh_draft )->post_modified_gmt, 'a never-saved draft has no GMT modified date (the trap is real)' );
+$rest_again = Delta::rest_modified_after( $t0['taken_at'] );
+$fresh_entry = entry_for( $rest_again, 'post', $fresh_draft );
+check( $fresh_entry && 'created' === $fresh_entry['op'] && preg_match( '/^modified_gmt \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/', $fresh_entry['detail'] ), 'REST-only mode sees a never-saved draft as created, with a derived GMT modified date' );
+// Purged before the delivery below: never in T0, so it leaves no entry behind.
+wp_delete_post( $fresh_draft, true );
 
 // ---- Delivery wiring: T0 read from the repository, delta written beside the export. ----
 $t1_job = export( $types );
