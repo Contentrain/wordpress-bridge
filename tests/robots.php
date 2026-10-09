@@ -106,6 +106,8 @@ $fixtures = array(
 $replaced = array(
 	'Yoast (wp-admin open to all)' => "User-agent: *\nDisallow:\n",
 	'no * group at all' => "User-agent: Googlebot\nDisallow: /private/\n",
+	// Yoast's block ends without a newline: our User-agent line must still start a line of its own (or the group is invisible).
+	'output ending without a newline' => "User-agent: *\nDisallow: /wp-admin/\n# END YOAST BLOCK",
 );
 /** robots.txt served when a plugin's filter replaces WordPress's own lines rather than appending to them. */
 function robots_replaced( $text ) {
@@ -123,6 +125,8 @@ foreach ( $fixtures + $replaced as $name => $lines ) {
 	$served = $read( $lines );
 	$reads = array_filter( READS, static function ( $path ) use ( $served ) { return ! can( $served, MIGRATE, $path ); } );
 	check( ! $reads, "$name: Migrate reads " . implode( ', ', READS ) . ( $reads ? ' (closed: ' . implode( ', ', $reads ) . ')' : '' ) );
+	// The reads would pass on the `*` rules alone: the group itself must be there (not glued to a line before it).
+	check( null !== rules_for( $served, MIGRATE ), "$name: the Migrate group stands as a group of its own" );
 	check( ! can( $served, MIGRATE, '/wp-admin/' ), "$name: wp-admin stays closed to Migrate" );
 	$same = true;
 	foreach ( array( '*', 'Googlebot', 'GPTBot', 'ClaudeBot' ) as $agent ) {
