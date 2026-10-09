@@ -4,7 +4,7 @@ Tags: export, migration, headless, astro, content
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 0.6.2
+Stable tag: 0.6.5
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -75,6 +75,23 @@ The active theme and child theme, and optionally the source files of active plug
 The plugin stores export ownership and a source revision marker. It sends nothing anywhere on its own; an export leaves the site only when you download it, deliver it to GitHub, or authorize a program to read it through the REST export API with an administrator's application password or a Contentrain Migrate connection key. For a connection key the plugin stores a fingerprint of the key (never the key), the Migrate order it is paired with, and the time and IP address of its last use; creating a new key or revoking it, and uninstalling the plugin, removes them. Export files are written to a private, per-administrator directory, are removed on uninstall, and expire after a day. An export can contain site content, author display names, selected post metadata and, if you or the program you authorized chose it, privacy-minimized comments and draft, pending, scheduled, private and password-protected posts (never the password). A program authorized through the REST API chooses the scope; Contentrain Migrate asks for private content. Treat a downloaded export as you would a WordPress export file. If you deliver to GitHub, the exported content is sent to GitHub under the account whose token you provide; choose a private repository when the export includes draft or private content.
 
 == Changelog ==
+
+= 0.6.5 =
+
+* The "modified after" change list — the one a reader keeps when it has no earlier inventory to compare with — now covers every post type the export itself covers, including a custom post type the site keeps out of the REST API (a classic theme's portfolio or product type, which WordPress hides from REST unless the theme says otherwise). Before, an edit to such a record never appeared in that list, although the record itself was exported.
+
+= 0.6.4 =
+
+* The export screen (Tools > Contentrain Bridge) is laid out in WordPress's own cards and shows where the export is: the nine stages as a list with the current one marked, a progress bar with a percentage, the item being worked on, and the counts so far. A stage the chosen scope leaves out (media, comments) is shown as skipped.
+* When the export stops, the screen says what happened and what to do: a stop the screen can retry (an interrupted or busy request, an archive or delivery that did not advance) offers Retry; an export the server gave up on offers deleting it and starting again with a smaller scope. Keyboard and screen-reader users land on the message, and progress is announced on a stage change and every quarter of the way rather than on every batch.
+* A finished export opens with its totals and the two ways to take it, the ZIP download and GitHub delivery, with the coverage table folded away until wanted. Before an export the screen says what will happen.
+* Each stage records its progress (items done, items in all, the latest item) in the export's state, so a screen opened later shows it too. An export started by an earlier version shows its stages without a count until its next stage begins.
+
+= 0.6.3 =
+
+* The export from the plugin's own screen no longer hangs on a host whose time or memory limit ends the request mid-step. Each request now does as many steps as fit in twelve seconds and saves as it goes; a request the host kills is counted, the next one works in smaller batches and saves after every step, an attachment that ends the request again and again is left out with a notice (its WordPress address is kept), and after six killed requests from the same point the export stops with a message saying what to do instead of retrying for ever. The screen retries a busy or interrupted request by itself, with a timeout, and shows the reason when it gives up.
+* A host where the export's lock cannot be taken for a reason other than another request holding it no longer answers "busy" for ever: a marker that expires after two minutes stands in.
+* The notice at the end of a repeatedly interrupted export names the stage and the step, so a report to the host or to Contentrain carries what is needed.
 
 = 0.6.2 =
 

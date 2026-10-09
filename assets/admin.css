@@ -1,13 +1,74 @@
+/* The export page: WordPress admin's own cards, notices, buttons and colours, nothing else. */
 .cr-bridge { max-width: 1100px; }
-.cr-bridge section { background: #fff; border: 1px solid #c3c4c7; padding: 20px; margin: 20px 0; }
-.cr-bridge label { display: block; margin: 12px 0 6px; }
-.cr-bridge fieldset { border: 1px solid #c3c4c7; padding: 12px; margin: 16px 0; }
-.cr-bridge legend { overflow-wrap: anywhere; max-width: 100%; }
-.cr-bridge fieldset input { display: block; width: min(100%, 600px); }
-.cr-bridge .cr-type { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
-.cr-bridge .cr-type label { min-width: 240px; }
-.cr-bridge .cr-actions { display: flex; gap: 8px; }
+/* WordPress's own `.button { display: inline-block }` outranks the hidden attribute; the attribute wins here. */
 .cr-bridge [hidden] { display: none !important; }
-#cr-status { margin-top: 16px; font-weight: 600; }
-#cr-error { padding: 12px; }
-@media (max-width: 600px) { .cr-bridge section { padding: 12px; } }
+.cr-bridge .cr-card { max-width: none; margin-top: 20px; padding: 20px 24px 24px; }
+.cr-bridge .cr-card-title { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font-size: 1.3em; line-height: 1.4; }
+.cr-bridge .cr-card-title .dashicons { color: #2271b1; font-size: 24px; width: 24px; height: 24px; }
+.cr-bridge .cr-card > p:first-of-type { margin-top: 0; }
+.cr-bridge .cr-card h3 { margin: 24px 0 8px; font-size: 1.05em; }
+.cr-bridge .cr-card label { display: block; margin: 8px 0; }
+.cr-bridge .cr-card .cr-type { display: flex; align-items: center; gap: 12px; margin: 4px 0; }
+.cr-bridge .cr-card .cr-type label { margin: 0; flex: 1; }
+.cr-bridge .cr-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 16px 0 0; }
+.cr-bridge .cr-actions .button { margin: 0; }
+.cr-bridge .cr-empty { color: #50575e; }
+
+/* Error: WordPress's own notice, kept inline so common.js leaves it where it is, with what to do and a way out. */
+.cr-bridge .cr-error { margin: 20px 0 0; padding: 12px 24px 16px; }
+.cr-bridge .cr-error-title { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 1.1em; }
+.cr-bridge .cr-error-title .dashicons { color: #d63638; }
+.cr-bridge .cr-error-title:focus { outline: 2px solid #2271b1; outline-offset: 2px; }
+.cr-bridge .cr-error p { margin: 6px 0; }
+.cr-bridge .cr-error .cr-error-actions { margin-top: 12px; }
+
+/* Stages: a dot per stage, filled as it is done, the current one in brand blue. */
+.cr-bridge .cr-steps { display: flex; flex-wrap: wrap; gap: 4px 0; margin: 0 0 20px; padding: 0; list-style: none; counter-reset: none; }
+.cr-bridge .cr-step { position: relative; display: flex; flex-direction: column; align-items: center; flex: 1 1 90px; min-width: 90px; padding: 0 4px; text-align: center; color: #646970; font-size: 12px; line-height: 1.3; }
+.cr-bridge .cr-step-mark { display: block; width: 14px; height: 14px; margin-bottom: 6px; border: 2px solid #c3c4c7; border-radius: 50%; background: #fff; box-sizing: border-box; position: relative; z-index: 1; }
+.cr-bridge .cr-step::before { content: ""; position: absolute; top: 6px; left: 50%; width: 100%; height: 2px; background: #c3c4c7; }
+.cr-bridge .cr-step:last-child::before { display: none; }
+.cr-bridge .cr-step.is-done { color: #1d2327; }
+.cr-bridge .cr-step.is-done .cr-step-mark { border-color: #00a32a; background: #00a32a; }
+.cr-bridge .cr-step.is-done::before { background: #00a32a; }
+.cr-bridge .cr-step.is-current { color: #1d2327; font-weight: 600; }
+.cr-bridge .cr-step.is-current .cr-step-mark { border-color: #2271b1; background: #fff; box-shadow: 0 0 0 3px rgba(34, 113, 177, 0.25); }
+.cr-bridge .cr-step.is-skipped { color: #8c8f94; text-decoration: line-through; }
+.cr-bridge .cr-step.is-skipped .cr-step-mark { border-style: dashed; }
+.cr-bridge .cr-step.is-skipped::before { background: #00a32a; }
+.cr-bridge .cr-step.is-waiting .cr-step-mark { border-color: #dba617; background: #dba617; }
+.cr-bridge .cr-step.is-failed .cr-step-mark { border-color: #d63638; background: #d63638; }
+
+/* The bar: the platform's progress element in admin colours; its text sits beside it. */
+.cr-bridge .cr-bar { display: flex; align-items: center; gap: 12px; }
+.cr-bridge .cr-bar progress { flex: 1; height: 12px; appearance: none; -webkit-appearance: none; border: 0; border-radius: 6px; background: #f0f0f1; overflow: hidden; }
+.cr-bridge .cr-bar progress::-webkit-progress-bar { background: #f0f0f1; border-radius: 6px; }
+.cr-bridge .cr-bar progress::-webkit-progress-value { background: #2271b1; border-radius: 6px; transition: width 0.3s ease; }
+.cr-bridge .cr-bar progress::-moz-progress-bar { background: #2271b1; border-radius: 6px; }
+.cr-bridge .cr-bar progress.is-done::-webkit-progress-value { background: #00a32a; }
+.cr-bridge .cr-bar progress.is-done::-moz-progress-bar { background: #00a32a; }
+.cr-bridge .cr-percent { min-width: 3.5em; text-align: right; font-size: 1.1em; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cr-bridge .cr-current { margin: 8px 0 0; color: #1d2327; }
+.cr-bridge .cr-current:empty { display: none; }
+
+/* Counts in a row of small figures. */
+.cr-bridge .cr-counts { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 16px 0 0; }
+.cr-bridge .cr-counts div { display: flex; flex-direction: column-reverse; }
+.cr-bridge .cr-counts dt { color: #646970; font-size: 12px; }
+.cr-bridge .cr-counts dd { margin: 0; font-size: 1.4em; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* Success: the ready card's notice carries the totals; the coverage table folds away. */
+.cr-bridge .cr-done { margin: 0 0 16px; padding: 12px 16px; }
+.cr-bridge .cr-done p { margin: 6px 0; }
+.cr-bridge .cr-coverage summary { cursor: pointer; color: #2271b1; margin: 8px 0; }
+.cr-bridge .cr-coverage .widefat { margin-top: 8px; }
+.cr-bridge #cr-candidates fieldset { margin: 12px 0; padding: 12px 16px; border: 1px solid #c3c4c7; border-radius: 4px; background: #f6f7f7; }
+.cr-bridge #cr-candidates legend { padding: 0 6px; color: #646970; font-size: 12px; }
+.cr-bridge #cr-models p { margin: 4px 0; font-family: Consolas, Monaco, monospace; font-size: 12px; }
+.cr-bridge #cr-key-state { font-weight: 600; }
+
+@media (max-width: 782px) {
+	.cr-bridge .cr-card { padding: 16px; }
+	.cr-bridge .cr-step { flex-basis: 33%; min-width: 0; margin-bottom: 8px; }
+	.cr-bridge .cr-step::before { display: none; }
+}

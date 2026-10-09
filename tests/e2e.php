@@ -148,10 +148,32 @@ if ( 'export' === $stage ) {
 	$previous = get_user_meta( $admin->ID, 'contentrain_bridge_job_1', true );
 	if ( $previous ) { Files::remove( Files::dir( $previous ) ); delete_user_meta( $admin->ID, 'contentrain_bridge_job_1' ); }
 	$summary = Jobs::create( array( 'types' => array( 'post', 'page', 'attachment' ), 'private' => false, 'scan_sources' => false, 'comments' => true ) );
-	for ( $i = 0; $i < 2000 && 'review' !== $summary['phase']; ++$i ) { $summary = Jobs::step( $summary['id'], $summary['step'] ); }
+	// Every stage reports its progress to the admin screen (0.6.4): the stage it belongs to, items done against a
+	// total counted ahead (null only for the inventory, which cannot count ahead), and the latest item. A summary
+	// taken right after a stage ended still carries the ended stage's record; the next stage writes its own.
+	$progress = array();
+	$named = array();
+	$watch = static function ( $summary ) use ( &$progress, &$named ) {
+		if ( in_array( $summary['phase'], array( 'review', 'ready' ), true ) ) { return; }
+		$p = $summary['progress'] ?? null;
+		if ( ! is_array( $p ) || ! isset( $p['phase'], $p['done'] ) || ! array_key_exists( 'total', $p ) || ! array_key_exists( 'current', $p ) ) { throw new RuntimeException( 'FAIL: stage ' . $summary['phase'] . ' reports no progress' ); }
+		if ( null !== $p['total'] && $p['done'] > $p['total'] ) { throw new RuntimeException( 'FAIL: stage ' . $p['phase'] . ' reports ' . $p['done'] . ' done of ' . $p['total'] ); }
+		if ( null === $p['total'] && 'inventory' !== $p['phase'] ) { throw new RuntimeException( 'FAIL: stage ' . $p['phase'] . ' reports no total' ); }
+		$progress[ $p['phase'] ] = $p;
+		if ( '' !== $p['current'] ) { $named[ $p['phase'] ] = true; }
+	};
+	for ( $i = 0; $i < 2000 && 'review' !== $summary['phase']; ++$i ) { $summary = Jobs::step( $summary['id'], $summary['step'] ); $watch( $summary ); }
 	$summary = Jobs::review( $summary['id'], array(), true );
-	for ( $i = 0; $i < 2000 && 'ready' !== $summary['phase']; ++$i ) { $summary = Jobs::step( $summary['id'], $summary['step'] ); }
+	for ( $i = 0; $i < 2000 && 'ready' !== $summary['phase']; ++$i ) { $summary = Jobs::step( $summary['id'], $summary['step'] ); $watch( $summary ); }
 	if ( 'ready' !== $summary['phase'] ) { throw new RuntimeException( 'FAIL: export did not reach ready' ); }
+	// Interface text was not scanned: that stage never starts, so it reports nothing; every other stage ran to its total.
+	$missing = array_diff( array( 'media', 'posts', 'terms', 'inventory', 'comments', 'tables' ), array_keys( $progress ) );
+	if ( $missing ) { throw new RuntimeException( 'FAIL: no progress record from stage(s) ' . implode( ', ', $missing ) ); }
+	foreach ( array( 'media', 'posts', 'terms', 'comments', 'tables' ) as $stage ) {
+		if ( $progress[ $stage ]['done'] !== $progress[ $stage ]['total'] ) { throw new RuntimeException( 'FAIL: stage ' . $stage . ' ended at ' . $progress[ $stage ]['done'] . ' of ' . $progress[ $stage ]['total'] ); }
+	}
+	if ( $progress['posts']['total'] < 1 || empty( $named['posts'] ) || empty( $named['media'] ) ) { throw new RuntimeException( 'FAIL: the content or media stage never names an item' ); }
+	echo 'progress: ' . implode( ', ', array_map( static function ( $p ) { return $p['phase'] . ' ' . $p['done'] . '/' . ( null === $p['total'] ? '?' : $p['total'] ); }, $progress ) ) . "\n";
 	$id = $summary['id'];
 	$receipt = array( 'label' => $label, 'job' => $id, 'files' => count( Jobs::read( $id )['files'] ), 'github' => null );
 	$repository = getenv( 'BRIDGE_TEST_REPO' );

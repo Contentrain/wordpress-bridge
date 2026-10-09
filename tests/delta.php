@@ -17,6 +17,7 @@ use Contentrain\Bridge\Files;
 use Contentrain\Bridge\GitHub;
 use Contentrain\Bridge\Inventory;
 use Contentrain\Bridge\Jobs;
+use Contentrain\Bridge\Models;
 use Contentrain\Bridge\Policy;
 
 $checks = 0;
@@ -76,7 +77,11 @@ delete_user_meta( $admin->ID, 'contentrain_bridge_job_1' );
 
 // Pretty permalinks (set by tests/delta.sh): with `?p=123` addresses a slug change moves nothing.
 check( '/%postname%/' === get_option( 'permalink_structure' ) && false === strpos( get_term_link( 1, 'category' ), '?cat=' ), 'pretty permalinks are active for posts and terms' );
-register_post_type( 'bridge_delta_cpt', array( 'public' => true, 'show_in_rest' => true, 'label' => 'Delta CPT' ) );
+// A classic theme's custom post type as sites register it: public, with its own address base, and — `register_post_type()`'s
+// default — hidden from the REST API (a WPBakery portfolio at /urunlerimiz/<slug>/, ps). Its edits must reach every cursor.
+$cpt_args = array( 'public' => true, 'show_in_rest' => false, 'label' => 'Delta CPT', 'rewrite' => array( 'slug' => 'urunlerimiz' ), 'supports' => array( 'title', 'editor' ) );
+register_post_type( 'bridge_delta_cpt', $cpt_args );
+check( rest_do_request( new WP_REST_Request( 'GET', '/wp/v2/bridge_delta_cpt' ) )->is_error(), 'the fixture CPT has no REST route (the trap is real)' );
 $has_acf = function_exists( 'acf_add_local_field_group' );
 check( $has_acf, 'ACF is active, so the meta-only trap is tested against real ACF' );
 acf_add_local_field_group( array(
@@ -93,7 +98,9 @@ $make = static function ( $slug, $args = array() ) use ( $admin, $run ) {
 	return wp_insert_post( $args + array( 'post_type' => 'post', 'post_title' => $slug, 'post_name' => $slug . '-' . $run, 'post_content' => '<p>' . $slug . '</p>', 'post_status' => 'publish', 'post_author' => $admin->ID ), true );
 };
 $f = array();
-$f['edit'] = $make( 'delta-edit' );
+// The record that gets edited is the hidden CPT's, with a page builder's body as the editor saved it.
+$vc_body = '[vc_row][vc_column width="1/2"][vc_column_text]<p>Mali koruma.</p>[/vc_column_text][vc_toggle title="Sigorta Yaptırmanın Faydaları?"]Cevap.[/vc_toggle][vc_single_image image="123" img_size="full"][/vc_column][/vc_row]';
+$f['edit'] = $make( 'delta-edit', array( 'post_type' => 'bridge_delta_cpt', 'post_content' => $vc_body ) );
 $f['acf'] = $make( 'delta-acf', array( 'post_type' => 'page' ) );
 update_field( 'delta_tagline', 'Before', $f['acf'] );
 $f['trash'] = $make( 'delta-trash' );
@@ -110,6 +117,19 @@ $f['cpt'] = $make( 'delta-cpt', array( 'post_type' => 'bridge_delta_cpt' ) );
 foreach ( $f as $name => $id ) {
 	if ( is_wp_error( $id ) || ! $id ) { throw new RuntimeException( 'FAIL: fixture ' . $name ); }
 }
+// Menus the way a classic theme links a product: the header three levels deep (top link > page > the CPT record) and a
+// footer list naming the record directly. Their items are inventory bystanders: nothing below changes them.
+register_nav_menus( array( 'bridge-delta-header' => 'Header', 'bridge-delta-footer' => 'Footer' ) );
+$header_menu = wp_create_nav_menu( 'Delta header ' . $run );
+$footer_menu = wp_create_nav_menu( 'Delta footer ' . $run );
+$menu_top = wp_update_nav_menu_item( $header_menu, 0, array( 'menu-item-title' => 'Kurumsal', 'menu-item-url' => 'https://example.test/kurumsal', 'menu-item-type' => 'custom', 'menu-item-status' => 'publish' ) );
+$menu_mid = wp_update_nav_menu_item( $header_menu, 0, array( 'menu-item-title' => 'Ürünlerimiz', 'menu-item-object' => 'page', 'menu-item-object-id' => $f['parent_a'], 'menu-item-parent-id' => $menu_top, 'menu-item-type' => 'post_type', 'menu-item-status' => 'publish' ) );
+$menu_leaf = wp_update_nav_menu_item( $header_menu, 0, array( 'menu-item-title' => 'Mali Koruma', 'menu-item-object' => 'bridge_delta_cpt', 'menu-item-object-id' => $f['edit'], 'menu-item-parent-id' => $menu_mid, 'menu-item-type' => 'post_type', 'menu-item-status' => 'publish' ) );
+$menu_footer = wp_update_nav_menu_item( $footer_menu, 0, array( 'menu-item-title' => 'Mali Koruma', 'menu-item-object' => 'bridge_delta_cpt', 'menu-item-object-id' => $f['edit'], 'menu-item-type' => 'post_type', 'menu-item-status' => 'publish' ) );
+foreach ( array( $menu_top, $menu_mid, $menu_leaf, $menu_footer ) as $item_id ) {
+	if ( is_wp_error( $item_id ) || ! $item_id ) { throw new RuntimeException( 'FAIL: fixture menu item' ); }
+}
+set_theme_mod( 'nav_menu_locations', array( 'bridge-delta-header' => $header_menu, 'bridge-delta-footer' => $footer_menu ) );
 // A secret on a record that changes: the delta and inventory must not carry it.
 update_post_meta( $f['edit'], 'delta_api_key', 'ghp_' . str_repeat( 'Q', 36 ) );
 $cat = wp_insert_term( 'Delta category ' . $run, 'category', array( 'slug' => 'delta-cat-' . $run ) );
@@ -154,6 +174,22 @@ check( false === strpos( $t0_raw, 'delta-unreleased-launch' ), 'the unreleased d
 check( false === strpos( $t0_raw, 'ghp_' ), 'no credential reaches the inventory' );
 $standalone = Inventory::build( $t0['scope'] );
 check( $standalone['inventory_hash'] === $t0['inventory_hash'], 'a standalone walk of the same scope reproduces the export\'s inventory hash' );
+// ---- The hidden CPT comes across whole: its body as saved, its address, its routing rule, its menu links. ----
+$t0_out = Files::dir( $t0_job ) . '/output';
+$cpt_row = json_decode( Files::read( Files::dir( $t0_job ), Models::row_file( 'bridge/raw-posts.json', $f['edit'] ) ), true );
+check( $vc_body === $cpt_row['content'] && 'bridge_delta_cpt' === $cpt_row['type'], 'the hidden CPT\'s raw body is exported byte for byte, page-builder tags included' );
+check( '/urunlerimiz/delta-edit-' . $run . '/' === $t0_index[ 'bridge_delta_cpt:' . $f['edit'] ]['path'] && '/urunlerimiz/delta-edit-' . $run . '/' === wp_make_link_relative( $cpt_row['link'] ), 'the hidden CPT record carries its public address under the rewrite slug' );
+$routing_types = array_column( json_decode( Files::read( $t0_out, 'bridge/routing.json' ), true )['post_types'], null, 'name' );
+check( 'urunlerimiz' === $routing_types['bridge_delta_cpt']['rewrite']['slug'] && '/urunlerimiz/%bridge_delta_cpt%' === $routing_types['bridge_delta_cpt']['permastruct'], 'routing names the hidden CPT\'s rewrite slug and permastruct' );
+$t0_record = Jobs::read( $t0_job );
+$menu_rows = json_decode( Files::read( $t0_out, Models::content_path( $t0_record, 'wp-menu-items', $t0_record['default_locale'] ) ), true );
+$menu_id = static function ( $wp_item_id ) { return substr( hash( 'sha256', 'menu:' . $wp_item_id ), 0, 12 ); };
+$leaf_row = $menu_rows[ $menu_id( $menu_leaf ) ];
+$mid_row = $menu_rows[ $menu_id( $menu_mid ) ];
+check( 'post' === $leaf_row['target_kind'] && true === $leaf_row['target_resolved'] && 'bridge_delta_cpt' === $leaf_row['target_post_type'] && 'delta-edit-' . $run === $leaf_row['target_slug'] && '/urunlerimiz/delta-edit-' . $run . '/' === wp_make_link_relative( $leaf_row['url'] ), 'a third-level header link to the hidden CPT resolves kind/post_type/slug and its address' );
+check( $menu_id( $menu_mid ) === $leaf_row['parent'] && $menu_id( $menu_top ) === $mid_row['parent'] && ! isset( $menu_rows[ $menu_id( $menu_top ) ]['parent'] ) && 'bridge-delta-header' === $leaf_row['location'], 'the header link keeps its two-level parent chain and its theme location' );
+$footer_row = $menu_rows[ $menu_id( $menu_footer ) ];
+check( 'bridge_delta_cpt' === $footer_row['target_post_type'] && true === $footer_row['target_resolved'] && 'bridge-delta-footer' === $footer_row['location'] && ! isset( $footer_row['parent'] ), 'a footer link to the hidden CPT resolves under the footer location' );
 drop_job( $t0_job );
 // The same moment in private scope, for the planner fixture: drafts are records
 // a planner has to place too, and a public-scope store does not hold them.
@@ -194,7 +230,7 @@ $plan = $result['plan'];
 $t1 = $result['inventory'];
 $expected = array(
 	'post:' . $created . ':created',
-	'post:' . $f['edit'] . ':updated',
+	'bridge_delta_cpt:' . $f['edit'] . ':updated',
 	'page:' . $f['acf'] . ':updated',
 	'post:' . $f['trash'] . ':deleted/trashed',
 	'post:' . $f['purge'] . ':deleted/purged',
@@ -257,8 +293,13 @@ $lost = Delta::plan( $t1 )['plan'];
 check( array() === array_filter( $lost['entries'], static function ( $e ) { return 'bridge_delta_cpt' === $e['wp_type']; } ), 'records of a type whose plugin went away are not reported deleted' );
 check( array( 'bridge_delta_cpt' ) === $lost['deletions_undetectable_types'] && false === $lost['deletions_detectable'], 'the lost type is named and deletions are not claimed as detectable' );
 check( 1 === count( preg_grep( '/^scope-lost:bridge_delta_cpt:/', $lost['warnings'] ) ), 'exactly one scope warning for the lost type' );
-check( array() === $lost['entries'], 'nothing else changed' );
-register_post_type( 'bridge_delta_cpt', array( 'public' => true, 'show_in_rest' => true, 'label' => 'Delta CPT' ) );
+// The two menu links that pointed at the lost type did change — WordPress marks them invalid once their target type is
+// gone — and the inventory says so; nothing else did.
+// A reused test site keeps earlier runs' menus too (tests/run.sh), so: these two among them, and only such links.
+$lost_ops = ops( $lost );
+$not_menu = array_filter( $lost_ops, static function ( $op ) { return 0 !== strpos( $op, 'nav_menu_item:' ) || ':updated' !== substr( $op, -8 ); } );
+check( array() === $not_menu && array() === array_diff( array( 'nav_menu_item:' . $menu_leaf . ':updated', 'nav_menu_item:' . $menu_footer . ':updated' ), $lost_ops ), 'the only other change is the menu links whose target type went away, reported as updated (' . implode( ', ', $lost_ops ) . ')' );
+register_post_type( 'bridge_delta_cpt', $cpt_args );
 
 // ---- Negative: a truncated walk proves no deletion. ----
 $short = Delta::plan( $t1, null, 3 )['plan'];
@@ -268,11 +309,22 @@ check( false === $short['deletions_detectable'] && ! preg_grep( '/:deleted/', op
 $rest = Delta::rest_modified_after( $t0['taken_at'] );
 $rest_ops = ops( $rest );
 check( 'rest_modified_after' === $rest['cursor']['kind'] && false === $rest['deletions_detectable'], 'REST-only mode never claims deletions are detectable' );
-check( in_array( 'post:' . $f['edit'] . ':updated', $rest_ops, true ) && in_array( 'post:' . $created . ':created', $rest_ops, true ), 'REST-only mode sees ordinary edits and new posts' );
+check( in_array( 'post:' . $created . ':created', $rest_ops, true ) && in_array( 'post:' . $f['twice'] . ':updated', $rest_ops, true ), 'REST-only mode sees ordinary edits and new posts' );
+check( in_array( 'bridge_delta_cpt:' . $f['edit'] . ':updated', $rest_ops, true ), 'REST-only mode sees the edit of a post type hidden from REST (show_in_rest false)' );
 $rest_ids = array_column( $rest['entries'], 'wp_id' );
 check( ! in_array( $f['acf'], $rest_ids, true ), 'REST-only mode misses the ACF-only edit (proven)' );
 check( ! in_array( $f['purge'], $rest_ids, true ) && ! in_array( $f['trash'], $rest_ids, true ) && ! in_array( $f_media, $rest_ids, true ), 'REST-only mode misses purge, trash and attachment deletion (proven)' );
 check( ! in_array( $f_cat, $rest_ids, true ), 'REST-only mode cannot see a term move' );
+// A draft written after the cursor and never saved again: WordPress copies its floating date into post_modified_gmt
+// (`0000-00-00`), so only the site-local post_modified column, which REST's `modified_after` filters, can find it.
+$fresh_draft = $make( 'delta-fresh-draft', array( 'post_status' => 'draft' ) );
+clean_post_cache( $fresh_draft );
+check( '0000-00-00 00:00:00' === get_post( $fresh_draft )->post_modified_gmt, 'a never-saved draft has no GMT modified date (the trap is real)' );
+$rest_again = Delta::rest_modified_after( $t0['taken_at'] );
+$fresh_entry = entry_for( $rest_again, 'post', $fresh_draft );
+check( $fresh_entry && 'created' === $fresh_entry['op'] && preg_match( '/^modified_gmt \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/', $fresh_entry['detail'] ), 'REST-only mode sees a never-saved draft as created, with a derived GMT modified date' );
+// Purged before the delivery below: never in T0, so it leaves no entry behind.
+wp_delete_post( $fresh_draft, true );
 
 // ---- Delivery wiring: T0 read from the repository, delta written beside the export. ----
 $t1_job = export( $types );

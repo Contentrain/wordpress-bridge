@@ -115,32 +115,69 @@ final class Jobs {
 		}
 		$dir = Files::dir( $id );
 		if ( is_dir( $dir ) ) {
-			$lock = fopen( $dir . '/lock', 'c' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Native advisory locking has no WP_Filesystem equivalent.
-			if ( ! $lock || ! flock( $lock, LOCK_EX | LOCK_NB ) ) {
-				if ( $lock ) {
-					fclose( $lock ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Native advisory lock handle.
-				}
+			$lock = self::acquire( $dir );
+			if ( ! $lock ) {
 				throw new \RuntimeException( 'Export is busy. Stop the running operation and retry deletion.' );
 			}
 			try {
 				Files::remove( $dir );
 			} finally {
-				flock( $lock, LOCK_UN );
-				fclose( $lock ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Native advisory lock handle.
+				self::release( $lock );
 			}
 		}
 		delete_user_meta( get_current_user_id(), $key );
 		return array( 'deleted' => true );
 	}
 
+	/** Seconds after which an expiring lock marker (hosts without flock) counts as left behind by a killed request. */
+	const LOCK_TTL = 120;
+
+	/**
+	 * Takes the export's lock: `array( flock handle|null, marker path|null )`, or null when another request
+	 * holds it. flock is released by the kernel when a request dies. Where it cannot be taken for any other
+	 * reason (a filesystem without flock, a job folder PHP cannot write the lock into) it is not
+	 * contention, so an expiring marker file stands in rather than answering "busy" for ever.
+	 */
+	private static function acquire( $dir ) {
+		$handle = @fopen( $dir . '/lock', 'c' ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Native advisory locking has no WP_Filesystem equivalent.
+		if ( $handle ) {
+			$contended = 0;
+			if ( flock( $handle, LOCK_EX | LOCK_NB, $contended ) ) {
+				return array( $handle, null );
+			}
+			fclose( $handle ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Native advisory lock handle.
+			if ( $contended ) {
+				return null;
+			}
+		}
+		$marker = $dir . '/lock.held';
+		clearstatcache( true, $marker );
+		if ( is_file( $marker ) && time() - (int) filemtime( $marker ) > self::LOCK_TTL ) {
+			wp_delete_file( $marker );
+		}
+		$taken = @fopen( $marker, 'x' ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Exclusive create is the atomic test.
+		if ( ! $taken ) {
+			return null;
+		}
+		fclose( $taken ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Native marker handle.
+		return array( null, $marker );
+	}
+
+	private static function release( $lock ) {
+		if ( $lock[0] ) {
+			flock( $lock[0], LOCK_UN );
+			fclose( $lock[0] ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Native advisory lock handle.
+		}
+		if ( $lock[1] ) {
+			wp_delete_file( $lock[1] );
+		}
+	}
+
 	/** Serialize all mutations, including repeated or concurrent browser requests. */
 	public static function mutate( $id, $callback ) {
 		self::read( $id );
-		$lock = fopen( Files::dir( $id ) . '/lock', 'c' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Native stream required for bounded output or advisory locking; WP_Filesystem has no equivalent.
-		if ( ! $lock || ! flock( $lock, LOCK_EX | LOCK_NB ) ) {
-			if ( $lock ) {
-				fclose( $lock ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Native stream required for bounded output or advisory locking; WP_Filesystem has no equivalent.
-			}
+		$lock = self::acquire( Files::dir( $id ) );
+		if ( ! $lock ) {
 			// 409: another request holds this export; nothing failed, retry.
 			throw new \RuntimeException( 'Export is busy. Retry this step.', 409 );
 		}
@@ -153,8 +190,7 @@ final class Jobs {
 			self::save( $job );
 			return $result ?? self::summary( $job );
 		} finally {
-			flock( $lock, LOCK_UN );
-			fclose( $lock ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Native stream required for bounded output or advisory locking; WP_Filesystem has no equivalent.
+			self::release( $lock );
 		}
 	}
 
@@ -163,8 +199,21 @@ final class Jobs {
 			if ( (int) $expected !== $job['step'] ) {
 				return self::summary( $job );
 			}
+			self::$tries = 1;
 			self::tick( $job );
 		} );
+	}
+
+	/** Seconds one wp-admin request may keep stepping: well inside the 30 s of a low-limit host and a proxy's timeout. */
+	const STEP_BUDGET = 12;
+
+	/**
+	 * What the wp-admin screen sends: the steps that fit in STEP_BUDGET (and in PHP's own limits), saved as
+	 * it goes, not a single tick per request. `$expected` is the step the browser last saw; a repeated or
+	 * late request changes nothing.
+	 */
+	public static function advance( $id, $expected ) {
+		return self::run( $id, microtime( true ) + self::STEP_BUDGET, true, (int) $expected );
 	}
 
 	/** Seconds between intermediate saves in `run()`: what a killed request can lose. */
@@ -193,10 +242,22 @@ final class Jobs {
 	 * steps before it, only while half of the run's time is left. `$first`: this run begins
 	 * the call, so its first step always runs and every call makes progress.
 	 */
-	public static function run( $id, $deadline, $first = true ) {
+	public static function run( $id, $deadline, $first = true, $expected = null ) {
 		$limit = wp_convert_hr_to_bytes( (string) ini_get( 'memory_limit' ) );
 		$deadline = min( $deadline, self::time_limit() );
-		return self::mutate( $id, static function ( &$job ) use ( $deadline, $limit, $first ) {
+		return self::mutate( $id, static function ( &$job ) use ( $deadline, $limit, $first, $expected ) {
+			if ( null !== $expected && $expected !== $job['step'] ) {
+				return self::summary( $job );
+			}
+			self::$deadline = $deadline;
+			$deaths = self::attempt( $job );
+			if ( $deaths > self::MAX_ATTEMPTS ) {
+				// This many requests started from this very state and none lived to save: one more would be the
+				// loop this guards against. Said once, with what to do; the admin screen stops here.
+				$job['error'] = array( 'code' => 'step_repeatedly_killed', 'stage' => $job['phase'], 'message' => sprintf( 'Step %d of stage "%s" stopped the request %d times without finishing; the host\'s time or memory limit is probably too low for this site. Delete the export and start again with a smaller scope (fewer content types, or without media files), or raise the host\'s limits.', $job['step'], $job['phase'], self::MAX_ATTEMPTS ) );
+				$job['phase'] = 'failed';
+				return;
+			}
 			$saved = microtime( true );
 			$half = ( $deadline - $saved ) / 2;
 			$slowest = 0.0;
@@ -209,9 +270,24 @@ final class Jobs {
 						break;
 					}
 				}
+				// The first step of a retried request is the one that killed the last (what came before it was saved
+				// at once); the steps after it stay small and saved too, but never give an attachment up.
+				self::$tries = 0 === $taken ? $deaths : min( $deaths, 3 );
 				$started = microtime( true );
-				self::tick( $job );
+				try {
+					self::tick( $job );
+				} catch ( \Throwable $error ) {
+					// Refused, not killed (content changed, a file missing): the next request is not a repeat of a death.
+					wp_delete_file( Files::dir( $job['id'] ) . '/' . self::ATTEMPT_FILE );
+					throw $error;
+				}
 				++$taken;
+				if ( self::$tries > 1 ) {
+					// A step that got through where the last request died is saved before the next one can die:
+					// unsaved, the next request would start from the same state and replay it at full size.
+					self::save( $job );
+					$saved = microtime( true );
+				}
 				// Every post, term and meta row read stays in WordPress's in-request cache; over
 				// thousands of steps that alone exhausts a 64 MB host. A persistent cache is left alone.
 				if ( ! wp_using_ext_object_cache() ) {
@@ -224,7 +300,69 @@ final class Jobs {
 					$saved = microtime( true );
 				}
 			}
+			// The request ended on its own: the state it leaves has not killed anything.
+			wp_delete_file( Files::dir( $job['id'] ) . '/' . self::ATTEMPT_FILE );
 		} );
+	}
+
+	/** The request's own stop time, for a step that does a batch of work (media). */
+	private static $deadline = 0.0;
+
+	/** How many requests, this one included, have started from the saved state the current step works on (`attempt()`). */
+	private static $tries = 1;
+
+	/** Beside the state: `{"step":n,"n":requests}`, the saved step a request started from and how many started there. */
+	const ATTEMPT_FILE = 'attempt';
+
+	/** When this many requests started from one saved state and none lived to save, the export fails rather than try again. */
+	const MAX_ATTEMPTS = 6;
+
+	/**
+	 * Records, before any work, the saved step this request starts from and how many requests have started
+	 * from it: a request PHP kills (time or memory limit, a proxy closing it) never reaches a save, so only
+	 * something written first can tell the next request that it starts where the last one died. A request
+	 * that saves moves the state on, and the count starts over. The record is one small file beside the state,
+	 * written once per request (a save per step is the memory cost BR-24 removed), and it does not care which
+	 * step died: whatever the host kills, the count grows until the state moves. From the second request on
+	 * the media phase shrinks its batch and `run()` saves after every step, so the state reaches the step that
+	 * kills; that one then runs alone, then without its files, then is left out; past MAX_ATTEMPTS the export
+	 * fails with what to do.
+	 */
+	private static function attempt( $job ) {
+		$dir = Files::dir( $job['id'] );
+		$last = is_file( $dir . '/' . self::ATTEMPT_FILE ) ? json_decode( Files::read( $dir, self::ATTEMPT_FILE ), true ) : null;
+		$step = (int) $job['step'];
+		$deaths = is_array( $last ) && (int) ( $last['step'] ?? -1 ) === $step ? (int) ( $last['n'] ?? 0 ) + 1 : 1;
+		Files::put( $dir, self::ATTEMPT_FILE, (string) wp_json_encode( array( 'step' => $step, 'n' => $deaths ) ) );
+		return $deaths;
+	}
+
+	/**
+	 * How far the current stage is, for the admin screen's progress bar: items done, items in all
+	 * (null when a stage cannot count ahead) and the item being worked on. Set once per stage, by
+	 * the stage itself; an export saved by an older version has none until its stage changes, and
+	 * the screen then shows the stages without a bar.
+	 */
+	private static function progress( &$job, $total ) {
+		if ( ! isset( $job['progress'] ) && 0 !== (int) $job['cursor'] ) {
+			return; // An older version's export, part way through this stage: nothing done is known, so no count is claimed.
+		}
+		if ( ( $job['progress']['phase'] ?? null ) !== $job['phase'] ) {
+			$job['progress'] = array( 'phase' => $job['phase'], 'done' => 0, 'total' => null === $total ? null : (int) $total, 'current' => '' );
+		}
+	}
+
+	/** A record's name for the screen: its title, or its slug, or its id when it has neither. */
+	private static function name( $p ) {
+		return '' !== (string) $p->post_title ? (string) $p->post_title : ( '' !== (string) $p->post_name ? (string) $p->post_name : '#' . $p->ID );
+	}
+
+	/** One more item of the current stage is done; `$current` names it for the screen. */
+	private static function progressed( &$job, $current = '' ) {
+		if ( isset( $job['progress'] ) ) {
+			++$job['progress']['done'];
+			$job['progress']['current'] = (string) $current;
+		}
 	}
 
 	/** One step of the current phase. */
@@ -244,8 +382,11 @@ final class Jobs {
 			self::sources( $job );
 		} elseif ( 'tables' === $job['phase'] ) {
 			$paths = array_keys( $job['tables'] );
+			self::progress( $job, count( $paths ) );
 			if ( isset( $paths[ $job['cursor'] ] ) ) {
-				Models::table( $job, $paths[ $job['cursor']++ ] );
+				$path = $paths[ $job['cursor']++ ];
+				Models::table( $job, $path );
+				self::progressed( $job, $path );
 			} else {
 				self::finish( $job );
 			}
@@ -292,7 +433,15 @@ final class Jobs {
 			$job['cursor'] = 0;
 			return;
 		}
-		$ids = $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE ID > %d AND post_type = 'attachment' ORDER BY ID ASC LIMIT 25", $job['cursor'] ) );
+		// A request that died before saving is followed by one with a smaller batch, then one attachment at a
+		// time (each saved), then the attachment that kills with its files left on WordPress, then without it
+		// at all: the same cursor is never retried for ever (`attempt()`).
+		$tries = self::$tries;
+		$batch = $tries >= 3 ? 1 : ( 2 === $tries ? 5 : 25 );
+		if ( ( $job['progress']['phase'] ?? null ) !== 'media' ) {
+			self::progress( $job, (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type = 'attachment'" ) );
+		}
+		$ids = $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE ID > %d AND post_type = 'attachment' ORDER BY ID ASC LIMIT %d", $job['cursor'], $batch ) );
 		if ( $wpdb->last_error ) {
 			throw new \RuntimeException( 'Cannot enumerate media.' );
 		}
@@ -300,7 +449,32 @@ final class Jobs {
 		// Records without their files: the reader localizes media itself, and with nothing copied nothing is
 		// relinked, so the store keeps every WordPress URL (`Models::relink` rewrites only copied files).
 		$copy = $job['options']['media_files'] ?? true;
-		foreach ( $ids as $id ) {
+		if ( $ids && $tries >= 5 ) {
+			// Even alone and without its files this attachment ends the request: it is left out altogether, named,
+			// and content keeps its WordPress URL (nothing copied means nothing relinked). The export goes on.
+			$skipped = (int) $ids[0];
+			$job['cursor'] = $skipped;
+			// The URL from the row itself: reading the attachment's meta is what may be killing the request.
+			$url = (string) $wpdb->get_var( $wpdb->prepare( "SELECT guid FROM {$wpdb->posts} WHERE ID = %d", $skipped ) );
+			self::warning( $job, array( 'source' => 'attachment/' . $skipped, 'reason' => 'media-skipped-after-repeated-failure: left out of the export after ' . ( $tries - 1 ) . ' requests ended on it; content keeps its WordPress URL' . ( '' !== $url ? ' (' . $url . ')' : '' ) ) );
+			++$job['counts']['media_kept_remote'];
+			self::progressed( $job, basename( $url ) );
+			return;
+		}
+		if ( $copy && $tries >= 4 && $ids ) {
+			$copy = false;
+			self::warning( $job, array( 'source' => 'attachment/' . $ids[0], 'reason' => 'media-files-skipped-after-repeated-failure: kept as WordPress URLs' ) );
+			++$job['counts']['media_kept_remote'];
+		}
+		$limit = wp_convert_hr_to_bytes( (string) ini_get( 'memory_limit' ) );
+		$stopped = false;
+		foreach ( $ids as $position => $id ) {
+			// Stop between attachments, not inside one, when the request is about to run out of time or memory;
+			// the cursor already names the last one finished, so the next request carries on from there.
+			if ( $position > 0 && ( ( self::$deadline && microtime( true ) + 3 >= self::$deadline ) || ( $limit > 0 && memory_get_usage() > 0.7 * $limit ) ) ) {
+				$stopped = true;
+				break;
+			}
 			$p = get_post( $id );
 			$job['cursor'] = (int) $id;
 			if ( ! $p ) {
@@ -314,6 +488,7 @@ final class Jobs {
 			if ( $reason ) {
 				Coverage::tally( $job, array( 'posts', 'attachment', $p->post_status ), 'excluded:' . $reason );
 				self::warning( $job, array( 'source' => 'attachment/' . $id, 'reason' => 'excluded-by-status-scope' ) );
+				self::progressed( $job, self::name( $p ) );
 				continue;
 			}
 			Coverage::tally( $job, array( 'posts', 'attachment', $p->post_status ), 'exported' );
@@ -351,8 +526,9 @@ final class Jobs {
 			}
 			Models::entry( $job, 'wp-media', $job['default_locale'], substr( hash( 'sha256', 'media:' . $id ), 0, 12 ), $data );
 			++$job['counts']['media'];
+			self::progressed( $job, self::name( $p ) );
 		}
-		if ( count( $ids ) < 25 ) {
+		if ( ! $stopped && count( $ids ) < $batch ) {
 			$job['phase'] = 'posts';
 			$job['cursor'] = 0;
 		}
@@ -407,6 +583,9 @@ final class Jobs {
 			return;
 		}
 		$placeholders = implode( ',', array_fill( 0, count( $types ), '%s' ) );
+		if ( ( $job['progress']['phase'] ?? null ) !== 'posts' ) {
+			self::progress( $job, (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type IN ($placeholders)", $types ) ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Placeholder list contains no user data.
+		}
 		$args = array_merge( array( $job['cursor'] ), $types );
 		$sql = "SELECT ID FROM {$wpdb->posts} WHERE ID > %d AND post_type IN ($placeholders) ORDER BY ID ASC LIMIT 25";
 		$ids = $wpdb->get_col( $wpdb->prepare( $sql, $args ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Placeholder list contains no user data.
@@ -429,6 +608,7 @@ final class Jobs {
 			if ( $reason ) {
 				Coverage::tally( $job, array( 'posts', $p->post_type, $p->post_status ), 'excluded:' . $reason );
 				self::warning( $job, array( 'source' => 'post/' . $id, 'reason' => 'excluded-by-status-scope' ) );
+				self::progressed( $job, self::name( $p ) );
 				continue;
 			}
 			$excluded = array();
@@ -444,6 +624,7 @@ final class Jobs {
 				Models::row( $job, 'bridge/seo-entries.json', 'post:' . $id, $seo );
 			}
 			++$job['counts']['posts'];
+			self::progressed( $job, self::name( $p ) );
 		}
 		if ( count( $ids ) < 25 ) {
 			$job['phase'] = 'terms';
@@ -453,6 +634,10 @@ final class Jobs {
 
 	private static function terms( &$job ) {
 		global $wpdb;
+		if ( ( $job['progress']['phase'] ?? null ) !== 'terms' ) {
+			// The same join as the enumeration below: a term_taxonomy row without its term is never listed, so never counted.
+			self::progress( $job, (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->term_taxonomy} tt JOIN {$wpdb->terms} t ON t.term_id = tt.term_id" ) );
+		}
 		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT tt.term_taxonomy_id, tt.taxonomy, tt.description, tt.parent, t.term_id, t.name, t.slug FROM {$wpdb->term_taxonomy} tt JOIN {$wpdb->terms} t ON t.term_id = tt.term_id WHERE tt.term_taxonomy_id > %d ORDER BY tt.term_taxonomy_id LIMIT 50", $job['cursor'] ) );
 		if ( $wpdb->last_error ) {
 			throw new \RuntimeException( 'Cannot enumerate taxonomies.' );
@@ -469,6 +654,7 @@ final class Jobs {
 				Models::term_raw( $job, (object) array( 'term_id' => (int) $row->term_id, 'taxonomy' => $row->taxonomy, 'slug' => $row->slug, 'name' => $row->name, 'description' => $row->description, 'parent' => (int) $row->parent ) );
 				Coverage::tally( $job, array( 'terms', $row->taxonomy ), 'excluded:taxonomy-not-registered' );
 				$job['cursor'] = $id;
+				self::progressed( $job, $row->name );
 				continue;
 			}
 			$t = Source::term_by( 'term_taxonomy_id', $id );
@@ -495,6 +681,7 @@ final class Jobs {
 				Coverage::tally( $job, array( 'terms', $t->taxonomy ), 'excluded:non-public-taxonomy' );
 			}
 			$job['cursor'] = $id;
+			self::progressed( $job, $t->name );
 		}
 		if ( count( $rows ) < 50 ) {
 			$job['phase'] = 'inventory';
@@ -508,7 +695,9 @@ final class Jobs {
 	 * measured from. Taken inside the same revision-checked snapshot as the content.
 	 */
 	private static function inventory( &$job ) {
+		self::progress( $job, null );
 		list( $records, $job['inventory_cursor'] ) = Inventory::page( $job['record_scope'], $job['inventory_cursor'] );
+		self::progressed( $job, (string) ( $job['inventory_cursor']['stage'] ?? '' ) );
 		// Beside the state, one JSON line per record: a large site's inventory would not fit in the state
 		// that every step reads and writes (BR-24). Pages are disjoint, and a request that died after
 		// appending but before saving left lines the saved cursor does not know: they are cut off
@@ -526,6 +715,9 @@ final class Jobs {
 
 	private static function comments( &$job ) {
 		global $wpdb;
+		if ( ( $job['progress']['phase'] ?? null ) !== 'comments' ) {
+			self::progress( $job, $job['options']['comments'] ? (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->comments}" ) : 0 );
+		}
 		$ids = $job['options']['comments'] ? $wpdb->get_col( $wpdb->prepare( "SELECT comment_ID FROM {$wpdb->comments} WHERE comment_ID > %d ORDER BY comment_ID LIMIT 50", $job['cursor'] ) ) : array();
 		if ( $wpdb->last_error ) {
 			throw new \RuntimeException( 'Cannot enumerate comments.' );
@@ -536,12 +728,14 @@ final class Jobs {
 			if ( ! isset( $job['tables']['bridge/entry-source-map.json'][ $c->comment_post_ID ] ) ) {
 				Coverage::tally( $job, array( 'comments', (string) $c->comment_approved ), 'excluded:post-not-in-scope' );
 				self::warning( $job, array( 'source' => 'comment/' . $id, 'reason' => 'post-not-in-scope' ) );
+				self::progressed( $job, $c->comment_author );
 				continue;
 			}
 			Coverage::tally( $job, array( 'comments', (string) $c->comment_approved ), 'exported' );
 			$data = array( 'id' => (int) $id, 'post' => (int) $c->comment_post_ID, 'post_type' => get_post_type( $c->comment_post_ID ), 'parent' => (int) $c->comment_parent ?: null, 'parent_resolved' => ! $c->comment_parent || null !== get_comment( $c->comment_parent ), 'author' => $c->comment_author, 'url' => $c->comment_author_url ?: null, 'date' => Exporter::utc_date( $c->comment_date_gmt ), 'content' => $c->comment_content, 'approved' => $c->comment_approved, 'type' => $c->comment_type, 'user_id' => null, 'meta' => (object) array() );
 			Models::row( $job, 'bridge/raw-comments.json', $id, $data );
 			++$job['counts']['comments'];
+			self::progressed( $job, $c->comment_author );
 		}
 		if ( count( $ids ) < 50 ) {
 			$job['phase'] = 'sources';
@@ -565,14 +759,18 @@ final class Jobs {
 		$files = $job['source_files'];
 		$states = $job['options']['scan_render'] ? ( $job['render_states'] = $job['render_states'] ?? Text::render_states() ) : array();
 		$step = $job['cursor'];
+		self::progress( $job, count( $files ) + 1 + count( $states ) );
 		$job['text'] = $job['text'] ?? array( 'occurrences' => array(), 'errors' => array(), 'counts' => array( 'unlisted_excluded' => 0, 'unlisted_by_reason' => array(), 'sources' => array( 'files' => count( $files ), 'settings' => 1, 'render_states' => count( $states ) ) ) );
 		if ( $step < count( $files ) ) {
 			$result = Scanner::scan( $files[ $step ], $job['default_locale'] );
+			self::progressed( $job, basename( $files[ $step ] ) );
 		} elseif ( $step === count( $files ) ) {
 			$result = Text::settings( $job['default_locale'] );
+			self::progressed( $job, 'settings' );
 		} elseif ( $step <= count( $files ) + count( $states ) ) {
 			$state = array_keys( $states )[ $step - count( $files ) - 1 ];
 			$result = Text::render( $state, $states[ $state ], $job['default_locale'] );
+			self::progressed( $job, $state );
 		} else {
 			$job['candidates'] = Text::merge( $job['text']['occurrences'], Text::content_texts() );
 			if ( count( $job['candidates'] ) > 20000 ) {
@@ -737,7 +935,7 @@ final class Jobs {
 	}
 
 	public static function summary( $job ) {
-		$result = array_intersect_key( $job, array_flip( array( 'id', 'phase', 'cursor', 'step', 'counts', 'created_at', 'error' ) ) ) + array( 'expires_at' => gmdate( 'c', strtotime( $job['created_at'] ) + DAY_IN_SECONDS ), 'scope' => array_intersect_key( $job['options'] + array( 'media_files' => true ), array_flip( array( 'types', 'private', 'comments', 'media_files' ) ) ), 'files' => count( $job['files'] ), 'models' => array_values( $job['models'] ), 'candidates' => count( $job['candidates'] ), 'unreviewed' => count( array_filter( $job['candidates'], static function ( $candidate ) { return 'review' === $candidate['decision']; } ) ) );
+		$result = array_intersect_key( $job, array_flip( array( 'id', 'phase', 'cursor', 'step', 'counts', 'created_at', 'error', 'progress' ) ) ) + array( 'expires_at' => gmdate( 'c', strtotime( $job['created_at'] ) + DAY_IN_SECONDS ), 'scope' => array_intersect_key( $job['options'] + array( 'media_files' => true ), array_flip( array( 'types', 'private', 'comments', 'media_files' ) ) ), 'files' => count( $job['files'] ), 'models' => array_values( $job['models'] ), 'candidates' => count( $job['candidates'] ), 'unreviewed' => count( array_filter( $job['candidates'], static function ( $candidate ) { return 'review' === $candidate['decision']; } ) ) );
 		if ( isset( $job['coverage_summary'] ) ) {
 			$result['coverage'] = $job['coverage_summary'];
 		}
