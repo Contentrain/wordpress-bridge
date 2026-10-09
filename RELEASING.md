@@ -156,7 +156,20 @@ another green CI run.
 
 ## Plugin Check warnings
 
-Fourteen, zero errors. They are third-party hook names — WPML's own filters,
-which have to be spelled WPML's way — and direct database queries in a one-shot
-exporter where the caching rule does not apply. Reviewers accept both with a
-stated reason; do not silence them by weakening the check.
+Plugin Check 2.1.0 (all categories, including plugin_repo and security) on the 0.6.5 release zip: zero errors,
+26 warnings, in three classes. Since 0.7.0 each direct query carries a `phpcs:ignore` with its reason on its own line,
+so the run shows only the first class. Reviewers accept all three with a stated reason; do not silence them by
+weakening the check.
+
+- **Third-party hook names (4):** `wpml_default_language`, `wpml_post_language_details`, `wpml_element_trid` and
+  `wpml_get_element_translations` are WPML's own filters, and have to be spelled WPML's way.
+- **Direct database queries (20, DirectQuery/NoCaching):** the export's batch and count steps
+  (`Jobs`: media, posts, terms, comments) read the next batch by id. A cached value would be stale by the next step.
+  `Source::revision()` reads the change counter uncached on purpose.
+- **A prepared `IN (…)` list (2, InterpolatedNotPrepared/UnfinishedPrepare):** the interpolated part is a list of
+  `%s` placeholders filled by `$wpdb->prepare()`, with no user data.
+
+## WordPress.org
+
+While the plugin is in review, upload each release zip (the GitHub release asset, sha256 checked) through
+wordpress.org/plugins/developers/add. ORK uploads with the founder's OK; the founder answers the review mail.
