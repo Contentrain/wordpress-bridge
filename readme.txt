@@ -37,14 +37,14 @@ The plugin contacts no host other than this site unless you choose GitHub delive
 
 == Installation ==
 
-1. Download `contentrain-bridge.zip` from the latest GitHub release (https://github.com/Contentrain/wordpress-bridge/releases/latest) and install it with Plugins > Add New > Upload Plugin.
+1. Install Contentrain Bridge from Plugins > Add New once the plugin is listed in the WordPress.org directory, or download `contentrain-bridge.zip` from the latest GitHub release (https://github.com/Contentrain/wordpress-bridge/releases/latest) and install it with Plugins > Add New > Upload Plugin.
 2. Activate Contentrain Bridge in WordPress.
 3. Open Tools > Contentrain Bridge.
 4. Step 1: choose content types and options, then prepare the content.
 5. Step 2: review the generated models and the interface-text candidates, then validate and finalize.
 6. Step 3: download the ZIP, or deliver to a branch in your own GitHub repository.
 
-The plugin is not in the WordPress.org directory yet, so updates are manual: upload the newer release ZIP the same way and WordPress replaces the installed version. Export snapshots are temporary and are not affected.
+Once the plugin is listed in the WordPress.org directory, updates arrive through WordPress like any other plugin's. A ZIP installed from a GitHub release is updated by uploading the newer release ZIP the same way; WordPress replaces the installed version. Export snapshots are temporary and are not affected.
 
 == Frequently Asked Questions ==
 
