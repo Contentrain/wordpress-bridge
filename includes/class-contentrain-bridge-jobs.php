@@ -439,9 +439,9 @@ final class Jobs {
 		$tries = self::$tries;
 		$batch = $tries >= 3 ? 1 : ( 2 === $tries ? 5 : 25 );
 		if ( ( $job['progress']['phase'] ?? null ) !== 'media' ) {
-			self::progress( $job, (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type = 'attachment'" ) );
+			self::progress( $job, (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type = 'attachment'" ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- One export step reads the next batch by id; a cached value would be stale by the next step.
 		}
-		$ids = $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE ID > %d AND post_type = 'attachment' ORDER BY ID ASC LIMIT %d", $job['cursor'], $batch ) );
+		$ids = $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE ID > %d AND post_type = 'attachment' ORDER BY ID ASC LIMIT %d", $job['cursor'], $batch ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- One export step reads the next batch by id; a cached value would be stale by the next step.
 		if ( $wpdb->last_error ) {
 			throw new \RuntimeException( 'Cannot enumerate media.' );
 		}
@@ -455,7 +455,7 @@ final class Jobs {
 			$skipped = (int) $ids[0];
 			$job['cursor'] = $skipped;
 			// The URL from the row itself: reading the attachment's meta is what may be killing the request.
-			$url = (string) $wpdb->get_var( $wpdb->prepare( "SELECT guid FROM {$wpdb->posts} WHERE ID = %d", $skipped ) );
+			$url = (string) $wpdb->get_var( $wpdb->prepare( "SELECT guid FROM {$wpdb->posts} WHERE ID = %d", $skipped ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- One export step reads the next batch by id; a cached value would be stale by the next step.
 			self::warning( $job, array( 'source' => 'attachment/' . $skipped, 'reason' => 'media-skipped-after-repeated-failure: left out of the export after ' . ( $tries - 1 ) . ' requests ended on it; content keeps its WordPress URL' . ( '' !== $url ? ' (' . $url . ')' : '' ) ) );
 			++$job['counts']['media_kept_remote'];
 			self::progressed( $job, basename( $url ) );
@@ -584,11 +584,11 @@ final class Jobs {
 		}
 		$placeholders = implode( ',', array_fill( 0, count( $types ), '%s' ) );
 		if ( ( $job['progress']['phase'] ?? null ) !== 'posts' ) {
-			self::progress( $job, (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type IN ($placeholders)", $types ) ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Placeholder list contains no user data.
+			self::progress( $job, (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type IN ($placeholders)", $types ) ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- The interpolated part is a list of %s placeholders filled by prepare(); one export step reads the next batch by id.
 		}
 		$args = array_merge( array( $job['cursor'] ), $types );
 		$sql = "SELECT ID FROM {$wpdb->posts} WHERE ID > %d AND post_type IN ($placeholders) ORDER BY ID ASC LIMIT 25";
-		$ids = $wpdb->get_col( $wpdb->prepare( $sql, $args ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Placeholder list contains no user data.
+		$ids = $wpdb->get_col( $wpdb->prepare( $sql, $args ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- The interpolated part is a list of %s placeholders filled by prepare(); one export step reads the next batch by id.
 		if ( $wpdb->last_error ) {
 			throw new \RuntimeException( 'Cannot enumerate WordPress content.' );
 		}
@@ -636,9 +636,9 @@ final class Jobs {
 		global $wpdb;
 		if ( ( $job['progress']['phase'] ?? null ) !== 'terms' ) {
 			// The same join as the enumeration below: a term_taxonomy row without its term is never listed, so never counted.
-			self::progress( $job, (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->term_taxonomy} tt JOIN {$wpdb->terms} t ON t.term_id = tt.term_id" ) );
+			self::progress( $job, (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->term_taxonomy} tt JOIN {$wpdb->terms} t ON t.term_id = tt.term_id" ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- One export step reads the next batch by id; a cached value would be stale by the next step.
 		}
-		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT tt.term_taxonomy_id, tt.taxonomy, tt.description, tt.parent, t.term_id, t.name, t.slug FROM {$wpdb->term_taxonomy} tt JOIN {$wpdb->terms} t ON t.term_id = tt.term_id WHERE tt.term_taxonomy_id > %d ORDER BY tt.term_taxonomy_id LIMIT 50", $job['cursor'] ) );
+		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT tt.term_taxonomy_id, tt.taxonomy, tt.description, tt.parent, t.term_id, t.name, t.slug FROM {$wpdb->term_taxonomy} tt JOIN {$wpdb->terms} t ON t.term_id = tt.term_id WHERE tt.term_taxonomy_id > %d ORDER BY tt.term_taxonomy_id LIMIT 50", $job['cursor'] ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- One export step reads the next batch by id; a cached value would be stale by the next step.
 		if ( $wpdb->last_error ) {
 			throw new \RuntimeException( 'Cannot enumerate taxonomies.' );
 		}
@@ -716,9 +716,9 @@ final class Jobs {
 	private static function comments( &$job ) {
 		global $wpdb;
 		if ( ( $job['progress']['phase'] ?? null ) !== 'comments' ) {
-			self::progress( $job, $job['options']['comments'] ? (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->comments}" ) : 0 );
+			self::progress( $job, $job['options']['comments'] ? (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->comments}" ) : 0 ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- One export step reads the next batch by id; a cached value would be stale by the next step.
 		}
-		$ids = $job['options']['comments'] ? $wpdb->get_col( $wpdb->prepare( "SELECT comment_ID FROM {$wpdb->comments} WHERE comment_ID > %d ORDER BY comment_ID LIMIT 50", $job['cursor'] ) ) : array();
+		$ids = $job['options']['comments'] ? $wpdb->get_col( $wpdb->prepare( "SELECT comment_ID FROM {$wpdb->comments} WHERE comment_ID > %d ORDER BY comment_ID LIMIT 50", $job['cursor'] ) ) : array(); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- One export step reads the next batch by id; a cached value would be stale by the next step.
 		if ( $wpdb->last_error ) {
 			throw new \RuntimeException( 'Cannot enumerate comments.' );
 		}

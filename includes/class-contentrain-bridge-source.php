@@ -383,7 +383,7 @@ final class Source {
 	public static function revision() {
 		global $wpdb;
 		// Bypass the request's option cache when checking concurrent source changes.
-		return (string) $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", 'contentrain_bridge_revision' ) );
+		return (string) $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", 'contentrain_bridge_revision' ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- The revision is read uncached on purpose: it is the change counter an export compares against.
 	}
 
 	/**
