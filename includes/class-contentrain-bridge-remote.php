@@ -47,6 +47,8 @@ final class Remote {
 	const META = 'contentrain_bridge_remote_jobs_';
 	const BUDGET = 20;
 	const LIVE_LIMIT = 3;
+	/** Not content for `/counts`: media (counted as `attachments`) and WordPress's own site-building types. */
+	const NOT_CONTENT_TYPES = array( 'attachment', 'wp_block', 'wp_template', 'wp_template_part', 'wp_navigation', 'wp_font_family', 'wp_font_face', 'wp_global_styles', 'nav_menu_item' );
 	/** Touched on every read of a snapshot; one read within READ_GUARD seconds keeps it from being replaced. */
 	const READ_MARK = 'read';
 	const READ_GUARD = 600;
@@ -94,11 +96,16 @@ final class Remote {
 	/**
 	 * How much a move would carry, counted by WordPress itself (`wp_count_posts`): published entries per content type (the
 	 * same types an export reads) and media files. Numbers only, no titles or addresses. Migrate prices on it before
-	 * payment and checks the export against the same basis when the move starts.
+	 * payment and checks the export against the same basis when the move starts. Media is `attachments` only, and WordPress's
+	 * own site-building types (blocks, templates, navigation, fonts, styles, menu items) are not content, so they are left
+	 * out: the same list Migrate keeps (`NOT_CONTENT_TYPES` in its credentials reader).
 	 */
 	public static function counts() {
 		$published = array();
 		foreach ( array_keys( Source::content_types() ) as $name ) {
+			if ( in_array( $name, self::NOT_CONTENT_TYPES, true ) ) {
+				continue;
+			}
 			$published[ $name ] = (int) ( wp_count_posts( $name )->publish ?? 0 );
 		}
 		ksort( $published );

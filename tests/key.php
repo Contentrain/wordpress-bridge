@@ -89,6 +89,7 @@ check( 404 === $status && 'bridge_not_found' === code( $body ) && $pair === get_
 list( $status, $counts ) = call( 'GET', '/counts', array( 'contentrain_pairing' => $pair ), $key );
 check( 200 === $status && 'contentrain-bridge-counts@1' === $counts['format'], "GET /counts with the paired key: 200 ($status)" );
 check( (int) wp_count_posts( 'post' )->publish === $counts['published']['post'] && (int) wp_count_posts( 'page' )->publish === $counts['published']['page'] && (int) wp_count_posts( 'attachment' )->inherit === $counts['attachments'], 'published per type and media, as wp_count_posts counts them' );
+check( array() === array_intersect( array_keys( $counts['published'] ), array( 'attachment', 'wp_block', 'wp_template', 'wp_template_part', 'wp_navigation', 'wp_font_family', 'wp_font_face', 'wp_global_styles', 'nav_menu_item' ) ), 'published lists content types only: no attachment (media is `attachments`), no blocks, templates, navigation, fonts, styles or menu items' );
 check( array_keys( $counts ) === array( 'format', 'published', 'attachments' ) && array_filter( $counts['published'], 'is_int' ) === $counts['published'], 'numbers only: no titles, addresses or drafts' );
 list( $status, $started ) = call( 'POST', '/exports', $scope, $key );
 check( 201 === $status && false === $started['reused'], 'the header key starts an export: 201' );
