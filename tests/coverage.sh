@@ -20,6 +20,8 @@ grep -q 'Coverage output: ' "$log"
 "${wp[@]}" php /var/www/html/wp-content/plugins/contentrain-bridge/tests/remote.php
 # BR-27: the same REST export with the Contentrain Migrate connection key alone.
 "${wp[@]}" php /var/www/html/wp-content/plugins/contentrain-bridge/tests/key.php
+# The owner's robots.txt switch for Contentrain Migrate.
+"${wp[@]}" php /var/www/html/wp-content/plugins/contentrain-bridge/tests/robots.php
 # The same site as WXR, the A-03 input.
 "${wp[@]}" sh -c "rm -rf $content/uploads/bridge-wxr && mkdir -p $content/uploads/bridge-wxr && chown www-data:www-data $content/uploads/bridge-wxr"
 "${cli[@]}" export --dir="$content/uploads/bridge-wxr" --filename_format=site.xml >/dev/null
