@@ -20,7 +20,8 @@
     "test:coverage": "tests/coverage.sh",
     "test:integrations": "tests/integrations.sh",
     "test:builder": "tests/builder.sh",
-    "test:robots": "tests/robots.sh"
+    "test:robots": "tests/robots.sh",
+    "test:robots-parity": "node tests/robots-parity.mjs"
   },
   "devDependencies": {
     "@contentrain/types": "1.59.0",

@@ -188,19 +188,24 @@ final class Admin {
 		$physical = Robots::physical();
 		?>
 		<section id="cr-robots" class="card cr-card">
-			<?php self::heading( 'visibility', __( 'Let Contentrain Migrate read your pages', 'contentrain-bridge' ) ); ?>
-			<p><?php esc_html_e( 'If your robots.txt closes this site to crawlers, Contentrain Migrate respects it and cannot read your pages. Turning this on adds one group to robots.txt for the ContentrainMigrate crawler only: the rules every crawler has, without the lines that close the whole site or the REST API. Other crawlers, and what stays closed (such as wp-admin), are unchanged. Turning it off removes the group.', 'contentrain-bridge' ); ?></p>
+			<?php self::heading( 'visibility', __( 'Let Contentrain Migrate read your pages and media', 'contentrain-bridge' ) ); ?>
+			<p><?php esc_html_e( 'If your robots.txt closes this site to crawlers, Contentrain Migrate respects it and cannot read your pages and media. Turning this on adds one group to robots.txt for the ContentrainMigrate crawler only: the rules every crawler has, without the lines that close the whole site, and an Allow for the REST API and your uploaded media. What you keep closed (such as wp-admin) stays closed, and other crawlers see robots.txt as before. Turning it off removes the group.', 'contentrain-bridge' ); ?></p>
 			<?php if ( $physical ) : ?>
-				<p><?php esc_html_e( 'This site serves a robots.txt file from disk, which WordPress cannot change. To let Contentrain Migrate read your pages, add these lines to that file yourself, then check again in Migrate:', 'contentrain-bridge' ); ?></p>
+				<p><?php esc_html_e( 'This site serves a robots.txt file from disk, which WordPress cannot change. To let Contentrain Migrate read your pages and media, add these lines to that file yourself, then check again in Migrate:', 'contentrain-bridge' ); ?></p>
 				<textarea class="large-text code" rows="6" readonly><?php echo esc_textarea( Robots::group( Robots::groups( Robots::physical_text() ) ) ); ?></textarea>
 			<?php else : ?>
 				<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
 					<input type="hidden" name="action" value="contentrain_bridge_robots" />
 					<input type="hidden" name="allow" value="<?php echo $chosen ? '0' : '1'; ?>" />
 					<?php wp_nonce_field( 'contentrain_bridge_robots' ); ?>
-					<p role="status"><?php echo $chosen ? esc_html__( 'On: Contentrain Migrate may read your pages.', 'contentrain-bridge' ) : esc_html__( 'Off: robots.txt is as you or your plugins wrote it.', 'contentrain-bridge' ); ?></p>
-					<p class="cr-actions"><button type="submit" class="button"><?php echo $chosen ? esc_html__( 'Turn off', 'contentrain-bridge' ) : esc_html__( 'Let Contentrain Migrate read my pages', 'contentrain-bridge' ); ?></button></p>
+					<p role="status"><?php echo $chosen ? esc_html__( 'On: Contentrain Migrate may read your pages and media.', 'contentrain-bridge' ) : esc_html__( 'Off: robots.txt is as you or your plugins wrote it.', 'contentrain-bridge' ); ?></p>
+					<p class="cr-actions"><button type="submit" class="button"><?php echo $chosen ? esc_html__( 'Turn off', 'contentrain-bridge' ) : esc_html__( 'Let Contentrain Migrate read my pages and media', 'contentrain-bridge' ); ?></button></p>
 				</form>
+				<details>
+					<summary><?php esc_html_e( 'Is your robots.txt served by Cloudflare or another CDN?', 'contentrain-bridge' ); ?></summary>
+					<p><?php esc_html_e( 'Then the switch cannot change it. Add these lines in that service instead, then check again in Migrate:', 'contentrain-bridge' ); ?></p>
+					<textarea class="large-text code" rows="6" readonly><?php echo esc_textarea( Robots::group( Robots::groups( Robots::served_without() ) ) ); ?></textarea>
+				</details>
 			<?php endif; ?>
 		</section>
 		<?php

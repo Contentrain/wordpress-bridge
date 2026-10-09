@@ -16,3 +16,6 @@ done
   --admin_email=bridge-admin@example.test --skip-email >/dev/null
 "${cli[@]}" plugin activate contentrain-bridge >/dev/null
 "${compose[@]}" exec -T wordpress php /var/www/html/wp-content/plugins/contentrain-bridge/tests/robots.php
+# The served pairs, for tests/robots-parity.mjs (Contentrain Migrate's own parser).
+rm -rf "$here/.out/robots" && mkdir -p "$here/.out"
+docker cp "$("${compose[@]}" ps -q wordpress):/tmp/bridge-robots" "$here/.out/robots"

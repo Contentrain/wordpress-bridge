@@ -6,8 +6,8 @@ defined( 'ABSPATH' ) || exit;
 
 /**
  * Off by default. When the site owner turns it on (Tools > Contentrain Bridge), WordPress's own robots.txt gets one more
- * group, for the `ContentrainMigrate` crawler alone: the rules every crawler (`*`) has, without the Disallows that close
- * the whole site (`/`) or the REST API (`/wp-json/`). Every other rule stays, so what the owner keeps closed (wp-admin, a
+ * group, for the `ContentrainMigrate` crawler alone: the rules every crawler (`*`) has without the Disallows that close the
+ * whole site (the ones matching `/`), then `Allow` for the REST API, the uploaded media and `/`. Every other rule stays, so what the owner keeps closed (wp-admin, a
  * private path) stays closed to it too; other crawlers see robots.txt exactly as before. Turning it off removes the group.
  *
  * A crawler follows only the group that names it (RFC 9309, 2.2.1), so the new group repeats the `*` rules rather than
@@ -29,9 +29,43 @@ final class Robots {
 		return (bool) get_option( self::OPTION, false );
 	}
 
-	/** Whether a robots.txt file on disk answers before WordPress does. */
+	/** Whether a robots.txt file on disk answers before WordPress does (in WordPress's own directory or the site's root). */
 	public static function physical() {
-		return file_exists( ABSPATH . 'robots.txt' );
+		return '' !== self::physical_path();
+	}
+
+	/** The robots.txt on disk, or '' when WordPress serves it. */
+	private static function physical_path() {
+		if ( ! function_exists( 'get_home_path' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/file.php';
+		}
+		foreach ( array_unique( array( ABSPATH, get_home_path() ) ) as $dir ) {
+			if ( file_exists( trailingslashit( $dir ) . 'robots.txt' ) ) {
+				return trailingslashit( $dir ) . 'robots.txt';
+			}
+		}
+		return '';
+	}
+
+	/** The robots.txt WordPress serves without this plugin's group (core's lines and every other plugin's filter). */
+	public static function served_without() {
+		$output = 'User-agent: *' . "\n" . 'Disallow: ' . wp_parse_url( admin_url(), PHP_URL_PATH ) . "\n" . 'Allow: ' . wp_parse_url( admin_url( 'admin-ajax.php' ), PHP_URL_PATH ) . "\n";
+		remove_filter( 'robots_txt', array( self::class, 'filter' ), PHP_INT_MAX );
+		$served = (string) apply_filters( 'robots_txt', $output, (bool) get_option( 'blog_public' ) ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- WordPress core's own robots.txt filter, read as do_robots() builds it.
+		add_filter( 'robots_txt', array( self::class, 'filter' ), PHP_INT_MAX, 2 );
+		return $served;
+	}
+
+	/** Whether the robots.txt WordPress serves already has a group of the owner's naming ContentrainMigrate. */
+	public static function owner_group() {
+		foreach ( self::groups( self::served_without() ) as $group ) {
+			foreach ( $group['agents'] as $agent ) {
+				if ( 0 === strcasecmp( $agent, self::AGENT ) ) {
+					return true;
+				}
+			}
+		}
+		return false;
 	}
 
 	/** What `/about` tells a reader: the switch, and where robots.txt comes from (a file is the owner's to edit). */
@@ -39,6 +73,7 @@ final class Robots {
 		return array(
 			'allow' => self::chosen() && ! self::physical(),
 			'file' => self::physical() ? 'physical' : 'virtual',
+			'owner_group' => self::owner_group(),
 		);
 	}
 
@@ -92,13 +127,16 @@ final class Robots {
 				continue;
 			}
 			foreach ( $group['rules'] as $rule ) {
-				if ( 'disallow' === $rule[0] && ( self::matches( $rule[1], '/' ) || self::matches( $rule[1], '/wp-json/' ) ) ) {
+				// Only a closure of the whole site goes (it matches `/`); every other rule is the owner's, kept as written.
+				if ( 'disallow' === $rule[0] && self::matches( $rule[1], '/' ) ) {
 					continue;
 				}
 				$lines[] = ( 'allow' === $rule[0] ? 'Allow: ' : 'Disallow: ' ) . $rule[1];
 			}
 		}
-		$lines[] = 'Allow: /';
+		foreach ( self::opened() as $path ) {
+			$lines[] = 'Allow: ' . $path;
+		}
 		return implode( "\n", array_unique( $lines ) );
 	}
 
@@ -141,6 +179,18 @@ final class Robots {
 		return $groups;
 	}
 
+	/**
+	 * The paths a migration reads, opened by an Allow each: by longest match (RFC 9309, 2.2.2; an Allow wins a tie) they
+	 * open the REST API and the uploaded media under any shorter Disallow (`/wp-`, `/wp-content/`), while every other path
+	 * such a Disallow closes, wp-admin among them, stays closed.
+	 */
+	public static function opened() {
+		$uploads = wp_parse_url( content_url( '/uploads/' ), PHP_URL_PATH );
+		// `/wp-json/` always: without pretty permalinks `rest_url()` is `/index.php?rest_route=`, and readers try both.
+		$rest = trailingslashit( (string) wp_parse_url( home_url( '/' . rest_get_url_prefix() ), PHP_URL_PATH ) );
+		return array_values( array_unique( array( '/wp-json/', $rest, is_string( $uploads ) ? $uploads : '/wp-content/uploads/', '/' ) ) );
+	}
+
 	/** Whether a rule's path pattern matches a path (RFC 9309, 2.2.2/2.2.3: `*` any run, a trailing `$` the end). */
 	public static function matches( $pattern, $path ) {
 		$anchored = '$' === substr( $pattern, -1 );
@@ -151,10 +201,11 @@ final class Robots {
 
 	/** The robots.txt on disk, when there is one: what the screen builds the lines to add from. */
 	public static function physical_text() {
-		if ( ! self::physical() ) {
+		$path = self::physical_path();
+		if ( '' === $path ) {
 			return '';
 		}
-		$text = file_get_contents( ABSPATH . 'robots.txt' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- A local file in the site root, read to show the owner lines to add.
+		$text = file_get_contents( $path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- A local file in the site root, read to show the owner lines to add.
 		return false === $text ? '' : $text;
 	}
 }

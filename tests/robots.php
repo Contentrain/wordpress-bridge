@@ -32,10 +32,41 @@ function rules_for( $robots, $agent ) {
 	}
 	return null;
 }
+/**
+ * Whether robots.txt lets an agent read a path, as RFC 9309 says: every group naming the agent (else `*`), the longest
+ * matching rule wins, an Allow wins a tie, no match is allowed.
+ */
+function can( $robots, $agent, $path ) {
+	$named = array();
+	$star = array();
+	foreach ( Robots::groups( $robots ) as $group ) {
+		foreach ( $group['agents'] as $a ) {
+			if ( 0 === strcasecmp( $a, $agent ) ) { $named = array_merge( $named, $group['rules'] ); }
+			if ( '*' === $a ) { $star = array_merge( $star, $group['rules'] ); }
+		}
+	}
+	$best = null;
+	foreach ( $named ? $named : $star as $rule ) {
+		if ( ! Robots::matches( $rule[1], $path ) ) { continue; }
+		$length = strlen( $rule[1] );
+		if ( null === $best || $length > $best[0] || ( $length === $best[0] && 'allow' === $rule[0] ) ) { $best = array( $length, $rule[0] ); }
+	}
+	return null === $best || 'allow' === $best[1];
+}
+/** robots.txt served with another plugin's lines appended (an SEO plugin, a security plugin, a staging setup). */
+function robots_with( $lines ) {
+	$f = static function ( $output ) use ( $lines ) { return $output . $lines; };
+	add_filter( 'robots_txt', $f, 10 );
+	$served = robots();
+	remove_filter( 'robots_txt', $f, 10 );
+	return $served;
+}
 function about() {
 	$response = rest_do_request( new WP_REST_Request( 'GET', '/contentrain-bridge/v1/about' ) );
 	return $response->get_data();
 }
+const MIGRATE = 'ContentrainMigrate';
+const READS = array( '/', '/blog/a-post/', '/wp-json/contentrain-bridge/v1/about', '/wp-json/wp/v2/posts', '/wp-content/uploads/2026/10/a.jpg' );
 
 $file = ABSPATH . 'robots.txt';
 check( ! file_exists( $file ), 'the test site has no robots.txt on disk' );
@@ -43,42 +74,63 @@ Robots::set( false );
 
 // Off by default: robots.txt is untouched.
 $plain = robots();
-check( ! Robots::chosen() && false === stripos( $plain, 'ContentrainMigrate' ), 'off by default: no Migrate group' );
-check( array( 'allow' => false, 'file' => 'virtual' ) === about()['robots'] && in_array( 'robots_allow', about()['capabilities'], true ), '/about: robots_allow capability, off, virtual' );
+check( ! Robots::chosen() && false === stripos( $plain, MIGRATE ), 'off by default: no Migrate group' );
+check( array( 'allow' => false, 'file' => 'virtual', 'owner_group' => false ) === about()['robots'] && in_array( 'robots_allow', about()['capabilities'], true ), '/about: robots_allow capability, off, virtual, no owner group' );
 
-// On, public site: the `*` rules repeated, wp-admin still closed, plus Allow: /.
+// On, public site: the `*` rules repeated and the reads opened; wp-admin still closed.
 Robots::set( true );
 $on = robots();
-$rules = rules_for( $on, 'ContentrainMigrate' );
-check( null !== $rules, 'on: a ContentrainMigrate group is served' );
-check( in_array( array( 'disallow', '/wp-admin/' ), $rules, true ) && in_array( array( 'allow', '/wp-admin/admin-ajax.php' ), $rules, true ), 'on: wp-admin stays closed to Migrate (the * rules repeated)' );
-check( in_array( array( 'allow', '/' ), $rules, true ), 'on: Allow: / for Migrate' );
+check( null !== rules_for( $on, MIGRATE ), 'on: a ContentrainMigrate group is served' );
+check( ! can( $on, MIGRATE, '/wp-admin/' ) && can( $on, MIGRATE, '/wp-admin/admin-ajax.php' ), 'on: wp-admin stays closed to Migrate (the * rules repeated)' );
 check( rules_for( $on, '*' ) === rules_for( $plain, '*' ), 'on: the * group is unchanged for every other crawler' );
 check( 0 === strpos( $on, rtrim( $plain, "\n" ) ), 'on: what robots.txt had stays first, byte for byte' );
-check( array( 'allow' => true, 'file' => 'virtual' ) === about()['robots'], '/about: on, virtual' );
+check( array( 'allow' => true, 'file' => 'virtual', 'owner_group' => false ) === about()['robots'], '/about: on, virtual' );
 
-// A robots.txt closed to every crawler (`Disallow: /`, as an SEO plugin or a staging setup writes it; WordPress itself
-// only adds a noindex meta for "Discourage search engines"): closed for `*`, open for Migrate.
-$all = static function ( $output ) { return $output . "Disallow: /\n"; };
-add_filter( 'robots_txt', $all, 10 );
-$closed = robots();
-check( in_array( array( 'disallow', '/' ), rules_for( $closed, '*' ), true ), 'closed site: * keeps Disallow: /' );
-check( ! in_array( array( 'disallow', '/' ), rules_for( $closed, 'ContentrainMigrate' ), true ) && in_array( array( 'disallow', '/wp-admin/' ), rules_for( $closed, 'ContentrainMigrate' ), true ), 'closed site: Migrate does not get Disallow: /, wp-admin stays closed' );
-remove_filter( 'robots_txt', $all, 10 );
+/**
+ * ork2's fixtures (#57 review): for each owner `*` set, Migrate reads the site, the REST API and the uploads, wp-admin
+ * stays closed wherever the owner closed it, and every other agent's verdict is what it was with the switch off.
+ */
+$fixtures = array(
+	'Disallow: /' => "Disallow: /\n",
+	'Disallow: /*' => "Disallow: /*\n",
+	'Disallow: /wp-' => "Disallow: /wp-\n",
+	'Disallow: /wp-content/' => "Disallow: /wp-content/\n",
+	'uploads + plugins closed, Googlebot group' => "Disallow: /wp-content/uploads/\nDisallow: /wp-content/plugins/\n\nUser-agent: Googlebot\nDisallow: /wp-content/\n",
+	'Disallow: /wp-json/ + /private/' => "Disallow: /wp-json/\nDisallow: /private/\n",
+	'Cloudflare managed' => "\n" . file_get_contents( __DIR__ . '/fixtures/robots/cloudflare-managed.txt' ),
+);
+foreach ( $fixtures as $name => $lines ) {
+	Robots::set( false );
+	$off = robots_with( $lines );
+	Robots::set( true );
+	$served = robots_with( $lines );
+	$reads = array_filter( READS, static function ( $path ) use ( $served ) { return ! can( $served, MIGRATE, $path ); } );
+	check( ! $reads, "$name: Migrate reads " . implode( ', ', READS ) . ( $reads ? ' (closed: ' . implode( ', ', $reads ) . ')' : '' ) );
+	check( ! can( $served, MIGRATE, '/wp-admin/' ), "$name: wp-admin stays closed to Migrate" );
+	$same = true;
+	foreach ( array( '*', 'Googlebot', 'GPTBot', 'ClaudeBot' ) as $agent ) {
+		foreach ( array_merge( READS, array( '/wp-admin/', '/private/x', '/wp-content/plugins/x.js' ) ) as $path ) {
+			$same = $same && can( $served, $agent, $path ) === can( $off, $agent, $path );
+		}
+	}
+	check( $same && 0 === strpos( $served, rtrim( $off, "\n" ) ), "$name: every other agent's verdicts unchanged, the original bytes first" );
+	// For tests/robots-parity.mjs: the same pair, read by Contentrain Migrate's own robots parser.
+	$slug = sprintf( '%02d-%s', array_search( $name, array_keys( $fixtures ), true ), sanitize_title( $name ) );
+	wp_mkdir_p( '/tmp/bridge-robots' );
+	file_put_contents( "/tmp/bridge-robots/$slug.off.txt", $off );
+	file_put_contents( "/tmp/bridge-robots/$slug.on.txt", $served );
+}
+$private = robots_with( "Disallow: /private/\nDisallow: /wp-content/plugins/\n" );
+check( ! can( $private, MIGRATE, '/private/x' ) && ! can( $private, MIGRATE, '/wp-content/plugins/x.js' ), 'a path the owner closes (outside the reads) stays closed to Migrate' );
+check( ! in_array( array( 'disallow', '/' ), rules_for( robots_with( "Disallow: /\n" ), MIGRATE ), true ), 'only a whole-site closure is left out of the Migrate group' );
+check( in_array( array( 'disallow', '/wp-' ), rules_for( robots_with( "Disallow: /wp-\n" ), MIGRATE ), true ), 'a shorter closer such as /wp- is kept (the Allows open the reads)' );
 
-// Another plugin's rules: /wp-json/ and wildcard closers dropped for Migrate, a private path kept.
-$extra = static function ( $output ) { return $output . "Disallow: /wp-json/\nDisallow: /*\nDisallow: /private/\nDisallow: /w\n"; };
-add_filter( 'robots_txt', $extra, 10 );
-$rules = rules_for( robots(), 'ContentrainMigrate' );
-check( ! in_array( array( 'disallow', '/wp-json/' ), $rules, true ) && ! in_array( array( 'disallow', '/*' ), $rules, true ) && ! in_array( array( 'disallow', '/w' ), $rules, true ), 'closers of / and /wp-json/ are dropped for Migrate (incl. /* and a prefix of /wp-json/)' );
-check( in_array( array( 'disallow', '/private/' ), $rules, true ), 'a path the owner closes stays closed to Migrate' );
-remove_filter( 'robots_txt', $extra, 10 );
-
-// The owner's own ContentrainMigrate group wins: nothing added.
+// The owner's own ContentrainMigrate group wins: nothing added, and /about says so.
 $own = static function ( $output ) { return $output . "\nUser-agent: ContentrainMigrate\nDisallow: /shop/\n"; };
 add_filter( 'robots_txt', $own, 10 );
 $served = robots();
-check( 1 === substr_count( $served, 'User-agent: ContentrainMigrate' ) && array( array( 'disallow', '/shop/' ) ) === rules_for( $served, 'ContentrainMigrate' ), "the owner's own Migrate group is left as written" );
+check( 1 === substr_count( $served, 'User-agent: ContentrainMigrate' ) && array( array( 'disallow', '/shop/' ) ) === rules_for( $served, MIGRATE ), "the owner's own Migrate group is left as written" );
+check( true === about()['robots']['owner_group'], "/about: owner_group when the owner wrote one" );
 remove_filter( 'robots_txt', $own, 10 );
 
 // RFC 9309 matching and grouping.
@@ -89,9 +141,10 @@ check( 2 === count( $groups ) && array( 'a', '*' ) === $groups[0]['agents'] && a
 // A file on disk: the switch is off whatever was chosen, and /about says physical.
 file_put_contents( $file, "User-agent: *\nDisallow: /\n" );
 try {
-	check( array( 'allow' => false, 'file' => 'physical' ) === about()['robots'], '/about: a robots.txt on disk is physical, and off' );
+	check( array( 'allow' => false, 'file' => 'physical' ) === array_intersect_key( about()['robots'], array( 'allow' => 1, 'file' => 1 ) ), '/about: a robots.txt on disk is physical, and off' );
 	check( "User-agent: *\nDisallow: /\n" === Robots::filter( "User-agent: *\nDisallow: /\n" ), 'a file on disk: the filter changes nothing' );
-	check( false !== strpos( Robots::group( Robots::groups( Robots::physical_text() ) ), "User-agent: ContentrainMigrate\nAllow: /" ), 'a file on disk: the lines to add by hand' );
+	$by_hand = "User-agent: *\nDisallow: /\n\n" . Robots::group( Robots::groups( Robots::physical_text() ) ) . "\n";
+	check( ! array_filter( READS, static function ( $path ) use ( $by_hand ) { return ! can( $by_hand, MIGRATE, $path ); } ), 'a file on disk: the lines to add by hand open the reads' );
 } finally {
 	unlink( $file );
 }
