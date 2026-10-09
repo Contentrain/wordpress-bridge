@@ -54,6 +54,8 @@ final class Remote {
 	public static function routes() {
 		// Public by design: what a reader needs to choose how to sign in. No site data.
 		register_rest_route( 'contentrain-bridge/v1', '/about', array( 'methods' => 'GET', 'permission_callback' => '__return_true', 'callback' => array( self::class, 'about' ) ) );
+		// Published counts for a price before payment (Migrate gate item 10): the same reader permission as an export, never public.
+		register_rest_route( 'contentrain-bridge/v1', '/counts', array( 'methods' => 'GET', 'permission_callback' => array( self::class, 'permitted' ), 'callback' => array( self::class, 'counts' ) ) );
 		register_rest_route( 'contentrain-bridge/v1', '/exports', array(
 			array( 'methods' => 'POST', 'permission_callback' => array( self::class, 'permitted' ), 'callback' => array( self::class, 'start' ) ),
 			array( 'methods' => 'GET', 'permission_callback' => array( self::class, 'permitted' ), 'callback' => array( self::class, 'index' ) ),
@@ -83,7 +85,22 @@ final class Remote {
 	}
 
 	public static function about() {
-		return new \WP_REST_Response( array( 'version' => CONTENTRAIN_BRIDGE_VERSION, 'auth' => array( 'app_password', 'key' ) ), 200, self::headers() );
+		// `capabilities`: what a reader may ask for beyond exports, so it can tell an older plugin without comparing versions.
+		return new \WP_REST_Response( array( 'version' => CONTENTRAIN_BRIDGE_VERSION, 'auth' => array( 'app_password', 'key' ), 'capabilities' => array( 'counts' ) ), 200, self::headers() );
+	}
+
+	/**
+	 * How much a move would carry, counted by WordPress itself (`wp_count_posts`): published entries per content type (the
+	 * same types an export reads) and media files. Numbers only, no titles or addresses. Migrate prices on it before
+	 * payment and checks the export against the same basis when the move starts.
+	 */
+	public static function counts() {
+		$published = array();
+		foreach ( array_keys( Source::content_types() ) as $name ) {
+			$published[ $name ] = (int) ( wp_count_posts( $name )->publish ?? 0 );
+		}
+		ksort( $published );
+		return new \WP_REST_Response( array( 'format' => 'contentrain-bridge-counts@1', 'published' => $published, 'attachments' => (int) ( wp_count_posts( 'attachment' )->inherit ?? 0 ) ), 200, self::headers() );
 	}
 
 	/** Start an export, or return the caller's live one with the same scope: never two alike. */
