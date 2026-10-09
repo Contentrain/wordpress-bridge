@@ -100,7 +100,10 @@ $fixtures = array(
 	'Cloudflare managed' => "\n" . file_get_contents( __DIR__ . '/fixtures/robots/cloudflare-managed.txt' ),
 );
 // An SEO plugin that replaces robots.txt whole (Yoast: an empty `Disallow:`, wp-admin open to everyone; CI runs Yoast).
-$replaced = array( 'Yoast (wp-admin open to all)' => "User-agent: *\nDisallow:\n" );
+$replaced = array(
+	'Yoast (wp-admin open to all)' => "User-agent: *\nDisallow:\n",
+	'no * group at all' => "User-agent: Googlebot\nDisallow: /private/\n",
+);
 /** robots.txt served when a plugin's filter replaces WordPress's own lines rather than appending to them. */
 function robots_replaced( $text ) {
 	$f = static function () use ( $text ) { return $text; };
