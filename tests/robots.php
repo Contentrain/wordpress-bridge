@@ -99,11 +99,22 @@ $fixtures = array(
 	'Disallow: /wp-json/ + /private/' => "Disallow: /wp-json/\nDisallow: /private/\n",
 	'Cloudflare managed' => "\n" . file_get_contents( __DIR__ . '/fixtures/robots/cloudflare-managed.txt' ),
 );
-foreach ( $fixtures as $name => $lines ) {
+// An SEO plugin that replaces robots.txt whole (Yoast: an empty `Disallow:`, wp-admin open to everyone; CI runs Yoast).
+$replaced = array( 'Yoast (wp-admin open to all)' => "User-agent: *\nDisallow:\n" );
+/** robots.txt served when a plugin's filter replaces WordPress's own lines rather than appending to them. */
+function robots_replaced( $text ) {
+	$f = static function () use ( $text ) { return $text; };
+	add_filter( 'robots_txt', $f, 10 );
+	$served = robots();
+	remove_filter( 'robots_txt', $f, 10 );
+	return $served;
+}
+foreach ( $fixtures + $replaced as $name => $lines ) {
+	$read = isset( $replaced[ $name ] ) ? 'robots_replaced' : 'robots_with';
 	Robots::set( false );
-	$off = robots_with( $lines );
+	$off = $read( $lines );
 	Robots::set( true );
-	$served = robots_with( $lines );
+	$served = $read( $lines );
 	$reads = array_filter( READS, static function ( $path ) use ( $served ) { return ! can( $served, MIGRATE, $path ); } );
 	check( ! $reads, "$name: Migrate reads " . implode( ', ', READS ) . ( $reads ? ' (closed: ' . implode( ', ', $reads ) . ')' : '' ) );
 	check( ! can( $served, MIGRATE, '/wp-admin/' ), "$name: wp-admin stays closed to Migrate" );
@@ -115,11 +126,20 @@ foreach ( $fixtures as $name => $lines ) {
 	}
 	check( $same && 0 === strpos( $served, rtrim( $off, "\n" ) ), "$name: every other agent's verdicts unchanged, the original bytes first" );
 	// For tests/robots-parity.mjs: the same pair, read by Contentrain Migrate's own robots parser.
-	$slug = sprintf( '%02d-%s', array_search( $name, array_keys( $fixtures ), true ), sanitize_title( $name ) );
+	$slug = sprintf( '%02d-%s', array_search( $name, array_keys( $fixtures + $replaced ), true ), sanitize_title( $name ) );
 	wp_mkdir_p( '/tmp/bridge-robots' );
 	file_put_contents( "/tmp/bridge-robots/$slug.off.txt", $off );
 	file_put_contents( "/tmp/bridge-robots/$slug.on.txt", $served );
 }
+// "Discourage search engines" (blog_public 0) with its `Disallow: /`: the owner's switch still lets Migrate read the content,
+// and wp-admin stays closed (the group's own closure, not the `*` rules).
+$closed = static function ( $output ) { return $output . "Disallow: /\n"; };
+add_filter( 'robots_txt', $closed, 10 );
+Robots::set( true );
+$hidden = robots( '0' );
+remove_filter( 'robots_txt', $closed, 10 );
+update_option( 'blog_public', '1' );
+check( ! array_filter( READS, static function ( $path ) use ( $hidden ) { return ! can( $hidden, MIGRATE, $path ); } ) && ! can( $hidden, MIGRATE, '/wp-admin/' ) && ! can( $hidden, '*', '/' ), 'blog_public 0: Migrate reads the content, wp-admin stays closed, every other crawler is still shut out' );
 $private = robots_with( "Disallow: /private/\nDisallow: /wp-content/plugins/\n" );
 check( ! can( $private, MIGRATE, '/private/x' ) && ! can( $private, MIGRATE, '/wp-content/plugins/x.js' ), 'a path the owner closes (outside the reads) stays closed to Migrate' );
 check( ! in_array( array( 'disallow', '/' ), rules_for( robots_with( "Disallow: /\n" ), MIGRATE ), true ), 'only a whole-site closure is left out of the Migrate group' );

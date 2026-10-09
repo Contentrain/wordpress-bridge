@@ -7,8 +7,9 @@ defined( 'ABSPATH' ) || exit;
 /**
  * Off by default. When the site owner turns it on (Tools > Contentrain Bridge), WordPress's own robots.txt gets one more
  * group, for the `ContentrainMigrate` crawler alone: the rules every crawler (`*`) has without the Disallows that close the
- * whole site (the ones matching `/`), then `Allow` for the REST API, the uploaded media and `/`. Every other rule stays, so what the owner keeps closed (wp-admin, a
- * private path) stays closed to it too; other crawlers see robots.txt exactly as before. Turning it off removes the group.
+ * whole site (the ones matching `/`), WordPress's own wp-admin closure, then `Allow` for the REST API, the uploaded media and
+ * `/`. Every other rule stays, so what the owner keeps closed (a private path) stays closed to it too, and wp-admin is closed
+ * even when an SEO plugin's robots.txt leaves it open; other crawlers see robots.txt exactly as before. Turning it off removes the group.
  *
  * A crawler follows only the group that names it (RFC 9309, 2.2.1), so the new group repeats the `*` rules rather than
  * relaxing them for everyone. A robots.txt file on disk is served by the web server, not by WordPress: the switch cannot
@@ -134,6 +135,10 @@ final class Robots {
 				$lines[] = ( 'allow' === $rule[0] ? 'Allow: ' : 'Disallow: ' ) . $rule[1];
 			}
 		}
+		// WordPress's own default, whatever the `*` group says: an SEO plugin that rewrites robots.txt (Yoast serves an empty
+		// `Disallow:`) leaves wp-admin open to every crawler, and a migration never reads it.
+		$lines[] = 'Disallow: ' . wp_parse_url( admin_url(), PHP_URL_PATH );
+		$lines[] = 'Allow: ' . wp_parse_url( admin_url( 'admin-ajax.php' ), PHP_URL_PATH );
 		foreach ( self::opened() as $path ) {
 			$lines[] = 'Allow: ' . $path;
 		}
