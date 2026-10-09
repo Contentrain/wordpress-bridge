@@ -19,7 +19,8 @@
     "test:text": "tests/text.sh",
     "test:coverage": "tests/coverage.sh",
     "test:integrations": "tests/integrations.sh",
-    "test:builder": "tests/builder.sh"
+    "test:builder": "tests/builder.sh",
+    "test:robots": "tests/robots.sh"
   },
   "devDependencies": {
     "@contentrain/types": "1.59.0",

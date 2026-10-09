@@ -83,7 +83,10 @@ final class Remote {
 	}
 
 	public static function about() {
-		return new \WP_REST_Response( array( 'version' => CONTENTRAIN_BRIDGE_VERSION, 'auth' => array( 'app_password', 'key' ) ), 200, self::headers() );
+		// `capabilities`: what a reader may ask for beyond exports, so it can tell an older plugin without comparing versions.
+		// `robots`: whether the owner lets Contentrain Migrate read the site, and whether robots.txt is WordPress's (`virtual`)
+		// or a file on disk (`physical`, the owner's to edit by hand).
+		return new \WP_REST_Response( array( 'version' => CONTENTRAIN_BRIDGE_VERSION, 'auth' => array( 'app_password', 'key' ), 'capabilities' => array( 'robots_allow' ), 'robots' => Robots::state() ), 200, self::headers() );
 	}
 
 	/** Start an export, or return the caller's live one with the same scope: never two alike. */

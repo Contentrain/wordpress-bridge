@@ -16,7 +16,7 @@ Contentrain Bridge turns your WordPress content into editable JSON and Markdown 
 
 * Advanced Custom Fields groups and repeaters become their own models with their own named fields, not one anonymous bag of values.
 * Free software under GPL-2.0-or-later. No account, subscription or paid service is required for either delivery.
-* Your WordPress site is not modified. The plugin reads content and source files; it never patches a theme or plugin.
+* Your WordPress site is not modified. The plugin reads content and source files; it never patches a theme or plugin. The one exception is opt-in: a switch, off by default, that adds a group for Contentrain Migrate to the robots.txt WordPress serves (see External services).
 * Every export step is started by a logged-in administrator through a nonce-protected request.
 * Exports run in bounded steps and can be resumed, so large sites do not depend on one long request.
 * Comment archiving is off by default. When enabled, email addresses, IP addresses and comment metadata are excluded.
@@ -32,6 +32,8 @@ The plugin contacts no host other than this site unless you choose GitHub delive
 **GitHub** — used only when you enter a repository and a token in step 3 and start the delivery. The plugin then calls the GitHub REST API at api.github.com to read the target repository's default branch (or the base branch you name) and file list, upload the exported files, and create one new branch holding them. What is sent: the exported content files you reviewed, a commit message, and the token you supplied. Nothing is sent to Contentrain or to any other host, and no analytics or telemetry is collected. The token is used for those requests only and is never stored in the database or in the export. Delivery never writes to your default branch and never overwrites a file you edited in Git. GitHub's terms: https://docs.github.com/site-policy/github-terms/github-terms-of-service — privacy policy: https://docs.github.com/site-policy/privacy-policies/github-privacy-statement
 
 **REST export API (inbound)** — the plugin adds routes under `/wp-json/contentrain-bridge/v1/` that let a program you authorize start an export and read its files. The plugin sends nothing by itself: the program asks, with an application password of an administrator who has the export and manage_options capabilities. Contentrain Migrate uses these routes when you give it such a password to migrate this site; what Migrate then does with the content is governed by Contentrain's terms (https://contentrain.io/terms-of-service) and privacy policy (https://contentrain.io/privacy-policy). The program that starts an export chooses its scope: Migrate asks for private content (drafts, pending, scheduled, private and password-protected posts, never the password) and for comments, and the exported files carry each post's own status. Revoke the application password in your profile to end that access; exports expire after a day.
+
+**robots.txt (only when you turn it on)** — Tools > Contentrain Bridge has a switch, off by default, "Let Contentrain Migrate read my pages". It changes only the robots.txt WordPress itself serves, through WordPress's `robots_txt` filter, and contacts no host. When you turn it on, robots.txt gains one group for the `ContentrainMigrate` crawler: the rules your robots.txt gives every crawler (`User-agent: *`), without the lines that close the whole site (`/`) or the REST API (`/wp-json/`), followed by `Allow: /`. Paths you keep closed, such as wp-admin, stay closed to it, and every other crawler sees robots.txt exactly as before. Turning it off removes the group, and uninstalling the plugin removes the setting. If your site serves a robots.txt file from disk, WordPress cannot change it: the switch stays off and the screen shows the lines to add yourself.
 
 == Installation ==
 
@@ -61,6 +63,10 @@ Yes, when you include the Media type. Each upload and its generated sizes are co
 = What is the Contentrain Migrate connection key? =
 
 A way for Contentrain Migrate to read this site's content when your host blocks application passwords (some hosts strip the Authorization header they travel in). Create it under Tools > Contentrain Bridge and paste it into Migrate. It lets Migrate start and read content exports as you, nothing else: it does not open the rest of the WordPress REST API. It is shown once and only a fingerprint of it is stored. Paste it into Migrate within an hour; once Migrate has used it, it works for that one move until 14 days after it was created, until Migrate closes it when the move is done, or until you revoke it or create a new one. It can only be created and used over HTTPS. Nothing is sent from your site to Contentrain when you create it.
+
+= Why would I let Contentrain Migrate read my pages in robots.txt? =
+
+Contentrain Migrate respects robots.txt. If yours closes the site to crawlers (for example with "Discourage search engines from indexing this site"), Migrate cannot read your pages to move them. The switch opens the site to the ContentrainMigrate crawler only, keeps what you close for every crawler closed to it as well (except the whole-site and REST API lines), and changes nothing for other crawlers. It is off until you turn it on, and you can turn it off at any time.
 
 = Which comment data is exported? =
 
