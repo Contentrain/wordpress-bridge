@@ -55,16 +55,19 @@ function can( $robots, $agent, $path ) {
 }
 /** robots.txt served with another plugin's lines appended (an SEO plugin, a security plugin, a staging setup). */
 function robots_with( $lines ) {
-	$f = static function ( $output ) use ( $lines ) { return $output . $lines; };
-	add_filter( 'robots_txt', $f, 10 );
+	// On a line of their own: an SEO plugin's block may end without a newline (Yoast's `# END YOAST BLOCK`).
+	$f = static function ( $output ) use ( $lines ) { return rtrim( $output, "\n" ) . "\n" . $lines; };
+	add_filter( 'robots_txt', $f, AFTER_PLUGINS );
 	$served = robots();
-	remove_filter( 'robots_txt', $f, 10 );
+	remove_filter( 'robots_txt', $f, AFTER_PLUGINS );
 	return $served;
 }
 function about() {
 	$response = rest_do_request( new WP_REST_Request( 'GET', '/contentrain-bridge/v1/about' ) );
 	return $response->get_data();
 }
+/** The test's own robots.txt lines go after every plugin's (an SEO plugin rewrites the output; CI has Yoast on) and before ours. */
+const AFTER_PLUGINS = PHP_INT_MAX - 1;
 const MIGRATE = 'ContentrainMigrate';
 const READS = array( '/', '/blog/a-post/', '/wp-json/contentrain-bridge/v1/about', '/wp-json/wp/v2/posts', '/wp-content/uploads/2026/10/a.jpg' );
 
@@ -107,9 +110,9 @@ $replaced = array(
 /** robots.txt served when a plugin's filter replaces WordPress's own lines rather than appending to them. */
 function robots_replaced( $text ) {
 	$f = static function () use ( $text ) { return $text; };
-	add_filter( 'robots_txt', $f, 10 );
+	add_filter( 'robots_txt', $f, AFTER_PLUGINS );
 	$served = robots();
-	remove_filter( 'robots_txt', $f, 10 );
+	remove_filter( 'robots_txt', $f, AFTER_PLUGINS );
 	return $served;
 }
 foreach ( $fixtures + $replaced as $name => $lines ) {
@@ -136,11 +139,11 @@ foreach ( $fixtures + $replaced as $name => $lines ) {
 }
 // "Discourage search engines" (blog_public 0) with its `Disallow: /`: the owner's switch still lets Migrate read the content,
 // and wp-admin stays closed (the group's own closure, not the `*` rules).
-$closed = static function ( $output ) { return $output . "Disallow: /\n"; };
-add_filter( 'robots_txt', $closed, 10 );
+$closed = static function ( $output ) { return rtrim( $output, "\n" ) . "\nDisallow: /\n"; };
+add_filter( 'robots_txt', $closed, AFTER_PLUGINS );
 Robots::set( true );
 $hidden = robots( '0' );
-remove_filter( 'robots_txt', $closed, 10 );
+remove_filter( 'robots_txt', $closed, AFTER_PLUGINS );
 update_option( 'blog_public', '1' );
 check( ! array_filter( READS, static function ( $path ) use ( $hidden ) { return ! can( $hidden, MIGRATE, $path ); } ) && ! can( $hidden, MIGRATE, '/wp-admin/' ) && ! can( $hidden, '*', '/' ), 'blog_public 0: Migrate reads the content, wp-admin stays closed, every other crawler is still shut out' );
 $private = robots_with( "Disallow: /private/\nDisallow: /wp-content/plugins/\n" );
@@ -149,12 +152,12 @@ check( ! in_array( array( 'disallow', '/' ), rules_for( robots_with( "Disallow: 
 check( in_array( array( 'disallow', '/wp-' ), rules_for( robots_with( "Disallow: /wp-\n" ), MIGRATE ), true ), 'a shorter closer such as /wp- is kept (the Allows open the reads)' );
 
 // The owner's own ContentrainMigrate group wins: nothing added, and /about says so.
-$own = static function ( $output ) { return $output . "\nUser-agent: ContentrainMigrate\nDisallow: /shop/\n"; };
-add_filter( 'robots_txt', $own, 10 );
+$own = static function ( $output ) { return rtrim( $output, "\n" ) . "\n\nUser-agent: ContentrainMigrate\nDisallow: /shop/\n"; };
+add_filter( 'robots_txt', $own, AFTER_PLUGINS );
 $served = robots();
 check( 1 === substr_count( $served, 'User-agent: ContentrainMigrate' ) && array( array( 'disallow', '/shop/' ) ) === rules_for( $served, MIGRATE ), "the owner's own Migrate group is left as written" );
 check( true === about()['robots']['owner_group'], "/about: owner_group when the owner wrote one" );
-remove_filter( 'robots_txt', $own, 10 );
+remove_filter( 'robots_txt', $own, AFTER_PLUGINS );
 
 // RFC 9309 matching and grouping.
 check( Robots::matches( '/', '/x' ) && Robots::matches( '/*', '/' ) && Robots::matches( '/wp-*', '/wp-json/' ) && ! Robots::matches( '/$', '/x' ) && Robots::matches( '/$', '/' ) && ! Robots::matches( '/wp-admin/', '/wp-json/' ), 'path patterns: prefix, * and $' );
