@@ -335,29 +335,37 @@ final class Source {
 					$layout_fields[ (string) $layout['name'] ] = $layout['sub_fields'] ?? array();
 				}
 			}
+			// Every layout's fields together: the lookup main always used, and the fallback for any cell
+			// the row's own layout does not define, so such a cell is still typed (and a secret type still
+			// removed) instead of passing through unchecked.
+			$all_by_key = array();
+			$all_by_name = array();
+			foreach ( $sub_fields as $sub ) {
+				$all_by_key[ (string) ( $sub['key'] ?? '' ) ] = $sub;
+				$all_by_name[ (string) ( $sub['name'] ?? '' ) ] = $sub;
+			}
 			foreach ( $rows as &$row ) {
 				if ( ! is_array( $row ) ) {
 					continue;
 				}
 				// A flexible content row names its layout; two layouts can each have a `heading` of a
-				// different type, so the row's own layout decides. Only a row whose layout is unknown
-				// falls back to every layout's fields.
-				$row_fields = $sub_fields;
-				$layout_name = (string) ( $row['acf_fc_layout'] ?? '' );
-				if ( '' !== $layout_name && isset( $layout_fields[ $layout_name ] ) ) {
-					$row_fields = $layout_fields[ $layout_name ];
-				}
+				// different type, so the row's own layout is looked up first. A cell that layout does not
+				// define, or a row whose layout is unknown, falls back to every layout's fields.
 				$by_key = array();
 				$by_name = array();
-				foreach ( $row_fields as $sub ) {
-					$by_key[ (string) ( $sub['key'] ?? '' ) ] = $sub;
-					$by_name[ (string) ( $sub['name'] ?? '' ) ] = $sub;
+				$layout_name = (string) ( $row['acf_fc_layout'] ?? '' );
+				if ( '' !== $layout_name && isset( $layout_fields[ $layout_name ] ) ) {
+					foreach ( $layout_fields[ $layout_name ] as $sub ) {
+						$by_key[ (string) ( $sub['key'] ?? '' ) ] = $sub;
+						$by_name[ (string) ( $sub['name'] ?? '' ) ] = $sub;
+					}
 				}
 				// ACF hands unformatted rows keyed by sub-field KEY (`field_5f3…`); the REST API and every
 				// editor know the NAME. Rows leave here under names, at every depth, so both read alike.
 				$named = array();
+				$from = array();
 				foreach ( $row as $key => $cell ) {
-					$sub = $by_name[ (string) $key ] ?? $by_key[ (string) $key ] ?? null;
+					$sub = $by_name[ (string) $key ] ?? $by_key[ (string) $key ] ?? $all_by_name[ (string) $key ] ?? $all_by_key[ (string) $key ] ?? null;
 					if ( ! $sub ) {
 						if ( is_string( $key ) && preg_match( '/^field_/', $key ) ) {
 							$excluded[] = array( 'source' => $path . '/' . $key, 'reason' => 'acf-key-unmapped' );
@@ -366,11 +374,12 @@ final class Source {
 						continue;
 					}
 					$name = '' !== (string) ( $sub['name'] ?? '' ) ? $sub['name'] : $key;
-					if ( array_key_exists( $name, $named ) ) {
-						// The row holds the sub-field under both its key and its name: the later cell
-						// wins, as before, but the overwrite is reported instead of silent.
-						$excluded[] = array( 'source' => $path . '/' . $name, 'reason' => 'acf-key-name-collision' );
+					if ( isset( $from[ $name ] ) ) {
+						// The row holds the sub-field under both its key and its name: the later cell wins,
+						// as before, and the report names the cell that was kept and the one that was dropped.
+						$excluded[] = array( 'source' => $path . '/' . $name, 'reason' => 'acf-key-name-collision: kept ' . $key . ', dropped ' . $from[ $name ] );
 					}
+					$from[ $name ] = (string) $key;
 					$clean = self::acf_value( $sub, $cell, $excluded, $path . '/' . $name );
 					if ( null !== $clean ) {
 						$named[ $name ] = $clean;

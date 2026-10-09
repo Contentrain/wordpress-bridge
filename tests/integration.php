@@ -602,7 +602,12 @@ $clean_shared = Source::acf_value( $flex_shared, array( array( 'acf_fc_layout' =
 check( 42 === ( $clean_shared[0]['media'] ?? null ) && ! isset( $clean_shared[1]['media'] ), 'a sub-field name two flexible layouts share is read with the definition of the row\'s own layout' );
 $collision = array();
 $clean_collision = Source::acf_value( $soc_schema, array( array( 'field_soc_label' => 'By key', 'label' => 'By name' ) ), $collision, 'acf/socials' );
-check( 'By name' === $clean_collision[0]['label'] && array( array( 'source' => 'acf/socials/label', 'reason' => 'acf-key-name-collision' ) ) === $collision, 'a row holding a sub-field under both its key and its name keeps the later cell and reports the collision' );
+check( 'By name' === $clean_collision[0]['label'] && array( array( 'source' => 'acf/socials/label', 'reason' => 'acf-key-name-collision: kept label, dropped field_soc_label' ) ) === $collision, 'a row holding a sub-field under both its key and its name keeps the later cell and reports which cell was kept and which dropped' );
+// A cell keyed by ANOTHER layout's field key is still typed by that definition: a password from
+// the note layout planted in a hero row is removed, never passed through as acf-key-unmapped.
+$planted = array();
+$clean_planted = Source::acf_value( $flex_shared, array( array( 'acf_fc_layout' => 'hero', 'media' => 42, 'field_note_media' => 'hunter2' ) ), $planted, 'acf/sections' );
+check( 42 === ( $clean_planted[0]['media'] ?? null ) && ! isset( $clean_planted[0]['field_note_media'] ) && false === strpos( wp_json_encode( $clean_planted ), 'hunter2' ) && ! in_array( 'acf-key-unmapped', array_column( $planted, 'reason' ), true ) && in_array( 'sensitive-field', array_column( $planted, 'reason' ), true ), 'a password field key from another flexible layout planted in a row is removed by its type, not passed through' );
 $unknown = array();
 $clean_unknown = Source::acf_value( $soc_schema, array( array( 'field_soc_label' => 'LinkedIn', 'field_gone' => 'orphan' ) ), $unknown, 'acf/socials' );
 check( 'LinkedIn' === $clean_unknown[0]['label'] && 'orphan' === $clean_unknown[0]['field_gone'] && array( array( 'source' => 'acf/socials/field_gone', 'reason' => 'acf-key-unmapped' ) ) === $unknown, 'a key no sub-field owns stays as it is and is counted, not given a name' );
