@@ -17,6 +17,7 @@ foreach ( $contentrain_bridge_sites as $contentrain_bridge_site ) {
 	delete_option( 'contentrain_bridge_key' );
 	delete_option( 'contentrain_bridge_key_seen' );
 	delete_option( 'contentrain_bridge_key_exports' );
+	delete_option( 'contentrain_bridge_robots_allow' );
 	delete_metadata( 'user', 0, 'contentrain_bridge_job_' . $contentrain_bridge_site, '', true );
 	delete_metadata( 'user', 0, 'contentrain_bridge_remote_jobs_' . $contentrain_bridge_site, '', true );
 	try {

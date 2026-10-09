@@ -62,7 +62,7 @@ $scope = array( 'types' => array( 'post', 'page' ), 'media_files' => false, 'con
 // ---- Discovery and creation. ----
 list( $status, $about ) = call( 'GET', '/about' );
 check( 200 === $status && CONTENTRAIN_BRIDGE_VERSION === $about['version'] && in_array( 'key', $about['auth'], true ), 'GET /about, signed out: the version and that a key is accepted' );
-check( array( 'counts' ) === $about['capabilities'] && ! isset( $about['published'] ), 'GET /about names the counts capability and carries no site data' );
+check( array( 'counts', 'robots_allow' ) === $about['capabilities'] && ! isset( $about['published'] ), 'GET /about names the counts and robots_allow capabilities and carries no site data' );
 list( $status ) = call( 'GET', '/counts' );
 check( in_array( $status, array( 401, 403 ), true ), "GET /counts signed out, no key: refused ($status), never public" );
 wp_set_current_user( 0 );
