@@ -4,7 +4,7 @@ Tags: export, migration, headless, astro, content
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 0.6.5
+Stable tag: 0.7.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -72,7 +72,7 @@ If Cloudflare (or another CDN) serves your robots.txt, for example Cloudflare's 
 
 = Which comment data is exported? =
 
-Only when explicitly selected: author name, URL, content, status, dates and relationships. Email addresses, IP addresses, user-agent values and comment metadata are excluded.
+Only when explicitly selected: author name, URL, content, status, dates and relationships. Comments of every status are included (approved, pending, spam and trash), each with its status, so you can leave out the ones you do not want to keep. Email addresses, IP addresses, user-agent values and comment metadata are excluded.
 
 = What does the source scan read? =
 
@@ -80,9 +80,15 @@ The active theme and child theme, and optionally the source files of active plug
 
 == Privacy ==
 
-The plugin stores export ownership and a source revision marker. It sends nothing anywhere on its own; an export leaves the site only when you download it, deliver it to GitHub, or authorize a program to read it through the REST export API with an administrator's application password or a Contentrain Migrate connection key. For a connection key the plugin stores a fingerprint of the key (never the key), the Migrate order it is paired with, and the time and IP address of its last use; creating a new key or revoking it, and uninstalling the plugin, removes them. Export files are written to a private, per-administrator directory, are removed on uninstall, and expire after a day. An export can contain site content, author display names, selected post metadata and, if you or the program you authorized chose it, privacy-minimized comments and draft, pending, scheduled, private and password-protected posts (never the password). A program authorized through the REST API chooses the scope; Contentrain Migrate asks for private content. Treat a downloaded export as you would a WordPress export file. If you deliver to GitHub, the exported content is sent to GitHub under the account whose token you provide; choose a private repository when the export includes draft or private content.
+The plugin stores export ownership and a source revision marker. It sends nothing anywhere on its own; an export leaves the site only when you download it, deliver it to GitHub, or authorize a program to read it through the REST export API with an administrator's application password or a Contentrain Migrate connection key. For a connection key the plugin stores a fingerprint of the key (never the key), the Migrate order it is paired with, and the time and IP address of its last use; creating a new key or revoking it, and uninstalling the plugin, removes them. Export files are written to a private, per-administrator directory, are removed on uninstall, and expire after a day. An export can contain site content, authors' display names and WordPress usernames, selected post metadata and, if you or the program you authorized chose it, privacy-minimized comments of every status (approved, pending, spam and trash) and draft, pending, scheduled, private and password-protected posts (never the password). A program authorized through the REST API chooses the scope; Contentrain Migrate asks for private content. Treat a downloaded export as you would a WordPress export file. If you deliver to GitHub, the exported content is sent to GitHub under the account whose token you provide; choose a private repository when the export includes draft or private content.
 
 == Changelog ==
+
+= 0.7.0 =
+
+* A new switch under Tools > Contentrain Bridge, "Let Contentrain Migrate read my pages and media", lets you open your site to Contentrain Migrate when your robots.txt closes it to crawlers. It is off by default. It changes only the robots.txt WordPress serves, adds one group for Contentrain Migrate, keeps closed what you close for every crawler (wp-admin, for one), and changes nothing for other crawlers. If your robots.txt is a file on disk, or a CDN serves it, the screen shows the lines to add yourself.
+* Contentrain Migrate can ask the plugin how much a move would carry before you pay: the number of published entries per content type and the number of media files, as WordPress counts them. Only numbers are sent, never titles or addresses. The answer needs the same sign-in as an export (an administrator's application password or your connection key), so it is never public.
+* The privacy text now says what an export already contained: authors' WordPress usernames as well as their display names, and, when comments are selected, comments of every status (approved, pending, spam and trash), each with its status.
 
 = 0.6.5 =
 

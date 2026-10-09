@@ -35,10 +35,10 @@ nothing to check. Start from `docker compose -f tests/compose.yml down -v` — a
 reused stack keeps the content of previous runs, which inflates the check and
 entry counts and makes a local number look unlike CI's.
 
-Last full clean run (0.6.2): 394 acceptance checks · Plugin Check 0 errors / 14
-warnings (the same 14 as 0.6.1) · `contentrain validate` 14 models, 62 entries ·
-canonical byte parity 55 files · 5 documents carry frontmatter · handoff and
-uninstall pass · archive 32 runtime files.
+Last full clean run (0.7.0): 394 acceptance checks · Plugin Check 0 errors / 4
+warnings (the four WPML hook names, below) · `contentrain validate` 14 models,
+62 entries · canonical byte parity 55 files · 5 documents carry frontmatter ·
+handoff, reader and uninstall pass · archive 33 runtime files.
 
 ## The reader gate
 
