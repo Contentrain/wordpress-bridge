@@ -62,6 +62,9 @@ $scope = array( 'types' => array( 'post', 'page' ), 'media_files' => false, 'con
 // ---- Discovery and creation. ----
 list( $status, $about ) = call( 'GET', '/about' );
 check( 200 === $status && CONTENTRAIN_BRIDGE_VERSION === $about['version'] && in_array( 'key', $about['auth'], true ), 'GET /about, signed out: the version and that a key is accepted' );
+check( array( 'counts', 'robots_allow' ) === $about['capabilities'] && ! isset( $about['published'] ), 'GET /about names the counts and robots_allow capabilities and carries no site data' );
+list( $status ) = call( 'GET', '/counts' );
+check( in_array( $status, array( 401, 403 ), true ), "GET /counts signed out, no key: refused ($status), never public" );
 wp_set_current_user( 0 );
 try { Key::create(); $made = true; } catch ( RuntimeException $e ) { $made = false; }
 check( ! $made, 'no key without an administrator' );
@@ -82,6 +85,12 @@ check( 400 === $status && 'bridge_key_pairing_required' === code( $body ), 'a ke
 check( null === get_option( Key::OPTION )['pairing'], 'and it does not pair the key' );
 list( $status, $body ) = call( 'POST', '/exports/' . str_repeat( '0', 32 ) . '/read', array( 'contentrain_pairing' => $pair ), $key, 'json' );
 check( 404 === $status && 'bridge_not_found' === code( $body ) && $pair === get_option( Key::OPTION )['pairing'], 'Migrate\'s access check (a read of no export): 404 bridge_not_found, and the key is now paired with the order' );
+// ---- Counts before payment (Migrate gate item 10): the paired key reads WordPress's own published counts. ----
+list( $status, $counts ) = call( 'GET', '/counts', array( 'contentrain_pairing' => $pair ), $key );
+check( 200 === $status && 'contentrain-bridge-counts@1' === $counts['format'], "GET /counts with the paired key: 200 ($status)" );
+check( (int) wp_count_posts( 'post' )->publish === $counts['published']['post'] && (int) wp_count_posts( 'page' )->publish === $counts['published']['page'] && (int) wp_count_posts( 'attachment' )->inherit === $counts['attachments'], 'published per type and media, as wp_count_posts counts them' );
+check( array() === array_intersect( array_keys( $counts['published'] ), array( 'attachment', 'wp_block', 'wp_template', 'wp_template_part', 'wp_navigation', 'wp_font_family', 'wp_font_face', 'wp_global_styles', 'nav_menu_item' ) ), 'published lists content types only: no attachment (media is `attachments`), no blocks, templates, navigation, fonts, styles or menu items' );
+check( array_keys( $counts ) === array( 'format', 'published', 'attachments' ) && array_filter( $counts['published'], 'is_int' ) === $counts['published'], 'numbers only: no titles, addresses or drafts' );
 list( $status, $started ) = call( 'POST', '/exports', $scope, $key );
 check( 201 === $status && false === $started['reused'], 'the header key starts an export: 201' );
 $a = $started['export']['id'];

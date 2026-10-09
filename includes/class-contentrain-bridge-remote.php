@@ -47,6 +47,8 @@ final class Remote {
 	const META = 'contentrain_bridge_remote_jobs_';
 	const BUDGET = 20;
 	const LIVE_LIMIT = 3;
+	/** Not content for `/counts`: media (counted as `attachments`) and WordPress's own site-building types. */
+	const NOT_CONTENT_TYPES = array( 'attachment', 'wp_block', 'wp_template', 'wp_template_part', 'wp_navigation', 'wp_font_family', 'wp_font_face', 'wp_global_styles', 'nav_menu_item' );
 	/** Touched on every read of a snapshot; one read within READ_GUARD seconds keeps it from being replaced. */
 	const READ_MARK = 'read';
 	const READ_GUARD = 600;
@@ -54,6 +56,8 @@ final class Remote {
 	public static function routes() {
 		// Public by design: what a reader needs to choose how to sign in. No site data.
 		register_rest_route( 'contentrain-bridge/v1', '/about', array( 'methods' => 'GET', 'permission_callback' => '__return_true', 'callback' => array( self::class, 'about' ) ) );
+		// Published counts for a price before payment (Migrate gate item 10): the same reader permission as an export, never public.
+		register_rest_route( 'contentrain-bridge/v1', '/counts', array( 'methods' => 'GET', 'permission_callback' => array( self::class, 'permitted' ), 'callback' => array( self::class, 'counts' ) ) );
 		register_rest_route( 'contentrain-bridge/v1', '/exports', array(
 			array( 'methods' => 'POST', 'permission_callback' => array( self::class, 'permitted' ), 'callback' => array( self::class, 'start' ) ),
 			array( 'methods' => 'GET', 'permission_callback' => array( self::class, 'permitted' ), 'callback' => array( self::class, 'index' ) ),
@@ -86,7 +90,26 @@ final class Remote {
 		// `capabilities`: what a reader may ask for beyond exports, so it can tell an older plugin without comparing versions.
 		// `robots`: whether the owner lets Contentrain Migrate read the site, and whether robots.txt is WordPress's (`virtual`)
 		// or a file on disk (`physical`, the owner's to edit by hand).
-		return new \WP_REST_Response( array( 'version' => CONTENTRAIN_BRIDGE_VERSION, 'auth' => array( 'app_password', 'key' ), 'capabilities' => array( 'robots_allow' ), 'robots' => Robots::state() ), 200, self::headers() );
+		return new \WP_REST_Response( array( 'version' => CONTENTRAIN_BRIDGE_VERSION, 'auth' => array( 'app_password', 'key' ), 'capabilities' => array( 'counts', 'robots_allow' ), 'robots' => Robots::state() ), 200, self::headers() );
+	}
+
+	/**
+	 * How much a move would carry, counted by WordPress itself (`wp_count_posts`): published entries per content type (the
+	 * same types an export reads) and media files. Numbers only, no titles or addresses. Migrate prices on it before
+	 * payment and checks the export against the same basis when the move starts. Media is `attachments` only, and WordPress's
+	 * own site-building types (blocks, templates, navigation, fonts, styles, menu items) are not content, so they are left
+	 * out: the same list Migrate keeps (`NOT_CONTENT_TYPES` in its credentials reader).
+	 */
+	public static function counts() {
+		$published = array();
+		foreach ( array_keys( Source::content_types() ) as $name ) {
+			if ( in_array( $name, self::NOT_CONTENT_TYPES, true ) ) {
+				continue;
+			}
+			$published[ $name ] = (int) ( wp_count_posts( $name )->publish ?? 0 );
+		}
+		ksort( $published );
+		return new \WP_REST_Response( array( 'format' => 'contentrain-bridge-counts@1', 'published' => $published, 'attachments' => (int) ( wp_count_posts( 'attachment' )->inherit ?? 0 ) ), 200, self::headers() );
 	}
 
 	/** Start an export, or return the caller's live one with the same scope: never two alike. */
