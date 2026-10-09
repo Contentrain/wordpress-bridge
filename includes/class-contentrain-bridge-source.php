@@ -328,20 +328,30 @@ final class Source {
 		if ( is_array( $value ) ) {
 			$rows = in_array( $field['type'] ?? '', array( 'repeater', 'flexible_content' ), true ) ? $value : array( $value );
 			$sub_fields = $field['sub_fields'] ?? array();
+			$layout_fields = array();
 			foreach ( $field['layouts'] ?? array() as $layout ) {
 				$sub_fields = array_merge( $sub_fields, $layout['sub_fields'] ?? array() );
-			}
-			$by_key = array();
-			foreach ( $sub_fields as $sub ) {
-				$by_key[ (string) ( $sub['key'] ?? '' ) ] = $sub;
-			}
-			$by_name = array();
-			foreach ( $sub_fields as $sub ) {
-				$by_name[ (string) ( $sub['name'] ?? '' ) ] = $sub;
+				if ( '' !== (string) ( $layout['name'] ?? '' ) ) {
+					$layout_fields[ (string) $layout['name'] ] = $layout['sub_fields'] ?? array();
+				}
 			}
 			foreach ( $rows as &$row ) {
 				if ( ! is_array( $row ) ) {
 					continue;
+				}
+				// A flexible content row names its layout; two layouts can each have a `heading` of a
+				// different type, so the row's own layout decides. Only a row whose layout is unknown
+				// falls back to every layout's fields.
+				$row_fields = $sub_fields;
+				$layout_name = (string) ( $row['acf_fc_layout'] ?? '' );
+				if ( '' !== $layout_name && isset( $layout_fields[ $layout_name ] ) ) {
+					$row_fields = $layout_fields[ $layout_name ];
+				}
+				$by_key = array();
+				$by_name = array();
+				foreach ( $row_fields as $sub ) {
+					$by_key[ (string) ( $sub['key'] ?? '' ) ] = $sub;
+					$by_name[ (string) ( $sub['name'] ?? '' ) ] = $sub;
 				}
 				// ACF hands unformatted rows keyed by sub-field KEY (`field_5f3…`); the REST API and every
 				// editor know the NAME. Rows leave here under names, at every depth, so both read alike.
@@ -356,6 +366,11 @@ final class Source {
 						continue;
 					}
 					$name = '' !== (string) ( $sub['name'] ?? '' ) ? $sub['name'] : $key;
+					if ( array_key_exists( $name, $named ) ) {
+						// The row holds the sub-field under both its key and its name: the later cell
+						// wins, as before, but the overwrite is reported instead of silent.
+						$excluded[] = array( 'source' => $path . '/' . $name, 'reason' => 'acf-key-name-collision' );
+					}
 					$clean = self::acf_value( $sub, $cell, $excluded, $path . '/' . $name );
 					if ( null !== $clean ) {
 						$named[ $name ] = $clean;
