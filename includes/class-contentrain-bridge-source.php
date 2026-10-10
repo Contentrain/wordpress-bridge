@@ -374,16 +374,22 @@ final class Source {
 						continue;
 					}
 					$name = '' !== (string) ( $sub['name'] ?? '' ) ? $sub['name'] : $key;
+					$clean = self::acf_value( $sub, $cell, $excluded, $path . '/' . $name );
+					// Two cells of the row land on one name (a sub-field under both its key and its name, or
+					// another layout's field key that resolves to a name this row already holds). The report
+					// names the cell whose value stays in the output: the later cell when it survives cleaning,
+					// the earlier one when the later is removed. A removed cell keeps its own reason as well.
+					if ( null === $clean ) {
+						if ( isset( $from[ $name ] ) ) {
+							$excluded[] = array( 'source' => $path . '/' . $name, 'reason' => 'acf-key-name-collision: kept ' . $from[ $name ] . ', dropped ' . $key );
+						}
+						continue;
+					}
 					if ( isset( $from[ $name ] ) ) {
-						// The row holds the sub-field under both its key and its name: the later cell wins,
-						// as before, and the report names the cell that was kept and the one that was dropped.
 						$excluded[] = array( 'source' => $path . '/' . $name, 'reason' => 'acf-key-name-collision: kept ' . $key . ', dropped ' . $from[ $name ] );
 					}
 					$from[ $name ] = (string) $key;
-					$clean = self::acf_value( $sub, $cell, $excluded, $path . '/' . $name );
-					if ( null !== $clean ) {
-						$named[ $name ] = $clean;
-					}
+					$named[ $name ] = $clean;
 				}
 				$row = $named;
 			}
