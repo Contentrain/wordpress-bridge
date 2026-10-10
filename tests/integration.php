@@ -608,6 +608,12 @@ check( 'By name' === $clean_collision[0]['label'] && array( array( 'source' => '
 $planted = array();
 $clean_planted = Source::acf_value( $flex_shared, array( array( 'acf_fc_layout' => 'hero', 'media' => 42, 'field_note_media' => 'hunter2' ) ), $planted, 'acf/sections' );
 check( 42 === ( $clean_planted[0]['media'] ?? null ) && ! isset( $clean_planted[0]['field_note_media'] ) && false === strpos( wp_json_encode( $clean_planted ), 'hunter2' ) && ! in_array( 'acf-key-unmapped', array_column( $planted, 'reason' ), true ) && in_array( 'sensitive-field', array_column( $planted, 'reason' ), true ), 'a password field key from another flexible layout planted in a row is removed by its type, not passed through' );
+check( in_array( array( 'source' => 'acf/sections/media', 'reason' => 'acf-key-name-collision: kept media, dropped field_note_media' ), $planted, true ), 'when the later of two cells on one name is removed, the collision report names the earlier cell as kept (#62)' );
+// The earlier cell is the one removed: the later cell stays and no collision is reported, since only
+// one value ever reached the row.
+$removed_first = array();
+$clean_removed_first = Source::acf_value( $flex_shared, array( array( 'acf_fc_layout' => 'hero', 'field_note_media' => 'hunter2', 'media' => 42 ) ), $removed_first, 'acf/sections' );
+check( 42 === ( $clean_removed_first[0]['media'] ?? null ) && false === strpos( wp_json_encode( $clean_removed_first ), 'hunter2' ) && ! in_array( 'acf-key-name-collision', array_map( function ( $r ) { return strtok( $r, ':' ); }, array_column( $removed_first, 'reason' ) ), true ), 'when the earlier of two cells on one name is removed, the later cell stays and no collision is reported (#62)' );
 $unknown = array();
 $clean_unknown = Source::acf_value( $soc_schema, array( array( 'field_soc_label' => 'LinkedIn', 'field_gone' => 'orphan' ) ), $unknown, 'acf/socials' );
 check( 'LinkedIn' === $clean_unknown[0]['label'] && 'orphan' === $clean_unknown[0]['field_gone'] && array( array( 'source' => 'acf/socials/field_gone', 'reason' => 'acf-key-unmapped' ) ) === $unknown, 'a key no sub-field owns stays as it is and is counted, not given a name' );
