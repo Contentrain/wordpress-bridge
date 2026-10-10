@@ -592,6 +592,22 @@ check( array( 'city' => 'Istanbul', 'phones' => array( array( 'number' => '+90 2
 $flex_keyed = array( 'type' => 'flexible_content', 'name' => 'blocks', 'layouts' => array( array( 'name' => 'quote', 'sub_fields' => array( array( 'key' => 'field_q_text', 'name' => 'text', 'type' => 'text' ) ) ) ) );
 $clean_flex = Source::acf_value( $flex_keyed, array( array( 'acf_fc_layout' => 'quote', 'field_q_text' => 'Hello' ) ), $keyed, 'acf/blocks' );
 check( array( array( 'acf_fc_layout' => 'quote', 'text' => 'Hello' ) ) === $clean_flex && array() === $keyed, 'a flexible content row keyed by key comes out under names and keeps its layout marker, uncounted' );
+// Two layouts share the sub-field name `media`, of different types: the row's own layout decides (#45).
+$flex_shared = array( 'type' => 'flexible_content', 'name' => 'sections', 'layouts' => array(
+	'layout_hero' => array( 'name' => 'hero', 'sub_fields' => array( array( 'key' => 'field_hero_media', 'name' => 'media', 'type' => 'image' ) ) ),
+	'layout_note' => array( 'name' => 'note', 'sub_fields' => array( array( 'key' => 'field_note_media', 'name' => 'media', 'type' => 'password' ) ) ),
+) );
+$shared = array();
+$clean_shared = Source::acf_value( $flex_shared, array( array( 'acf_fc_layout' => 'hero', 'media' => 42 ), array( 'acf_fc_layout' => 'note', 'media' => 'planted' ) ), $shared, 'acf/sections' );
+check( 42 === ( $clean_shared[0]['media'] ?? null ) && ! isset( $clean_shared[1]['media'] ), 'a sub-field name two flexible layouts share is read with the definition of the row\'s own layout' );
+$collision = array();
+$clean_collision = Source::acf_value( $soc_schema, array( array( 'field_soc_label' => 'By key', 'label' => 'By name' ) ), $collision, 'acf/socials' );
+check( 'By name' === $clean_collision[0]['label'] && array( array( 'source' => 'acf/socials/label', 'reason' => 'acf-key-name-collision: kept label, dropped field_soc_label' ) ) === $collision, 'a row holding a sub-field under both its key and its name keeps the later cell and reports which cell was kept and which dropped' );
+// A cell keyed by ANOTHER layout's field key is still typed by that definition: a password from
+// the note layout planted in a hero row is removed, never passed through as acf-key-unmapped.
+$planted = array();
+$clean_planted = Source::acf_value( $flex_shared, array( array( 'acf_fc_layout' => 'hero', 'media' => 42, 'field_note_media' => 'hunter2' ) ), $planted, 'acf/sections' );
+check( 42 === ( $clean_planted[0]['media'] ?? null ) && ! isset( $clean_planted[0]['field_note_media'] ) && false === strpos( wp_json_encode( $clean_planted ), 'hunter2' ) && ! in_array( 'acf-key-unmapped', array_column( $planted, 'reason' ), true ) && in_array( 'sensitive-field', array_column( $planted, 'reason' ), true ), 'a password field key from another flexible layout planted in a row is removed by its type, not passed through' );
 $unknown = array();
 $clean_unknown = Source::acf_value( $soc_schema, array( array( 'field_soc_label' => 'LinkedIn', 'field_gone' => 'orphan' ) ), $unknown, 'acf/socials' );
 check( 'LinkedIn' === $clean_unknown[0]['label'] && 'orphan' === $clean_unknown[0]['field_gone'] && array( array( 'source' => 'acf/socials/field_gone', 'reason' => 'acf-key-unmapped' ) ) === $unknown, 'a key no sub-field owns stays as it is and is counted, not given a name' );
