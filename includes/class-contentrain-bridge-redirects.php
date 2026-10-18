@@ -202,7 +202,7 @@ final class Redirects {
 			$rule = array( 'id' => 'simple_301_redirects:' . ( $i++ ), 'from' => $from, 'source' => 'simple_301_redirects', 'match' => 'url', 'regex' => false );
 			if ( $wildcard && false !== strpos( $from, '*' ) ) {
 				// preg_quote() escapes `-` and `#` too, which a JavaScript `u` regex rejects outside a class.
-				$rule['from'] = '^' . str_replace( array( '\*', '\-', '\#' ), array( '(.*)', '-', '#' ), preg_quote( $from, '/' ) ) . '$';
+				$rule['from'] = '^' . str_replace( array( '\*', '\-', '\#' ), array( '(.*)', '-', '#' ), preg_quote( $from ) ) . '$'; // phpcs:ignore WordPress.PHP.PregQuoteDelimiter.Missing -- Exported for a JavaScript RegExp, never used with a PHP delimiter; a quoted slash would not match.
 				$rule['match'] = 'regex';
 				$rule['regex'] = true;
 				$to = str_replace( '*', '$1', (string) $to );
