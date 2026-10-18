@@ -291,7 +291,7 @@ final class Inventory {
 		} else {
 			$excluded = array();
 			$mapped = Source::post( $post, $scope['selected_meta'], $excluded )['raw'];
-			$path = wp_make_link_relative( get_permalink( $post ) );
+			$path = wp_make_link_relative( Source::permalink( $post ) );
 		}
 		$record = array(
 			'wp_type' => $post->post_type,

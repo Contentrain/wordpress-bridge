@@ -211,7 +211,6 @@ final class Jobs {
 			// 409: another request holds this export; nothing failed, retry.
 			throw new \RuntimeException( 'Export is busy. Retry this step.', 409 );
 		}
-		add_filter( 'user_has_cap', array( __CLASS__, 'address_private' ), 10, 3 );
 		try {
 			$job = self::read( $id );
 			if ( 'failed' === $job['phase'] ) {
@@ -221,35 +220,8 @@ final class Jobs {
 			self::save( $job );
 			return $result ?? self::summary( $job );
 		} finally {
-			remove_filter( 'user_has_cap', array( __CLASS__, 'address_private' ), 10 );
 			self::release( $lock );
 		}
-	}
-
-	/**
-	 * While an export step runs, a private record is addressed by its permalink whoever runs
-	 * the export. WordPress gives a private post a plain `?p=` link unless the current user may
-	 * read it, and a request authenticated with the connection key has no user: without this,
-	 * the same export would carry different addresses and fingerprints depending on how it was
-	 * started. Answers only `read_post` on a record whose status is private, with that post
-	 * type's own read_private cap, and only inside `mutate()`; nothing else in the request
-	 * sees it, and it grants no edit, delete or publish capability.
-	 */
-	public static function address_private( $allcaps, $caps, $args ) {
-		if ( 'read_post' !== ( $args[0] ?? '' ) ) {
-			return $allcaps;
-		}
-		$post = get_post( (int) ( $args[2] ?? 0 ) );
-		$type = $post ? get_post_type_object( $post->post_type ) : null;
-		if ( ! $type || 'private' !== $post->post_status ) {
-			return $allcaps;
-		}
-		foreach ( $caps as $cap ) {
-			if ( $cap === $type->cap->read_private_posts ) {
-				$allcaps[ $cap ] = true;
-			}
-		}
-		return $allcaps;
 	}
 
 	public static function step( $id, $expected ) {

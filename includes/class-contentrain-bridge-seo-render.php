@@ -154,7 +154,7 @@ final class SeoRender {
 			'parent_title'   => $post->post_parent ? get_the_title( $post->post_parent ) : '',
 			'pt_single'      => $type ? $type->labels->singular_name : '',
 			'pt_plural'      => $type ? $type->labels->name : '',
-			'url'            => (string) get_permalink( $post ),
+			'url'            => Source::permalink( $post ),
 		);
 	}
 

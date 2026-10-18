@@ -72,9 +72,10 @@ final class Remote {
 	}
 
 	/**
-	 * The two fields a keyed call carries in its body or query. `Key` reads both inside the permission callback,
-	 * which runs before WordPress validates arguments, so these declare and bound them for the schema and refuse a
-	 * malformed one before the callback; they do not replace the checks in `Key::authorize()`.
+	 * The two fields a keyed call carries in its body or query. WordPress validates and sanitizes declared
+	 * arguments before it runs the permission callback, so a malformed body field is refused with core's own
+	 * `rest_invalid_param` before `Key` reads it; a key sent as a header is not an argument and is checked by
+	 * `Key::authorize()` alone. These declare the fields for the schema; they do not replace `Key::authorize()`.
 	 */
 	public static function key_args() {
 		return array(

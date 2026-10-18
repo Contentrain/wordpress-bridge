@@ -460,7 +460,7 @@ final class Redirects {
 		foreach ( $rows as $row ) {
 			$post = get_post( (int) $row['post_id'] );
 			$rule = array( 'id' => 'wordpress:old-slug:' . $row['post_id'] . ':' . $row['meta_value'], 'source' => 'wordpress', 'match' => 'url', 'regex' => false );
-			$current = $post ? get_permalink( $post ) : false;
+			$current = $post ? Source::permalink( $post ) : false;
 			if ( ! $current || ! is_post_type_viewable( $post->post_type ) || ! get_option( 'permalink_structure' ) ) {
 				// With plain permalinks the address is `?p=ID`: the slug was never in it.
 				$rule['from'] = (string) $row['meta_value'];
@@ -469,7 +469,7 @@ final class Redirects {
 			}
 			$old = clone $post;
 			$old->post_name = (string) $row['meta_value'];
-			$rule['from'] = wp_make_link_relative( get_permalink( $old ) );
+			$rule['from'] = wp_make_link_relative( Source::permalink( $old ) );
 			if ( $post->post_name === $old->post_name ) {
 				self::exclude( $doc, $rule, 'slug-reused' );
 				continue;

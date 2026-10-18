@@ -37,6 +37,27 @@ $observe = static function ( $response ) use ( &$observed ) {
 };
 add_filter( 'rest_request_before_callbacks', $observe, 1 );
 add_filter( 'rest_request_after_callbacks', $observe, 1 );
+/**
+ * Every capability question WordPress is asked while a keyed request runs: the answer must grant nothing to
+ * the user-less request, and no plugin callback may sit on `user_has_cap` or `map_meta_cap` to change it.
+ */
+$granted = array();
+$cap_questions = 0;
+add_filter( 'user_has_cap', static function ( $allcaps, $caps, $args ) use ( &$granted, &$cap_questions ) {
+	if ( ! Key::active() ) { return $allcaps; }
+	++$cap_questions;
+	foreach ( array( 'user_has_cap', 'map_meta_cap' ) as $hook ) {
+		foreach ( ( $GLOBALS['wp_filter'][ $hook ]->callbacks ?? array() ) as $set ) {
+			foreach ( $set as $cb ) {
+				$fn = $cb['function'];
+				$name = is_array( $fn ) ? ( is_object( $fn[0] ) ? get_class( $fn[0] ) : (string) $fn[0] ) . '::' . $fn[1] : ( is_string( $fn ) ? $fn : get_class( $fn ) );
+				if ( false !== stripos( $name, 'Contentrain' ) ) { $granted[] = "$hook: $name"; }
+			}
+		}
+	}
+	if ( array_filter( $allcaps ) ) { $granted[] = 'granted ' . implode( ',', array_keys( array_filter( $allcaps ) ) ) . ' for ' . implode( ',', array_map( 'strval', (array) $args ) ); }
+	return $allcaps;
+}, PHP_INT_MAX, 3 );
 $keyed_calls = 0;
 function call( $method, $route, $params = array(), $key = null, $via = 'header', $as = 0 ) {
 	global $observed, $keyed_calls;
@@ -74,6 +95,10 @@ function code( $data ) {
 }
 
 $admin = get_user_by( 'login', 'bridge-admin' );
+// A private post in scope: its address is the one place WordPress answers differently to a user-less request.
+if ( ! get_posts( array( 'post_status' => 'private', 'post_type' => 'post', 'numberposts' => 1 ) ) ) {
+	wp_insert_post( array( 'post_title' => 'Key private ' . wp_generate_password( 6, false ), 'post_content' => 'Private body.', 'post_status' => 'private', 'post_type' => 'post', 'post_author' => $admin->ID ) );
+}
 $meta = Remote::META . get_current_blog_id();
 $_SERVER['REMOTE_ADDR'] = '203.0.113.7';
 $reset = static function () use ( $admin, $meta ) {
@@ -211,6 +236,13 @@ foreach ( $list['files'] + $plist['files'] as $path => $meta_row ) {
 	$differ[] = $path;
 }
 check( array() === $differ, 'the key export and the application-password export have the same files and hashes apart from the timestamped manifest and site.json (differing: ' . implode( ', ', $differ ) . ')' );
+$privates = static function ( $id ) {
+	$doc = json_decode( (string) file_get_contents( Files::dir( $id ) . '/output/bridge/inventory.json' ), true );
+	$out = array();
+	foreach ( $doc['records'] ?? array() as $r ) { if ( 'private' === ( $r['status'] ?? '' ) ) { $out[ $r['wp_type'] . ':' . $r['wp_id'] ] = $r['fingerprint']; } }
+	return $out;
+};
+check( array() !== $privates( $a ) && $privates( $a ) === $privates( $p ), 'a private record is inventoried with the same fingerprint, which covers its permalink, by the key and by the application password (' . count( $privates( $a ) ) . ' private)' );
 
 // ---- Reuse isolation: an export the administrator started is never reused, bound or replaced by the key. ----
 $scope2 = array( 'types' => array( 'page' ), 'media_files' => false, 'comments' => true );
@@ -313,6 +345,7 @@ check( 200 === $status && in_array( $b, array_column( $index['exports'], 'id' ),
 list( $status, $body ) = call( 'GET', "/exports/$a", array(), null, 'none', $admin->ID );
 check( 404 === $status && 'bridge_not_found' === code( $body ), 'the administrator cannot read the key\'s export through REST either: 404' );
 check( $keyed_calls > 40, "every one of the $keyed_calls keyed requests ran with user 0, signed out, without manage_options, before and after its callback" );
+check( array() === $granted, "no capability was granted to a keyed request and no plugin callback sat on user_has_cap or map_meta_cap during $cap_questions capability questions (" . implode( '; ', $granted ) . ')' );
 
 $reset();
 delete_transient( 'contentrain_bridge_key_fail_' . md5( '203.0.113.8' ) );

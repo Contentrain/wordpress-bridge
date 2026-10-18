@@ -18,7 +18,7 @@ final class Routing {
 		$front = static function ( $option ) {
 			$id = (int) get_option( $option );
 			$post = $id ? get_post( $id ) : null;
-			return $post ? array( 'id' => $id, 'slug' => $post->post_name, 'path' => wp_make_link_relative( get_permalink( $post ) ) ) : null;
+			return $post ? array( 'id' => $id, 'slug' => $post->post_name, 'path' => wp_make_link_relative( Source::permalink( $post ) ) ) : null;
 		};
 		$post_types = array();
 		foreach ( get_post_types( array( 'public' => true ), 'objects' ) as $type ) {

@@ -155,7 +155,7 @@ final class Acf {
 				return null;
 			}
 		}
-		return get_permalink( $post ) ?: null;
+		return Source::permalink( $post ) ?: null;
 	}
 
 	/**

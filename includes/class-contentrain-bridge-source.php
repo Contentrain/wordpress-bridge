@@ -518,4 +518,25 @@ final class Source {
 		$walk( $value );
 		return $out;
 	}
+
+	/**
+	 * A record's permalink as a reader of the site would address it, whoever runs the export.
+	 * WordPress gives a private post a plain `?p=` link unless the current user may read it, and a
+	 * request authenticated with the connection key has no user; the exporter already reads the
+	 * record itself, so the address is built from the record as if published. Nothing is granted:
+	 * the copy never leaves this function, and WordPress is asked no capability question.
+	 */
+	public static function permalink( $post ) {
+		$post = get_post( $post );
+		if ( ! $post ) {
+			return '';
+		}
+		if ( 'private' !== $post->post_status ) {
+			return (string) get_permalink( $post );
+		}
+		$published              = clone $post;
+		$published->post_status = 'publish';
+		$published->filter      = 'raw'; // get_post() keeps a raw object as is; any other filter would refetch the private row.
+		return (string) get_permalink( $published );
+	}
 }

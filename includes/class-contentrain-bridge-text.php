@@ -24,10 +24,10 @@ final class Text {
 		$post = get_posts( array( 'post_type' => 'post', 'post_status' => 'publish', 'numberposts' => 1, 'orderby' => 'ID', 'order' => 'ASC' ) );
 		$page = get_posts( array( 'post_type' => 'page', 'post_status' => 'publish', 'numberposts' => 1, 'orderby' => 'ID', 'order' => 'ASC' ) );
 		if ( $post ) {
-			$states['single'] = get_permalink( $post[0] );
+			$states['single'] = Source::permalink( $post[0] );
 		}
 		if ( $page ) {
-			$states['page'] = get_permalink( $page[0] );
+			$states['page'] = Source::permalink( $page[0] );
 		}
 		/** Filters the pages whose rendered text is scanned (state => URL). */
 		return apply_filters( 'contentrain_bridge_render_states', $states );

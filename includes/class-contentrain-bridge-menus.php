@@ -328,7 +328,7 @@ final class Menus {
 		$out = array();
 		foreach ( get_pages( array( 'post_status' => 'publish' ) ) as $page ) {
 			if ( ! $page->post_password ) {
-				$out[] = array( 'id' => (int) $page->ID, 'parent' => (int) $page->post_parent, 'menu_order' => (int) $page->menu_order, 'title' => $page->post_title, 'slug' => $page->post_name, 'link' => (string) get_permalink( $page ) );
+				$out[] = array( 'id' => (int) $page->ID, 'parent' => (int) $page->post_parent, 'menu_order' => (int) $page->menu_order, 'title' => $page->post_title, 'slug' => $page->post_name, 'link' => Source::permalink( $page ) );
 			}
 		}
 		return $out;
