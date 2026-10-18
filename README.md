@@ -135,10 +135,15 @@ SHA-256 is stored.
   GET. The first accepted call of any route pairs the key with it — an access
   check that reads a non-existent export (`404 bridge_not_found`) included;
   another pairing is refused.
-- It acts as the administrator who created it, while they still have `export`
-  + `manage_options`, and opens these routes only. It sees only the exports it
-  started, and runs one at a time: another scope while one runs is
-  `409 bridge_export_live`; once that one is `ready` or `failed`, a rerun starts.
+- It runs with **no WordPress user** (`get_current_user_id()` is 0 for the whole
+  request) and opens these routes only; it is valid while the administrator who
+  created it still has `export` + `manage_options` (checked with `user_can()` on
+  their id, never by signing them in). It sees only the exports it started —
+  indexed in the plugin's own option, never in a user's meta — and runs one at a
+  time: another scope while one runs is `409 bridge_export_live`; once that one
+  is `ready` or `failed`, a rerun starts. An export the administrator started
+  with an application password is never reused, bound or replaced by the key.
+  Revoking the key removes its exports.
 - Unpaired, it stops working an hour after it was created. Paired, it has no
   idle limit (reruns can be days apart) and works until 14 days after it was
   created, or until it is revoked (the Bridge screen, or `DELETE /key`) or
