@@ -14,8 +14,23 @@
   const STEP_TIMEOUT = 120000;
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   function retryable(message) { return Object.assign(new Error(message), { retryable: true }); }
+  /**
+   * The request as plain form fields, one per value, the way PHP reads them: a list as `name[]`, an object as
+   * `name[key]`, a flag as 1 or 0. The server reads each field once with the function for its type; no JSON blob.
+   */
+  function fields(payload, body = new URLSearchParams(), prefix = '') {
+    for (const [name, value] of Object.entries(payload)) {
+      const key = prefix ? `${prefix}[${name}]` : name;
+      if (value === null || value === undefined) continue;
+      if (Array.isArray(value)) value.forEach((item) => body.append(`${key}[]`, String(item)));
+      else if (typeof value === 'object') fields(value, body, key);
+      else if (typeof value === 'boolean') body.append(key, value ? '1' : '0');
+      else body.append(key, String(value));
+    }
+    return body;
+  }
   async function api(payload, timeout = 0) {
-    const body = new URLSearchParams({ action: 'contentrain_bridge', nonce: ContentrainBridge.nonce, payload: JSON.stringify(payload) });
+    const body = fields({ action: 'contentrain_bridge', nonce: ContentrainBridge.nonce, ...payload });
     const controller = new AbortController();
     const timer = timeout ? setTimeout(() => controller.abort(), timeout) : 0;
     let response;

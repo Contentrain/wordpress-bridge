@@ -63,8 +63,10 @@ final class Admin {
 			<p><?php esc_html_e( 'Your WordPress site stays as it is. Review the content models and interface text before downloading or sending anything to GitHub.', 'contentrain-bridge' ); ?></p>
 			<section id="cr-connect" class="card cr-card">
 				<?php self::heading( 'admin-links', __( 'Connect to Contentrain Migrate', 'contentrain-bridge' ) ); ?>
-				<p><?php esc_html_e( 'Moving this site with Contentrain Migrate? Create a connection key and paste it into Migrate. It lets Migrate start and read content exports of this site as you, nothing else, and works where your host blocks application passwords.', 'contentrain-bridge' ); ?></p>
-				<p><?php esc_html_e( 'The key is shown once; only a fingerprint of it is stored. Paste it into Migrate within an hour. Once Migrate has used it, it works for that one move until 14 days after it was created, until Migrate closes it when the move is done, or until you revoke it or create a new one.', 'contentrain-bridge' ); ?></p>
+				<p><?php esc_html_e( 'Moving this site with Contentrain Migrate? Create a connection key and paste it into Migrate. It works where your host blocks application passwords.', 'contentrain-bridge' ); ?></p>
+				<p><strong><?php esc_html_e( 'What the key allows.', 'contentrain-bridge' ); ?></strong> <?php esc_html_e( 'With this key, Contentrain Migrate can ask this site to prepare a content export and download it. The export contains: published posts, pages and custom post types with their fields and metadata (secret-looking keys are always left out); if Migrate asks for it, draft, pending, scheduled, private and password-protected content too (never the password itself); media records (the files only if requested); categories, tags and menus; comments without email addresses or IP addresses; SEO, redirect and permalink settings; theme design settings; the names and versions of active plugins and the theme; and the number of published entries per content type.', 'contentrain-bridge' ); ?></p>
+				<p><strong><?php esc_html_e( 'What the key cannot do.', 'contentrain-bridge' ); ?></strong> <?php esc_html_e( 'It runs with no WordPress user. It cannot change anything on this site: no post, setting, file, user, plugin or theme is written. It does not open the WordPress REST API, wp-admin or application passwords; it works only on the plugin\'s own export routes. The only things recorded are the time and address of its last use.', 'contentrain-bridge' ); ?></p>
+				<p><strong><?php esc_html_e( 'Revoking.', 'contentrain-bridge' ); ?></strong> <?php esc_html_e( 'Revoke it here at any time; creating a new key retires the old one, and revoking removes the exports it prepared. The key is shown once; only a fingerprint of it is stored. An unused key expires an hour after creation; once Migrate has used it, it works for that one move for up to 14 days, and Migrate closes it itself when the move is done. It can only be created and used over HTTPS.', 'contentrain-bridge' ); ?></p>
 				<p id="cr-key-state" role="status" aria-live="polite"></p>
 				<div id="cr-key-new" hidden>
 					<label for="cr-key"><?php esc_html_e( 'Your connection key — copy it now, it will not be shown again', 'contentrain-bridge' ); ?></label>
@@ -211,45 +213,97 @@ final class Admin {
 		<?php
 	}
 
+	/** The operations the screen's script can ask for. */
+	const OPS = array( 'inventory', 'create', 'status', 'step', 'candidates', 'review', 'github-start', 'github-step', 'coverage', 'zip', 'key-status', 'key-create', 'key-revoke', 'delete' );
+
+	/**
+	 * What the screen's script sent, as plain form fields, each read once with the function for its type (after the
+	 * nonce). Nothing else from the request reaches an operation: the `switch` in `ajax()` consumes this array only.
+	 */
+	private static function input() {
+		// phpcs:disable WordPress.Security.NonceVerification.Missing -- check_ajax_referer() ran in ajax() before this is called.
+		$in = array();
+		$in['op'] = isset( $_POST['op'] ) ? sanitize_key( wp_unslash( $_POST['op'] ) ) : '';
+		if ( ! in_array( $in['op'], self::OPS, true ) ) {
+			throw new \RuntimeException( 'Unknown operation.' );
+		}
+		$in['id'] = isset( $_POST['id'] ) ? sanitize_text_field( wp_unslash( $_POST['id'] ) ) : '';
+		if ( '' !== $in['id'] && ! preg_match( '/^[a-f0-9]{32}$/D', $in['id'] ) ) {
+			throw new \RuntimeException( 'Invalid export identifier.' );
+		}
+		foreach ( array( 'step', 'offset', 'cursor' ) as $number ) {
+			// -1: "not sent", which Jobs::advance / GitHub::step read as "no step expected".
+			$in[ $number ] = isset( $_POST[ $number ] ) ? absint( wp_unslash( $_POST[ $number ] ) ) : -1;
+		}
+		foreach ( array( 'finish', 'consent', 'private', 'comments', 'media_files', 'scan_sources', 'scan_render', 'scan_plugins' ) as $flag ) {
+			$in[ $flag ] = isset( $_POST[ $flag ] ) ? rest_sanitize_boolean( sanitize_text_field( wp_unslash( $_POST[ $flag ] ) ) ) : false;
+		}
+		// Absent means none chosen (the screen sends one field per checked type), never "every type".
+		$in['types'] = isset( $_POST['types'] ) && is_array( $_POST['types'] ) ? array_values( array_filter( array_map( 'sanitize_key', wp_unslash( $_POST['types'] ) ) ) ) : array();
+		$in['selected_meta'] = isset( $_POST['selected_meta'] ) && is_array( $_POST['selected_meta'] ) ? array_values( array_filter( array_map( 'sanitize_text_field', wp_unslash( $_POST['selected_meta'] ) ) ) ) : array();
+		// labels[<type>] = <label>: one string per type name.
+		$in['labels'] = array();
+		if ( isset( $_POST['labels'] ) && is_array( $_POST['labels'] ) ) {
+			foreach ( map_deep( wp_unslash( $_POST['labels'] ), 'sanitize_text_field' ) as $type => $label ) {
+				if ( is_string( $label ) ) {
+					$in['labels'][ sanitize_key( $type ) ] = $label;
+				}
+			}
+		}
+		// decisions[<candidate id>][decision|key]: Jobs::review() checks each against the export's own candidates.
+		$in['decisions'] = array();
+		if ( isset( $_POST['decisions'] ) && is_array( $_POST['decisions'] ) ) {
+			foreach ( map_deep( wp_unslash( $_POST['decisions'] ), 'sanitize_text_field' ) as $candidate => $decision ) {
+				if ( is_array( $decision ) && preg_match( '/^[A-Za-z0-9_.:-]{1,200}$/D', (string) $candidate ) ) {
+					$in['decisions'][ (string) $candidate ] = array_intersect_key( $decision, array( 'decision' => 1, 'key' => 1 ) );
+				}
+			}
+		}
+		// The token is a credential: whitespace-free and bounded, which GitHub::start() checks again; never logged or stored.
+		$in['token'] = isset( $_POST['token'] ) ? trim( sanitize_text_field( wp_unslash( $_POST['token'] ) ) ) : '';
+		$in['repository'] = isset( $_POST['repository'] ) ? sanitize_text_field( wp_unslash( $_POST['repository'] ) ) : '';
+		$in['base_branch'] = isset( $_POST['base_branch'] ) ? sanitize_text_field( wp_unslash( $_POST['base_branch'] ) ) : '';
+		$choice = isset( $_POST['on_conflict'] ) ? sanitize_key( wp_unslash( $_POST['on_conflict'] ) ) : 'refuse';
+		$in['on_conflict'] = in_array( $choice, GitHub::CONFLICT_CHOICES, true ) ? $choice : 'refuse';
+		// phpcs:enable WordPress.Security.NonceVerification.Missing
+		return $in;
+	}
+
 	public static function ajax() {
 		if ( ! self::permitted() ) {
 			wp_send_json_error( array( 'message' => __( 'Permission denied.', 'contentrain-bridge' ) ), 403 );
 		}
 		check_ajax_referer( 'contentrain_bridge', 'nonce' );
 		try {
-			$input = isset( $_POST['payload'] ) ? json_decode( wp_unslash( $_POST['payload'] ), true ) : array(); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Typed operation validation below; arbitrary content is not rendered.
-			if ( ! is_array( $input ) ) {
-				throw new \RuntimeException( 'Invalid request.' );
-			}
-			$op = $input['op'] ?? '';
-			$id = $input['id'] ?? '';
-			switch ( $op ) {
+			$in = self::input();
+			$id = $in['id'];
+			switch ( $in['op'] ) {
 				case 'inventory':
 					$result = Source::inventory();
 					$result['active_job'] = get_user_meta( get_current_user_id(), 'contentrain_bridge_job_' . get_current_blog_id(), true );
 					break;
-				case 'create': $result = Jobs::create( $input ); break;
+				case 'create': $result = Jobs::create( array_intersect_key( $in, array_flip( array( 'types', 'labels', 'private', 'comments', 'media_files', 'scan_sources', 'scan_render', 'scan_plugins', 'selected_meta' ) ) ) ); break;
 				case 'status': $result = Jobs::summary( Jobs::read( $id ) ); break;
-				case 'step': $result = Jobs::advance( $id, $input['step'] ?? -1 ); break;
+				case 'step': $result = Jobs::advance( $id, $in['step'] ); break;
 				case 'candidates':
 					$job = Jobs::read( $id );
-					$result = array_slice( array_values( $job['candidates'] ), max( 0, (int) ( $input['offset'] ?? 0 ) ), 30 );
+					$result = array_slice( array_values( $job['candidates'] ), max( 0, $in['offset'] ), 30 );
 					break;
-				case 'review': $result = Jobs::review( $id, (array) ( $input['decisions'] ?? array() ), ! empty( $input['finish'] ) ); break;
+				case 'review': $result = Jobs::review( $id, $in['decisions'], $in['finish'] ); break;
 				case 'github-start':
 					if ( ! is_ssl() && 'local' !== wp_get_environment_type() ) {
 						throw new \RuntimeException( 'Use HTTPS in WordPress administration before sending a GitHub credential.' );
 					}
-					if ( empty( $input['consent'] ) ) {
+					if ( ! $in['consent'] ) {
 						throw new \RuntimeException( 'Explicit GitHub transfer consent is required.' );
 					}
-					$result = GitHub::start( $id, $input['token'] ?? '', $input['repository'] ?? '', in_array( $input['on_conflict'] ?? 'refuse', GitHub::CONFLICT_CHOICES, true ) ? $input['on_conflict'] : 'refuse', is_string( $input['base_branch'] ?? null ) ? $input['base_branch'] : '' );
+					$result = GitHub::start( $id, $in['token'], $in['repository'], $in['on_conflict'], $in['base_branch'] );
 					break;
 				case 'github-step':
 					if ( ! is_ssl() && 'local' !== wp_get_environment_type() ) {
 						throw new \RuntimeException( 'Use HTTPS in WordPress administration before sending a GitHub credential.' );
 					}
-					$result = GitHub::step( $id, $input['token'] ?? '', $input['cursor'] ?? -1 ); break;
+					$result = GitHub::step( $id, $in['token'], $in['cursor'] ); break;
 				case 'coverage':
 					$job = Jobs::read( $id );
 					if ( 'ready' !== $job['phase'] || ! isset( $job['files']['bridge/coverage.json'] ) ) {
@@ -317,6 +371,9 @@ final class Admin {
 		check_admin_referer( 'contentrain_bridge_download' );
 		try {
 			$id = isset( $_GET['id'] ) ? sanitize_text_field( wp_unslash( $_GET['id'] ) ) : '';
+			if ( ! preg_match( '/^[a-f0-9]{32}$/D', $id ) ) {
+				throw new \RuntimeException( 'Invalid export identifier.' );
+			}
 			$job = Jobs::read( $id );
 			if ( 'ready' !== $job['phase'] || ( $job['zip_cursor'] ?? 0 ) < count( $job['files'] ) ) {
 				throw new \RuntimeException( 'ZIP is not ready.' );
@@ -335,10 +392,31 @@ final class Admin {
 	}
 
 	public static function routes() {
-		register_rest_route( 'contentrain-bridge/v1', '/exports/(?P<id>[a-f0-9]{32})', array( 'methods' => 'GET', 'permission_callback' => array( Remote::class, 'permitted' ), 'callback' => array( self::class, 'read_export' ) ) );
+		$read = array( 'permission_callback' => array( Remote::class, 'permitted' ), 'callback' => array( self::class, 'read_export' ), 'args' => self::read_args() );
+		register_rest_route( 'contentrain-bridge/v1', '/exports/(?P<id>[a-f0-9]{32})', array( 'methods' => 'GET' ) + $read );
 		// The same read for a caller whose key travels in the body (BR-27): a GET has none.
-		register_rest_route( 'contentrain-bridge/v1', '/exports/(?P<id>[a-f0-9]{32})/read', array( 'methods' => 'POST', 'permission_callback' => array( Remote::class, 'permitted' ), 'callback' => array( self::class, 'read_export' ) ) );
+		register_rest_route( 'contentrain-bridge/v1', '/exports/(?P<id>[a-f0-9]{32})/read', array( 'methods' => 'POST' ) + $read );
 		Remote::routes();
+	}
+
+	/** The read routes' parameters: a snapshot path, and a byte range of at most 8 MiB; `read_chunk()` checks them against the export again. */
+	public static function read_args() {
+		$number = array( 'type' => 'integer', 'sanitize_callback' => 'absint', 'validate_callback' => array( self::class, 'validate_number' ) );
+		return array(
+			'file' => array( 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field', 'validate_callback' => array( self::class, 'validate_path' ) ),
+			'offset' => $number,
+			'length' => $number,
+		) + Remote::key_args();
+	}
+
+	/** A relative snapshot path, as `Files::path()` accepts it. */
+	public static function validate_path( $value ) {
+		return is_string( $value ) && preg_match( '#^[a-zA-Z0-9_.\-/]+$#D', $value ) && ! preg_match( '#(^|/)\.\.?(/|$)#', $value ) && '/' !== substr( $value, 0, 1 );
+	}
+
+	/** Digits only, at most twelve. */
+	public static function validate_number( $value ) {
+		return is_int( $value ) ? $value >= 0 : ( is_string( $value ) && 1 === preg_match( '/^[0-9]{1,12}$/D', $value ) );
 	}
 
 	/**
@@ -373,6 +451,7 @@ final class Admin {
 			}
 			$content = Files::read( Files::dir( $job['id'] ) . '/output', $path );
 			$binary = 0 === strpos( $path, 'media/' );
+			// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode -- Media bytes travel in JSON as base64; the reader verifies the sha256.
 			return new \WP_REST_Response( array( 'path' => $path, 'sha256' => $job['files'][ $path ]['sha256'], 'encoding' => $binary ? 'base64' : 'utf8', 'content' => $binary ? base64_encode( $content ) : $content ), 200, array( 'Cache-Control' => 'private, no-store' ) );
 		} catch ( \Throwable $error ) {
 			return new \WP_Error( 'bridge_export', $error->getMessage(), array( 'status' => 400 ) );
@@ -402,12 +481,14 @@ final class Admin {
 				if ( 0 !== fseek( $stream, $offset ) ) {
 					throw new \RuntimeException( 'Cannot read export file.' );
 				}
-				while ( strlen( $content ) < $length && ! feof( $stream ) ) {
-					$part = fread( $stream, $length - strlen( $content ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fread -- Ranged read.
+				$got = 0;
+				while ( $got < $length && ! feof( $stream ) ) {
+					$part = fread( $stream, $length - $got ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fread -- Ranged read.
 					if ( false === $part ) {
 						throw new \RuntimeException( 'Cannot read export file.' );
 					}
 					$content .= $part;
+					$got = strlen( $content );
 				}
 			} finally {
 				fclose( $stream ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Native stream handle.
@@ -416,10 +497,11 @@ final class Admin {
 				throw new \RuntimeException( 'Export file changed while being read.' );
 			}
 		}
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode -- A byte range of a file travels in JSON as base64; the reader verifies the sha256.
 		return new \WP_REST_Response( array( 'path' => $path, 'sha256' => $job['files'][ $path ]['sha256'], 'bytes' => $bytes, 'offset' => $offset, 'length' => $length, 'encoding' => 'base64', 'content' => base64_encode( $content ) ), 200, array( 'Cache-Control' => 'private, no-store' ) );
 	}
 
 	public static function privacy() {
-		wp_add_privacy_policy_content( __( 'Contentrain Bridge', 'contentrain-bridge' ), wp_kses_post( __( 'Contentrain Bridge prepares a private, temporary content export after an administrator requests it. Export files expire after 24 hours and may be deleted earlier. Content can contain personal information, including authors\' display names and WordPress usernames; review the scope before sharing. When comments are selected, comments of every status (approved, pending, spam and trash) are included with their status; comment email, IP and metadata are excluded. GitHub transfer is optional and sends the reviewed files to the selected repository only after explicit consent. GitHub credentials are not stored. The optional Migrate link sends no export data. A Contentrain Migrate connection key, when an administrator creates one, lets Contentrain Migrate start and read content exports as that administrator until it expires or is revoked; only a fingerprint of the key and the address and time of its last use are stored. No telemetry is collected.', 'contentrain-bridge' ) ) );
+		wp_add_privacy_policy_content( __( 'Contentrain Bridge', 'contentrain-bridge' ), wp_kses_post( __( 'Contentrain Bridge prepares a private, temporary content export after an administrator requests it. Export files expire after 24 hours and may be deleted earlier. Content can contain personal information, including authors\' display names and WordPress usernames; review the scope before sharing. When comments are selected, comments of every status (approved, pending, spam and trash) are included with their status; comment email, IP and metadata are excluded. GitHub transfer is optional and sends the reviewed files to the selected repository only after explicit consent. GitHub credentials are not stored. The optional Migrate link sends no export data. A Contentrain Migrate connection key, when an administrator creates one, lets Contentrain Migrate prepare and read content exports of this site with no WordPress user and no ability to change the site, until it expires or is revoked; only a fingerprint of the key and the address and time of its last use are stored. No telemetry is collected.', 'contentrain-bridge' ) ) );
 	}
 }

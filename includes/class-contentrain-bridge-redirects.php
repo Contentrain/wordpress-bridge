@@ -199,10 +199,10 @@ final class Redirects {
 		$i = 0;
 		foreach ( $rules as $from => $to ) {
 			$from = (string) $from;
-			$rule = array( 'id' => 'simple_301_redirects:' . $i++, 'from' => $from, 'source' => 'simple_301_redirects', 'match' => 'url', 'regex' => false );
+			$rule = array( 'id' => 'simple_301_redirects:' . ( $i++ ), 'from' => $from, 'source' => 'simple_301_redirects', 'match' => 'url', 'regex' => false );
 			if ( $wildcard && false !== strpos( $from, '*' ) ) {
 				// preg_quote() escapes `-` and `#` too, which a JavaScript `u` regex rejects outside a class.
-				$rule['from'] = '^' . str_replace( array( '\*', '\-', '\#' ), array( '(.*)', '-', '#' ), preg_quote( $from ) ) . '$';
+				$rule['from'] = '^' . str_replace( array( '\*', '\-', '\#' ), array( '(.*)', '-', '#' ), preg_quote( $from, '/' ) ) . '$';
 				$rule['match'] = 'regex';
 				$rule['regex'] = true;
 				$to = str_replace( '*', '$1', (string) $to );
@@ -232,14 +232,16 @@ final class Redirects {
 			$doc['sources']['htaccess'] = array( 'status' => 'unreadable' );
 			return;
 		}
-		$software = (string) ( $_SERVER['SERVER_SOFTWARE'] ?? '' ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput -- Compared, never output.
+		$software = isset( $_SERVER['SERVER_SOFTWARE'] ) ? sanitize_text_field( wp_unslash( $_SERVER['SERVER_SOFTWARE'] ) ) : '';
 		// Unknown (a CLI run) is read as Apache: the file exists because the site's server uses it.
 		$apache = '' === $software || false !== stripos( $software, 'apache' ) || false !== stripos( $software, 'litespeed' );
 		self::$serving = $apache;
 		$count = self::htaccess_rules( $doc, $lines );
 		$doc['sources']['htaccess'] = self::source( $apache ? 'active' : 'inactive-with-data', $count );
 		if ( ! $apache ) {
-			$doc['sources']['htaccess']['note'] = 'server ' . $software . ' does not read .htaccess';
+			// The note names a class of server, never the header's own text: this document is exported.
+			$kind = false !== stripos( $software, 'nginx' ) ? 'nginx' : ( false !== stripos( $software, 'iis' ) ? 'iis' : 'other' );
+			$doc['sources']['htaccess']['note'] = $kind . ' does not read .htaccess';
 		}
 		if ( untrailingslashit( (string) wp_parse_url( home_url( '/' ), PHP_URL_PATH ) ) !== untrailingslashit( (string) wp_parse_url( site_url( '/' ), PHP_URL_PATH ) ) ) {
 			$doc['sources']['htaccess']['note'] = 'WordPress is in a subdirectory: the .htaccess that serves the home address is not the one read';
