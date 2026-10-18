@@ -36,10 +36,11 @@ nothing to check. Start from `docker compose -f tests/compose.yml down -v` — a
 reused stack keeps the content of previous runs, which inflates the check and
 entry counts and makes a local number look unlike CI's.
 
-Last full clean run (0.7.0): 394 acceptance checks · Plugin Check 0 errors / 4
-warnings (the four WPML hook names, below) · `contentrain validate` 14 models,
-62 entries · canonical byte parity 55 files · 5 documents carry frontmatter ·
-handoff, reader and uninstall pass · archive 33 runtime files.
+Last full clean run (0.7.1): 399 acceptance checks · Plugin Check 0 errors / 0
+warnings (the four WPML hook names, below, now carry a reasoned `phpcs:ignore`)
+· `contentrain validate` 14 models, 62 entries · canonical byte parity 55 files
+· 5 documents carry frontmatter · handoff, reader and uninstall pass · archive
+33 runtime files · `composer lint` 0 errors / 0 warnings on 27 packaged files.
 
 ## The reader gate
 
@@ -159,7 +160,8 @@ another green CI run.
 
 Plugin Check 2.1.0 (all categories, including plugin_repo and security) on the 0.6.5 release zip: zero errors,
 26 warnings, in three classes. Since 0.7.0 each direct query carries a `phpcs:ignore` with its reason on its own line,
-so the run shows only the first class. Reviewers accept all three with a stated reason; do not silence them by
+and since 0.7.1 the WPML hook names do too, so the run shows none of them; `composer lint:all -- --report=source`
+in CI lists every ignored sniff. Reviewers accept all three with a stated reason; do not silence them by
 weakening the check.
 
 - **Third-party hook names (4):** `wpml_default_language`, `wpml_post_language_details`, `wpml_element_trid` and
