@@ -18,7 +18,9 @@ status=0
   --format=strict-json > "$here/.out/plugin-check.json" || status=$?
 node --input-type=module - "$here/.out/plugin-check.json" "$status" <<'JS'
 import {readFileSync} from 'node:fs';
-const findings = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+const raw = readFileSync(process.argv[2], 'utf8').trim();
+// A clean run prints "Success: Checks complete. No errors found." instead of JSON.
+const findings = /^Success:/.test(raw) ? [] : JSON.parse(raw);
 if (!Array.isArray(findings) || Number(process.argv[3]) > 1) throw new Error('Plugin Check did not finish normally');
 const errors = findings.filter(row => row.type === 'ERROR');
 const warnings = findings.filter(row => row.type === 'WARNING');

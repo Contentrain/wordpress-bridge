@@ -258,7 +258,7 @@ final class Jobs {
 		if ( $max <= 0 ) {
 			return INF;
 		}
-		$start = isset( $_SERVER['REQUEST_TIME_FLOAT'] ) ? (float) wp_unslash( $_SERVER['REQUEST_TIME_FLOAT'] ) : microtime( true );
+		$start = isset( $_SERVER['REQUEST_TIME_FLOAT'] ) ? (float) sanitize_text_field( wp_unslash( $_SERVER['REQUEST_TIME_FLOAT'] ) ) : microtime( true );
 		return $start + $max - 5;
 	}
 
