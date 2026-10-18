@@ -192,11 +192,25 @@ for ( $i = 0; $i < 60; ++$i ) {
 check( 'ready' === $body['export']['phase'], 'and advances it to ready' );
 list( , $plist ) = call( 'GET', "/exports/$p", array(), null, 'none', $admin->ID );
 $timed = array( 'bridge/manifest.json', 'bridge/site.json' );
+// Two exports a second apart differ in their second-granular clocks and nothing else; compare what is left.
+$untimed = static function ( $id, $path ) {
+	$doc = json_decode( (string) file_get_contents( Files::dir( $id ) . '/output/' . $path ), true );
+	$strip = static function ( &$node ) use ( &$strip ) {
+		if ( ! is_array( $node ) ) { return; }
+		foreach ( array( 'taken_at', 'fetched_at', 'export_date', 'generated_at', 'exported_at' ) as $clock ) { unset( $node[ $clock ] ); }
+		foreach ( $node as &$child ) { $strip( $child ); }
+	};
+	$strip( $doc );
+	return $doc;
+};
 $differ = array();
 foreach ( $list['files'] + $plist['files'] as $path => $meta_row ) {
-	if ( ! isset( $list['files'][ $path ], $plist['files'][ $path ] ) || $list['files'][ $path ]['sha256'] !== $plist['files'][ $path ]['sha256'] ) { $differ[] = $path; }
+	if ( ! isset( $list['files'][ $path ], $plist['files'][ $path ] ) ) { $differ[] = $path; continue; }
+	if ( $list['files'][ $path ]['sha256'] === $plist['files'][ $path ]['sha256'] ) { continue; }
+	if ( in_array( $path, $timed, true ) || ( '.json' === substr( $path, -5 ) && null !== $untimed( $a, $path ) && $untimed( $a, $path ) === $untimed( $p, $path ) ) ) { continue; }
+	$differ[] = $path;
 }
-check( array() === array_diff( $differ, $timed ), 'the key export and the application-password export have the same files and hashes apart from the timestamped manifest and site.json (differing: ' . implode( ', ', $differ ) . ')' );
+check( array() === $differ, 'the key export and the application-password export have the same files and hashes apart from the timestamped manifest and site.json (differing: ' . implode( ', ', $differ ) . ')' );
 
 // ---- Reuse isolation: an export the administrator started is never reused, bound or replaced by the key. ----
 $scope2 = array( 'types' => array( 'page' ), 'media_files' => false, 'comments' => true );
