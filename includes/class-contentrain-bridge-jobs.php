@@ -6,12 +6,26 @@ defined( 'ABSPATH' ) || exit;
 
 final class Jobs {
 	/**
+	 * Who an export belongs to, said explicitly: `user` (the administrator's id) and `via` — `admin` (the Bridge
+	 * screen), `app_password` (REST, signed in) or `key` (REST with the connection key, which signs nobody in:
+	 * the user is the key's creator, read from the key's record, never from `get_current_user_id()`).
+	 */
+	public static function principal( $remote = false ) {
+		if ( Key::active() ) {
+			return array( 'user' => Key::owner(), 'via' => 'key', 'key' => Key::hash() );
+		}
+		return array( 'user' => get_current_user_id(), 'via' => $remote ? 'app_password' : 'admin' );
+	}
+
+	/**
 	 * `$remote`: started over REST (`Remote`), listed there rather than as the
 	 * admin screen's one export, and never waiting on a person: no source scan,
-	 * so no text candidates to review.
+	 * so no text candidates to review. `$principal`: whose export it is
+	 * (`principal()`); the state records it as `owner` and `via`.
 	 */
-	public static function create( $input, $remote = false ) {
+	public static function create( $input, $remote = false, $principal = null ) {
 		Files::cleanup();
+		$principal = is_array( $principal ) ? $principal : self::principal( $remote );
 		if ( $remote ) {
 			$input = array_merge( $input, array( 'scan_plugins' => false, 'scan_sources' => false, 'scan_render' => false, 'selected_meta' => array(), 'labels' => array() ) );
 		}
@@ -20,7 +34,7 @@ final class Jobs {
 		if ( ! $types ) {
 			throw new \RuntimeException( 'Select at least one content type.' );
 		}
-		$old = $remote ? null : get_user_meta( get_current_user_id(), 'contentrain_bridge_job_' . get_current_blog_id(), true );
+		$old = 'admin' === $principal['via'] ? get_user_meta( get_current_user_id(), 'contentrain_bridge_job_' . get_current_blog_id(), true ) : null;
 		if ( $old && is_dir( Files::dir( $old ) ) ) {
 			throw new \RuntimeException( 'Resume or delete your previous export before starting another.' );
 		}
@@ -34,7 +48,7 @@ final class Jobs {
 		// taken here because it selects the paths every later step writes to.
 		$languages = array_values( array_unique( array_map( array( Source::class, 'locale' ), (array) $inventory['languages'] ) ) );
 		$job = array(
-			'id' => $id, 'remote' => (bool) $remote, 'owner' => get_current_user_id(), 'blog' => get_current_blog_id(), 'created_at' => gmdate( 'c' ),
+			'id' => $id, 'remote' => (bool) $remote, 'owner' => (int) $principal['user'], 'via' => $principal['via'], 'key' => $principal['key'] ?? null, 'blog' => get_current_blog_id(), 'created_at' => gmdate( 'c' ),
 			'revision' => Source::revision(), 'phase' => 'media', 'cursor' => 0, 'step' => 0,
 			'inventory' => $inventory, 'default_locale' => $locale, 'locales' => array( $locale => true ), 'i18n' => count( $languages ) > 1,
 			'options' => array( 'types' => $types, 'private' => ! empty( $input['private'] ), 'comments' => ! empty( $input['comments'] ), 'media_files' => ! array_key_exists( 'media_files', $input ) || ! empty( $input['media_files'] ), 'scan_plugins' => ! empty( $input['scan_plugins'] ), 'scan_sources' => ! empty( $input['scan_sources'] ), 'scan_render' => ! empty( $input['scan_render'] ), 'selected_meta' => array_values( array_filter( array_map( 'sanitize_text_field', (array) ( $input['selected_meta'] ?? array() ) ) ) ), 'labels' => array_map( 'sanitize_text_field', (array) ( $input['labels'] ?? array() ) ) ),
@@ -70,15 +84,31 @@ final class Jobs {
 		}
 		self::warning( $job, array( 'source' => 'rendered-states', 'reason' => 'Source scan does not execute dynamic WordPress/plugin states. Rendered coverage requires the Migrate capture adapter.' ) );
 		self::save( $job );
-		if ( ! $remote ) {
+		if ( 'admin' === $principal['via'] ) {
 			update_user_meta( get_current_user_id(), 'contentrain_bridge_job_' . get_current_blog_id(), $id );
 		}
 		return self::summary( $job );
 	}
 
+	/**
+	 * Whether the caller may read this export. A key reads the exports it started (`via` key, listed in `Key::exports()`)
+	 * and nothing else; a signed-in administrator reads their own screen and application-password exports and never a
+	 * key's. Neither side's rule touches the other's identity: with a key there is no current user to compare.
+	 */
+	public static function owned( $job ) {
+		if ( ! is_array( $job ) || ! isset( $job['owner'], $job['blog'] ) || (int) $job['blog'] !== get_current_blog_id() ) {
+			return false;
+		}
+		$via = isset( $job['via'] ) ? (string) $job['via'] : '';
+		if ( Key::active() ) {
+			return 'key' === $via && ( $job['key'] ?? '' ) === Key::hash() && in_array( $job['id'] ?? '', Key::exports(), true );
+		}
+		return 'key' !== $via && get_current_user_id() > 0 && (int) $job['owner'] === get_current_user_id();
+	}
+
 	public static function read( $id ) {
 		$job = json_decode( Files::read( Files::dir( $id ), 'state.json' ), true );
-		if ( ! is_array( $job ) || (int) $job['owner'] !== get_current_user_id() || (int) $job['blog'] !== get_current_blog_id() ) {
+		if ( ! self::owned( $job ) ) {
 			throw new \RuntimeException( 'Export is not owned by the current user.' );
 		}
 		if ( strtotime( $job['created_at'] ) < time() - DAY_IN_SECONDS ) {
@@ -228,7 +258,7 @@ final class Jobs {
 		if ( $max <= 0 ) {
 			return INF;
 		}
-		$start = isset( $_SERVER['REQUEST_TIME_FLOAT'] ) ? (float) $_SERVER['REQUEST_TIME_FLOAT'] : microtime( true );
+		$start = isset( $_SERVER['REQUEST_TIME_FLOAT'] ) ? (float) wp_unslash( $_SERVER['REQUEST_TIME_FLOAT'] ) : microtime( true );
 		return $start + $max - 5;
 	}
 
@@ -757,7 +787,10 @@ final class Jobs {
 			return;
 		}
 		$files = $job['source_files'];
-		$states = $job['options']['scan_render'] ? ( $job['render_states'] = $job['render_states'] ?? Text::render_states() ) : array();
+		if ( $job['options']['scan_render'] && ! isset( $job['render_states'] ) ) {
+			$job['render_states'] = Text::render_states();
+		}
+		$states = $job['options']['scan_render'] ? $job['render_states'] : array();
 		$step = $job['cursor'];
 		self::progress( $job, count( $files ) + 1 + count( $states ) );
 		$job['text'] = $job['text'] ?? array( 'occurrences' => array(), 'errors' => array(), 'counts' => array( 'unlisted_excluded' => 0, 'unlisted_by_reason' => array(), 'sources' => array( 'files' => count( $files ), 'settings' => 1, 'render_states' => count( $states ) ) ) );

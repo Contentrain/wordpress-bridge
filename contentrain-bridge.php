@@ -25,6 +25,7 @@ foreach ( array( 'policy', 'files', 'exporter', 'menus', 'source', 'inventory', 
 unset( $contentrain_bridge_class );
 
 \Contentrain\Bridge\Admin::register();
+\Contentrain\Bridge\Key::register();
 \Contentrain\Bridge\Robots::register();
 foreach ( array( 'save_post', 'deleted_post', 'added_post_meta', 'updated_post_meta', 'deleted_post_meta', 'created_term', 'edited_term', 'delete_term', 'added_term_meta', 'updated_term_meta', 'deleted_term_meta', 'comment_post', 'edit_comment', 'deleted_comment', 'transition_comment_status', 'profile_update', 'switch_theme' ) as $contentrain_bridge_hook ) {
 	add_action( $contentrain_bridge_hook, array( '\Contentrain\Bridge\Source', 'changed' ), 10, 3 );
