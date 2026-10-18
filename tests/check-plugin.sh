@@ -14,7 +14,7 @@ status=0
 # hidden file; exclude it explicitly so the check passes from any worktree.
 "${cli[@]}" plugin check contentrain-bridge \
   --exclude-directories=tests,tools,dist,.github \
-  --exclude-files=.gitignore,package.json,package-lock.json,RELEASING.md,.git \
+  --exclude-files=.gitignore,package.json,package-lock.json,composer.json,composer.lock,phpcs.xml.dist,RELEASING.md,.git \
   --format=strict-json > "$here/.out/plugin-check.json" || status=$?
 node --input-type=module - "$here/.out/plugin-check.json" "$status" <<'JS'
 import {readFileSync} from 'node:fs';

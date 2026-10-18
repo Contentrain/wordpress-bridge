@@ -22,7 +22,7 @@ foreach ( $contentrain_bridge_sites as $contentrain_bridge_site ) {
 	delete_metadata( 'user', 0, 'contentrain_bridge_remote_jobs_' . $contentrain_bridge_site, '', true );
 	try {
 		\Contentrain\Bridge\Files::remove( \Contentrain\Bridge\Files::root() );
-	} catch ( \RuntimeException $contentrain_bridge_error ) {
+	} catch ( \RuntimeException $contentrain_bridge_error ) { // phpcs:ignore Generic.CodeAnalysis.EmptyStatement.DetectedCatch -- Nothing to do: the reason is below.
 		// An unavailable temporary volume cannot be removed by this process.
 		// The directory is private and contains no stored GitHub credentials.
 	}

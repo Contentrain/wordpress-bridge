@@ -15,6 +15,7 @@ listed at the end, and they are not paperwork.
 
 ```bash
 npm ci --ignore-scripts
+composer install && composer lint   # PHP_CodeSniffer: WordPress-Extra + PHPCompatibilityWP (phpcs.xml.dist)
 npm run test:wordpress    # container acceptance suite
 npm run test:plugin       # official Plugin Check
 npm run test:store        # contentrain validate + canonical byte parity

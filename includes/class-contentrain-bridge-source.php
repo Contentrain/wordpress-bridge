@@ -101,7 +101,7 @@ final class Source {
 			return self::locale( pll_default_language() );
 		}
 		if ( has_filter( 'wpml_default_language' ) ) {
-			$default = apply_filters( 'wpml_default_language', null );
+			$default = apply_filters( 'wpml_default_language', null ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- WPML's own filter, spelled WPML's way.
 			if ( $default ) {
 				return self::locale( $default );
 			}
@@ -112,7 +112,7 @@ final class Source {
 	public static function language( $post ) {
 		$code = function_exists( 'pll_get_post_language' ) ? pll_get_post_language( $post->ID ) : null;
 		if ( ! $code && has_filter( 'wpml_post_language_details' ) ) {
-			$details = apply_filters( 'wpml_post_language_details', null, $post->ID );
+			$details = apply_filters( 'wpml_post_language_details', null, $post->ID ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- WPML's own filter.
 			$code = is_array( $details ) ? ( $details['language_code'] ?? null ) : null;
 		}
 		// An untagged post (Polylang does not manage every post type, e.g.
@@ -128,8 +128,8 @@ final class Source {
 		$translations = function_exists( 'pll_get_post_translations' ) ? pll_get_post_translations( $post->ID ) : array();
 		if ( ! $translations && has_filter( 'wpml_element_trid' ) ) {
 			$type = 'post_' . $post->post_type;
-			$trid = apply_filters( 'wpml_element_trid', null, $post->ID, $type );
-			foreach ( (array) apply_filters( 'wpml_get_element_translations', array(), $trid, $type ) as $code => $item ) {
+			$trid = apply_filters( 'wpml_element_trid', null, $post->ID, $type ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- WPML's own filter.
+			foreach ( (array) apply_filters( 'wpml_get_element_translations', array(), $trid, $type ) as $code => $item ) { // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- WPML's own filter.
 				$translations[ $code ] = (int) $item->element_id;
 			}
 		}

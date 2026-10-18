@@ -1,0 +1,58 @@
+<?xml version="1.0"?>
+<ruleset name="Contentrain Bridge">
+	<description>WordPress coding standards and PHP compatibility for the files the plugin ships.</description>
+
+	<!-- The runtime files tools/package.py archives: nothing under tests/ or tools/ reaches a site. -->
+	<file>contentrain-bridge.php</file>
+	<file>uninstall.php</file>
+	<file>includes</file>
+
+	<arg name="extensions" value="php"/>
+	<arg name="colors"/>
+	<arg value="sp"/>
+	<arg name="parallel" value="4"/>
+
+	<!-- The plugin header promises PHP 7.4. -->
+	<config name="testVersion" value="7.4-"/>
+	<config name="minimum_wp_version" value="6.2"/>
+
+	<rule ref="WordPress-Extra">
+		<!-- Layout conventions this codebase does not follow: one-line methods and cases, unaligned arrays and
+		     assignments, inline associative arrays, the short ternary, non-Yoda literals, camelCase properties of
+		     third-party objects, parameter names such as $public that mirror WordPress's own filters, and class
+		     file names without the `class-` prefix WordPress-Extra expects. None bears on security, input
+		     handling, output escaping, database access, i18n or PHP compatibility: every sniff of those kinds runs. -->
+		<exclude name="Generic.Formatting.DisallowMultipleStatements"/>
+		<exclude name="Generic.Formatting.MultipleStatementAlignment"/>
+		<exclude name="PEAR.Functions.FunctionCallSignature"/>
+		<exclude name="PSR2.ControlStructures.SwitchDeclaration"/>
+		<exclude name="Squiz.Functions.MultiLineFunctionDeclaration"/>
+		<exclude name="Universal.NamingConventions.NoReservedKeywordParameterNames"/>
+		<exclude name="Universal.Operators.DisallowShortTernary"/>
+		<exclude name="WordPress.Arrays.ArrayDeclarationSpacing"/>
+		<exclude name="WordPress.Arrays.MultipleStatementAlignment"/>
+		<exclude name="WordPress.Files.FileName"/>
+		<exclude name="WordPress.NamingConventions.ValidVariableName"/>
+		<exclude name="WordPress.PHP.YodaConditions"/>
+	</rule>
+
+	<rule ref="PHPCompatibilityWP"/>
+
+	<rule ref="WordPress.WP.I18n">
+		<properties>
+			<property name="text_domain" type="array">
+				<element value="contentrain-bridge"/>
+			</property>
+		</properties>
+	</rule>
+
+	<rule ref="WordPress.NamingConventions.PrefixAllGlobals">
+		<properties>
+			<property name="prefixes" type="array">
+				<element value="contentrain_bridge"/>
+				<element value="Contentrain\Bridge"/>
+				<element value="CONTENTRAIN_BRIDGE"/>
+			</property>
+		</properties>
+	</rule>
+</ruleset>

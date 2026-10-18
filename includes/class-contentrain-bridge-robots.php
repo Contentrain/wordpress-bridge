@@ -98,7 +98,7 @@ final class Robots {
 	}
 
 	/** `robots_txt`: WordPress's robots.txt with the Migrate group added when the owner turned it on. */
-	public static function filter( $output, $public = true ) {
+	public static function filter( $output, $public = true ) { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.FoundAfterLastUsed -- The robots_txt filter's signature.
 		$output = (string) $output;
 		if ( ! self::chosen() || self::physical() ) {
 			return $output;
