@@ -9,8 +9,11 @@ defined( 'ABSPATH' ) || exit;
  * (BR-19). Same permission as the read API (`export` + `manage_options`), same
  * jobs, same snapshot. The program signs in with an application password, or,
  * where the host strips the Authorization header, with the connection key an
- * administrator created on the Bridge screen (`Key`, BR-27): the key's exports
- * only, one running at a time.
+ * administrator created on the Bridge screen (`Key`, BR-27). A keyed request
+ * runs with no WordPress user at all: the key is valid only while its creator
+ * still has `export` + `manage_options`, its exports are listed in the plugin's
+ * own option rather than in anyone's user meta, and it sees those exports only,
+ * one running at a time.
  *
  *   GET  /contentrain-bridge/v1/about                  → { version, auth: [ "app_password", "key" ] }, no sign-in
  *
@@ -54,17 +57,72 @@ final class Remote {
 	const READ_GUARD = 600;
 
 	public static function routes() {
+		$permitted = array( self::class, 'permitted' );
 		// Public by design: what a reader needs to choose how to sign in. No site data.
 		register_rest_route( 'contentrain-bridge/v1', '/about', array( 'methods' => 'GET', 'permission_callback' => '__return_true', 'callback' => array( self::class, 'about' ) ) );
 		// Published counts for a price before payment (Migrate gate item 10): the same reader permission as an export, never public.
-		register_rest_route( 'contentrain-bridge/v1', '/counts', array( 'methods' => 'GET', 'permission_callback' => array( self::class, 'permitted' ), 'callback' => array( self::class, 'counts' ) ) );
+		register_rest_route( 'contentrain-bridge/v1', '/counts', array( 'methods' => 'GET', 'permission_callback' => $permitted, 'callback' => array( self::class, 'counts' ), 'args' => self::key_args() ) );
 		register_rest_route( 'contentrain-bridge/v1', '/exports', array(
-			array( 'methods' => 'POST', 'permission_callback' => array( self::class, 'permitted' ), 'callback' => array( self::class, 'start' ) ),
-			array( 'methods' => 'GET', 'permission_callback' => array( self::class, 'permitted' ), 'callback' => array( self::class, 'index' ) ),
+			array( 'methods' => 'POST', 'permission_callback' => $permitted, 'callback' => array( self::class, 'start' ), 'args' => self::start_args() ),
+			array( 'methods' => 'GET', 'permission_callback' => $permitted, 'callback' => array( self::class, 'index' ), 'args' => self::key_args() ),
 		) );
 		// Migrate closes its own key when the order is done (BR-27).
-		register_rest_route( 'contentrain-bridge/v1', '/key', array( 'methods' => 'DELETE', 'permission_callback' => array( Key::class, 'permitted_self' ), 'callback' => array( Key::class, 'revoke_self' ) ) );
-		register_rest_route( 'contentrain-bridge/v1', '/exports/(?P<id>[a-f0-9]{32})/advance', array( 'methods' => 'POST', 'permission_callback' => array( self::class, 'permitted' ), 'callback' => array( self::class, 'advance' ) ) );
+		register_rest_route( 'contentrain-bridge/v1', '/key', array( 'methods' => 'DELETE', 'permission_callback' => array( Key::class, 'permitted_self' ), 'callback' => array( Key::class, 'revoke_self' ), 'args' => self::key_args() ) );
+		register_rest_route( 'contentrain-bridge/v1', '/exports/(?P<id>[a-f0-9]{32})/advance', array( 'methods' => 'POST', 'permission_callback' => $permitted, 'callback' => array( self::class, 'advance' ), 'args' => self::key_args() ) );
+	}
+
+	/**
+	 * The two fields a keyed call carries in its body or query. WordPress validates and sanitizes declared
+	 * arguments before it runs the permission callback, so a malformed body field is refused with core's own
+	 * `rest_invalid_param` before `Key` reads it; a key sent as a header is not an argument and is checked by
+	 * `Key::authorize()` alone. These declare the fields for the schema; they do not replace `Key::authorize()`.
+	 */
+	public static function key_args() {
+		return array(
+			Key::PAIRING => array( 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field', 'validate_callback' => array( self::class, 'validate_pairing' ) ),
+			Key::FIELD => array( 'type' => 'string', 'sanitize_callback' => 'sanitize_text_field', 'validate_callback' => array( self::class, 'validate_key' ) ),
+		);
+	}
+
+	/** `POST /exports`: the scope and the reuse window. The inline checks in `start()` stay; these bound each value first. */
+	public static function start_args() {
+		$flag = array( 'type' => 'boolean', 'sanitize_callback' => 'rest_sanitize_boolean', 'validate_callback' => 'rest_is_boolean' );
+		return array(
+			'types' => array( 'type' => 'array', 'items' => array( 'type' => 'string' ), 'sanitize_callback' => array( self::class, 'sanitize_types' ), 'validate_callback' => array( self::class, 'validate_types' ) ),
+			'private' => $flag,
+			'comments' => $flag,
+			'media_files' => $flag,
+			'fresh' => $flag,
+			'max_age' => array( 'type' => 'integer', 'sanitize_callback' => 'absint', 'validate_callback' => array( self::class, 'validate_max_age' ) ),
+		) + self::key_args();
+	}
+
+	public static function validate_pairing( $value ) {
+		return is_string( $value ) && 1 === preg_match( '/^[A-Za-z0-9_-]{8,64}$/D', $value );
+	}
+
+	public static function validate_key( $value ) {
+		return is_string( $value ) && 1 === preg_match( Key::FORMAT, trim( $value ) );
+	}
+
+	public static function validate_types( $value ) {
+		if ( ! is_array( $value ) || count( $value ) > 200 ) {
+			return false;
+		}
+		foreach ( $value as $type ) {
+			if ( ! is_string( $type ) || 1 !== preg_match( '/^[a-z0-9_-]{1,20}$/D', $type ) ) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	public static function sanitize_types( $value ) {
+		return array_values( array_map( 'sanitize_key', (array) $value ) );
+	}
+
+	public static function validate_max_age( $value ) {
+		return ( is_int( $value ) && $value >= 0 && $value <= 999999999 ) || ( is_string( $value ) && 1 === preg_match( '/^[0-9]{1,9}$/D', $value ) );
 	}
 
 	/** The read API's permission, or the connection key when the request carries one. */
@@ -160,22 +218,16 @@ final class Remote {
 					}
 					++$live;
 					if ( $same ) {
-						if ( Key::active() ) {
-							Key::bind( $job['id'] );
-						}
 						return new \WP_REST_Response( array( 'export' => Jobs::summary( $job ), 'reused' => true ), 200, self::headers() );
 					}
 				}
 				if ( $live >= self::LIVE_LIMIT ) {
 					return self::error( 'too_many_exports', 'Three exports are already in progress for this user; let one finish or expire.', 429 );
 				}
-				$summary = Jobs::create( $scope, true );
+				$summary = Jobs::create( $scope, true, Jobs::principal( true ) );
 				$ids = self::ids();
 				$ids[] = $summary['id'];
-				update_user_meta( get_current_user_id(), self::META . get_current_blog_id(), $ids );
-				if ( Key::active() ) {
-					Key::bind( $summary['id'] );
-				}
+				self::remember( $ids );
 				return new \WP_REST_Response( array( 'export' => $summary, 'reused' => false ), 201, self::headers() );
 			} );
 		} catch ( \Throwable $error ) {
@@ -184,13 +236,10 @@ final class Remote {
 		}
 	}
 
-	/** The caller's remote exports that still exist, oldest first; with a key, the key's own. */
+	/** The caller's remote exports that still exist, oldest first; with a key, the key's own (`ids()`). */
 	public static function index() {
 		try {
 			$jobs = self::jobs();
-			if ( Key::active() ) {
-				$jobs = array_values( array_filter( $jobs, static function ( $job ) { return in_array( $job['id'], Key::exports(), true ); } ) );
-			}
 			return new \WP_REST_Response( array( 'exports' => array_map( array( Jobs::class, 'summary' ), $jobs ) ), 200, self::headers() );
 		} catch ( \Throwable $error ) {
 			// Input is checked above; what is left is the server's fault, not "not ready".
@@ -267,7 +316,7 @@ final class Remote {
 			flock( $lock, LOCK_UN );
 			fclose( $lock ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Native advisory lock handle.
 		}
-		update_user_meta( get_current_user_id(), self::META . get_current_blog_id(), array_values( array_diff( self::ids(), array( $id ) ) ) );
+		self::remember( array_values( array_diff( self::ids(), array( $id ) ) ) );
 		return true;
 	}
 
@@ -290,9 +339,22 @@ final class Remote {
 		return 'export_failed';
 	}
 
+	/** The caller's export ids: the key's own list (the plugin's option) with a key, the signed-in user's meta otherwise. */
 	private static function ids() {
+		if ( Key::active() ) {
+			return Key::exports();
+		}
 		$ids = get_user_meta( get_current_user_id(), self::META . get_current_blog_id(), true );
 		return is_array( $ids ) ? array_values( array_filter( $ids, static function ( $id ) { return is_string( $id ) && preg_match( '/^[a-f0-9]{32}$/D', $id ); } ) ) : array();
+	}
+
+	/** Store the caller's export ids where `ids()` reads them. */
+	private static function remember( $ids ) {
+		if ( Key::active() ) {
+			Key::set( $ids );
+			return;
+		}
+		update_user_meta( get_current_user_id(), self::META . get_current_blog_id(), $ids );
 	}
 
 	/** Readable jobs only; an expired or deleted one leaves the list. */
@@ -308,14 +370,14 @@ final class Remote {
 			}
 		}
 		if ( $kept !== self::ids() ) {
-			update_user_meta( get_current_user_id(), self::META . get_current_blog_id(), $kept );
+			self::remember( $kept );
 		}
 		return $jobs;
 	}
 
-	/** One start at a time per user: two concurrent requests cannot both create. */
+	/** One start at a time per caller (the key, or the signed-in user): two concurrent requests cannot both create. */
 	private static function locked( $callback ) {
-		$lock = fopen( Files::root() . '/remote-' . get_current_user_id() . '.lock', 'c' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Native advisory lock; filesystem API has no locking primitive.
+		$lock = fopen( Files::root() . '/remote-' . ( Key::active() ? 'key' : get_current_user_id() ) . '.lock', 'c' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Native advisory lock; filesystem API has no locking primitive.
 		if ( ! $lock || ! flock( $lock, LOCK_EX ) ) {
 			throw new \RuntimeException( 'Cannot lock export start.' );
 		}

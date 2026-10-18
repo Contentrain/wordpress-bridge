@@ -20,12 +20,12 @@ final class GitHub {
 	 * the exception is created, so the setting holds for it after that.
 	 */
 	private static function without_trace_arguments( callable $work ) {
-		$previous = ini_set( 'zend.exception_ignore_args', '1' ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Scoped to this call and restored below; keeps the token out of exception traces.
+		$previous = ini_set( 'zend.exception_ignore_args', '1' ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged, WordPress.PHP.IniSet.Risky -- Scoped to this call and restored below; keeps the token out of exception traces.
 		try {
 			return $work();
 		} finally {
 			if ( false !== $previous ) {
-				ini_set( 'zend.exception_ignore_args', $previous ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- Restores the value saved above.
+				ini_set( 'zend.exception_ignore_args', $previous ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged, WordPress.PHP.IniSet.Risky -- Restores the value saved above.
 			}
 		}
 	}
@@ -141,7 +141,7 @@ final class GitHub {
 			$previous = array();
 			if ( isset( $remote['bridge/manifest.json'] ) ) {
 				$blob = self::request( $token, 'GET', $prefix . '/git/blobs/' . $remote['bridge/manifest.json'] );
-				$manifest = json_decode( base64_decode( str_replace( "\n", '', $blob['content'] ), true ), true );
+				$manifest = json_decode( base64_decode( str_replace( "\n", '', $blob['content'] ), true ), true ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- The GitHub blob API returns file content base64-encoded.
 				if ( ! is_array( $manifest ) || 'contentrain-bridge@1' !== ( $manifest['format'] ?? '' ) || $manifest['site'] !== $job['inventory']['site'] ) {
 					throw new \RuntimeException( 'Existing Bridge content belongs to another source or has an invalid manifest.' );
 				}
@@ -152,7 +152,7 @@ final class GitHub {
 			// the previous manifest's hash is what says nobody edited it since.
 			if ( isset( $remote['bridge/inventory.json'], $job['files']['bridge/inventory.json'] ) ) {
 				$blob = self::request( $token, 'GET', $prefix . '/git/blobs/' . $remote['bridge/inventory.json'] );
-				$raw = (string) base64_decode( str_replace( "\n", '', $blob['content'] ), true );
+				$raw = (string) base64_decode( str_replace( "\n", '', $blob['content'] ), true ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- The GitHub blob API returns file content base64-encoded.
 				$trusted = $previous['bridge/inventory.json']['sha256'] ?? null;
 				$after = json_decode( Files::read( Files::dir( $job['id'] ) . '/output', 'bridge/inventory.json' ), true );
 				// Edited in Git after delivery: not a cursor this export can trust.
@@ -181,7 +181,7 @@ final class GitHub {
 				return array();
 			}
 			$blob = self::request( $token, 'GET', $prefix . '/git/blobs/' . $remote[ $path ] );
-			$data = json_decode( (string) base64_decode( str_replace( "\n", '', $blob['content'] ), true ), true );
+			$data = json_decode( (string) base64_decode( str_replace( "\n", '', $blob['content'] ), true ), true ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- The GitHub blob API returns file content base64-encoded.
 			return is_array( $data ) ? $data : array();
 		};
 		$entries = null;
@@ -263,7 +263,7 @@ final class GitHub {
 				$git_sha = sha1( 'blob ' . strlen( $content ) . "\0" . $content );
 				if ( isset( $g['remote'][ $path ] ) && $g['remote'][ $path ] !== $git_sha ) {
 					$old = self::request( $token, 'GET', $prefix . '/git/blobs/' . $g['remote'][ $path ] );
-					$old_content = base64_decode( str_replace( "\n", '', $old['content'] ), true );
+					$old_content = base64_decode( str_replace( "\n", '', $old['content'] ), true ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- The GitHub blob API returns file content base64-encoded.
 					$trusted = $g['previous'][ $path ]['sha256'] ?? null;
 					// The manifest identifies the previous snapshot; it is the only self-describing file.
 					if ( 'bridge/manifest.json' !== $path && ( ! $trusted || hash( 'sha256', $old_content ) !== $trusted ) ) {
@@ -280,7 +280,7 @@ final class GitHub {
 						}
 					}
 				}
-				$blob = self::request( $token, 'POST', $prefix . '/git/blobs', array( 'content' => base64_encode( $content ), 'encoding' => 'base64' ) );
+				$blob = self::request( $token, 'POST', $prefix . '/git/blobs', array( 'content' => base64_encode( $content ), 'encoding' => 'base64' ) ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode -- The GitHub blob API takes file content base64-encoded.
 				$g['nodes'][] = array( 'path' => $path, 'mode' => '100644', 'type' => 'blob', 'sha' => $blob['sha'] );
 				++$g['cursor'];
 			} elseif ( 'files' === $g['phase'] ) {

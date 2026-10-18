@@ -40,7 +40,7 @@ final class Exporter {
 			'status'         => $post->post_status,
 			'slug'           => $post->post_name,
 			'title'          => $post->post_title,
-			'link'           => get_permalink( $post ),
+			'link'           => Source::permalink( $post ),
 			'guid'           => $post->guid,
 			'author'         => $author ? $author->user_login : null,
 			'date'           => self::utc_date( $post->post_date_gmt ),

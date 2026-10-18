@@ -59,8 +59,25 @@ export function boot(script, { stages = STAGES } = {}) {
     steps.children.push(item);
   }
   const calls = [];
+  /** The form fields admin.js sends (`name`, `name[]`, `name[key][sub]`) back as the object it was given; numbers as numbers. */
+  const decode = (body) => {
+    const payload = {};
+    for (const [field, raw] of new URLSearchParams(body)) {
+      if (field === 'action' || field === 'nonce') continue;
+      const path = [field.replace(/\[.*$/, ''), ...[...field.matchAll(/\[([^\]]*)\]/g)].map((m) => m[1])];
+      const value = /^-?\d+$/.test(raw) ? Number(raw) : raw;
+      let at = payload;
+      for (let i = 0; i < path.length - 1; i++) {
+        const next = path[i + 1] === '' ? [] : {};
+        at = at[path[i]] ??= next;
+      }
+      const last = path[path.length - 1];
+      if (last === '') at.push(value); else at[last] = value;
+    }
+    return payload;
+  };
   const fetch = async (_url, init) => {
-    const payload = JSON.parse(new URLSearchParams(init.body).get('payload'));
+    const payload = decode(init.body);
     calls.push(payload);
     const answer = script(payload, calls);
     if (answer instanceof Error) throw answer;

@@ -24,10 +24,10 @@ final class Text {
 		$post = get_posts( array( 'post_type' => 'post', 'post_status' => 'publish', 'numberposts' => 1, 'orderby' => 'ID', 'order' => 'ASC' ) );
 		$page = get_posts( array( 'post_type' => 'page', 'post_status' => 'publish', 'numberposts' => 1, 'orderby' => 'ID', 'order' => 'ASC' ) );
 		if ( $post ) {
-			$states['single'] = get_permalink( $post[0] );
+			$states['single'] = Source::permalink( $post[0] );
 		}
 		if ( $page ) {
-			$states['page'] = get_permalink( $page[0] );
+			$states['page'] = Source::permalink( $page[0] );
 		}
 		/** Filters the pages whose rendered text is scanned (state => URL). */
 		return apply_filters( 'contentrain_bridge_render_states', $states );
@@ -261,7 +261,7 @@ final class Text {
 	/** Text that is exported as content, so a page rendering it is not showing interface text. */
 	public static function content_texts() {
 		$texts = array( get_option( 'blogname' ), get_option( 'blogdescription' ) );
-		foreach ( get_posts( array( 'post_type' => 'any', 'post_status' => 'publish', 'numberposts' => 2000, 'fields' => 'ids' ) ) as $id ) {
+		foreach ( get_posts( array( 'post_type' => 'any', 'post_status' => 'publish', 'numberposts' => 2000, 'fields' => 'ids' ) ) as $id ) { // phpcs:ignore WordPress.WP.PostsPerPage.posts_per_page_numberposts -- Titles only (ids), once per export, to tell content apart from interface text; bounded.
 			$texts[] = get_the_title( $id );
 		}
 		foreach ( get_terms( array( 'hide_empty' => false, 'number' => 2000 ) ) as $term ) {

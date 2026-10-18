@@ -28,6 +28,23 @@ jobs:
       - name: Lint every PHP file
         run: find . -name '*.php' -not -path './.git/*' -print0 | xargs -0 -n1 -P4 php -l
 
+  phpcs:
+    name: WordPress coding standards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+          tools: composer:v2
+      - run: composer install --no-interaction --no-progress
+      # phpcs.xml.dist: WordPress-Extra + PHPCompatibilityWP (7.4-) on the files the archive ships. Every
+      # phpcs:ignore in the code carries its reason on the same line; the gate honours them, and the second run
+      # lists what they cover so a review can read it in the log without trusting the annotations.
+      - run: composer lint
+      - run: composer lint:all -- --report=source || true
+
   metadata:
     name: Plugin metadata is consistent
     runs-on: ubuntu-latest

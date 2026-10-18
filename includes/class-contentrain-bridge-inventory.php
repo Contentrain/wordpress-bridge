@@ -183,13 +183,19 @@ final class Inventory {
 		$index = array();
 		$in = file_exists( $journal ) ? fopen( $journal, 'rb' ) : null; // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- Streamed read of a large journal.
 		if ( $in ) {
-			for ( $offset = ftell( $in ); false !== ( $line = fgets( $in ) ); $offset = ftell( $in ) ) {
+			$offset = ftell( $in );
+			while ( true ) {
+				$line = fgets( $in );
+				if ( false === $line ) {
+					break;
+				}
 				if ( preg_match( '/^\{"wp_type":"((?:[^"\\\\]|\\\\.)*)","wp_id":(\d+)/', $line, $m ) ) {
 					$index[] = stripcslashes( $m[1] ) . "\0" . str_pad( $m[2], 20, '0', STR_PAD_LEFT ) . "\0" . $offset;
 				} else {
 					$record = json_decode( $line, true );
 					$index[] = $record['wp_type'] . "\0" . str_pad( (string) (int) $record['wp_id'], 20, '0', STR_PAD_LEFT ) . "\0" . $offset;
 				}
+				$offset = ftell( $in );
 			}
 		}
 		// (wp_type, wp_id): the type by strcmp, then the zero-padded id; exactly `compare()`.
@@ -285,7 +291,7 @@ final class Inventory {
 		} else {
 			$excluded = array();
 			$mapped = Source::post( $post, $scope['selected_meta'], $excluded )['raw'];
-			$path = wp_make_link_relative( get_permalink( $post ) );
+			$path = wp_make_link_relative( Source::permalink( $post ) );
 		}
 		$record = array(
 			'wp_type' => $post->post_type,
@@ -309,7 +315,7 @@ final class Inventory {
 			if ( $modified && 'nav_menu_item' !== $post->post_type ) {
 				$record['modified_at'] = gmdate( 'Y-m-d\TH:i:s\Z', strtotime( $modified ) );
 			}
-			$old = array_values( array_unique( array_map( 'strval', (array) get_post_meta( $post->ID, '_wp_old_slug' ) ) ) );
+			$old = array_values( array_unique( array_map( 'strval', (array) get_post_meta( $post->ID, '_wp_old_slug', false ) ) ) );
 			if ( $old ) {
 				sort( $old, SORT_STRING );
 				$record['old_slugs'] = $old;

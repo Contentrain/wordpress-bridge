@@ -90,7 +90,7 @@ final class Models {
 		$existing = $job['models'][ $id ] ?? null;
 		if ( $existing ) {
 			foreach ( $fields as $key => $definition ) {
-				if ( isset( $existing['fields'][ $key ] ) && $existing['fields'][ $key ] != $definition ) {
+				if ( isset( $existing['fields'][ $key ] ) && $existing['fields'][ $key ] != $definition ) { // phpcs:ignore Universal.Operators.StrictComparisons.LooseNotEqual -- Field definitions are arrays compared by value, key order aside.
 					throw new \RuntimeException( 'Inconsistent field types in ' . $id . '.' . $key . '; choose a consistent model before exporting.' ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Diagnostic data is escaped at the admin output boundary or JSON encoded.
 				}
 			}

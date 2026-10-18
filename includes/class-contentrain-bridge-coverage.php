@@ -355,7 +355,7 @@ final class Coverage {
 	}
 
 	/** Every table in the database with this site's prefix: read, core, derived, or not read. */
-	private static function tables( $job ) {
+	private static function tables( $job ) { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.Found -- Every source reader takes the job; this one needs only the database.
 		global $wpdb;
 		$outcomes = array();
 		$detail = array();
