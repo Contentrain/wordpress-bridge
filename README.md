@@ -21,6 +21,8 @@ Free, local-first WordPress bridge: models site content and interface text as Co
 
 The JSON contract is defined by the MIT-licensed `@contentrain/types` package in `Contentrain/ai`; the plugin does not import or embed private Migrate or proprietary Studio code.
 
+Moving the whole site rather than exporting its content? [Contentrain Migrate](https://migrate.contentrain.io) moves a WordPress site to an Astro project in your own GitHub, with layouts as Astro components and old URLs kept or redirected. This plugin is optional there: Migrate can read your public pages without it.
+
 ## Install and update
 
 Download `contentrain-bridge.zip` from the
