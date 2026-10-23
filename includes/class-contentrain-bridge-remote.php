@@ -50,7 +50,7 @@ final class Remote {
 	const META = 'contentrain_bridge_remote_jobs_';
 	const BUDGET = 20;
 	const LIVE_LIMIT = 3;
-	/** Not content for `/counts`: media (counted as `attachments`) and WordPress's own site-building types. */
+	/** Not content for `/counts` or language pairs: media (counted as `attachments`) and WordPress's own site-building types. */
 	const NOT_CONTENT_TYPES = array( 'attachment', 'wp_block', 'wp_template', 'wp_template_part', 'wp_navigation', 'wp_font_family', 'wp_font_face', 'wp_global_styles', 'nav_menu_item' );
 	/** Touched on every read of a snapshot; one read within READ_GUARD seconds keeps it from being replaced. */
 	const READ_MARK = 'read';

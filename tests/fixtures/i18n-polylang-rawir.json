@@ -1,8 +1,8 @@
 {
-  "_about": "Bridge 0.8.0 export of migrate golden i18n-polylang (F4: Twenty Twenty-Five, tr_TR, Polylang 3.9.1 free, tr default unprefixed, en at /en/), trimmed to the multilingual fields; site URL is the local golden. Recorded 2026-10-23.",
+  "_about": "Bridge 0.8.1 export of migrate golden i18n-polylang (F4: Twenty Twenty-Five, tr_TR, Polylang 3.9.1 free, tr default unprefixed, en at /en/), trimmed to the multilingual fields; site URL is the local golden. Recorded 2026-10-23 (0.8.1: a group of one and a non-content type make no pair).",
   "provenance": {
     "kind": "bridge",
-    "tool": "contentrain-bridge/0.8.0"
+    "tool": "contentrain-bridge/0.8.1"
   },
   "site": {
     "url": "http://127.0.0.1:9490/",
@@ -206,15 +206,6 @@
       }
     },
     {
-      "missing_translations": [
-        "en"
-      ],
-      "post": 10,
-      "translations": {
-        "tr": 10
-      }
-    },
-    {
       "post": 11,
       "translations": {
         "en": 12,
@@ -226,15 +217,6 @@
       "translations": {
         "en": 14,
         "tr": 13
-      }
-    },
-    {
-      "missing_translations": [
-        "en"
-      ],
-      "post": 17,
-      "translations": {
-        "tr": 17
       }
     }
   ],
