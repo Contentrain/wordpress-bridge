@@ -316,6 +316,17 @@ if ( $has_polylang ) {
 	// BO-10 found in the real plugin, not merely a language Polylang never
 	// bothers to filter because nothing was ever assigned.
 	pll_set_term_language( (int) $category['term_id'], 'en' );
+	// Its Danish translation, paired through Polylang's own term API: a term
+	// translation group the RawIR must carry as `term_pairs`, with `lang` on both.
+	$category_da = term_exists( 'bridge-fixture-kategori', 'category' );
+	if ( ! $category_da ) { $category_da = wp_insert_term( 'Bridge kategori', 'category', array( 'slug' => 'bridge-fixture-kategori' ) ); }
+	pll_set_term_language( (int) $category_da['term_id'], 'da' );
+	pll_save_term_translations( array( 'en' => (int) $category['term_id'], 'da' => (int) $category_da['term_id'] ) );
+	// The site title translated in Polylang's own string table, as its Strings screen saves it.
+	$strings_da = new PLL_MO();
+	$strings_da->import_from_db( PLL()->model->get_language( 'da' ) );
+	$strings_da->add_entry( $strings_da->make_entry( get_option( 'blogname' ), 'Bridge Accept DA' ) );
+	$strings_da->export_to_db( PLL()->model->get_language( 'da' ) );
 	pll_set_post_language( $post, 'en' );
 	pll_set_post_language( $page, 'en' );
 	$post_da = wp_insert_post( array( 'post_type' => 'post', 'post_title' => 'Bridge artikel', 'post_content' => '<p>Dansk indhold.</p>', 'post_status' => 'publish', 'post_author' => $admin->ID ) );
@@ -434,6 +445,19 @@ $menu_url_item = wp_update_nav_menu_item( $footer_menu, 0, array( 'menu-item-tit
 // actually carries an unresolvable post-type target is one that never
 // resolved in the first place.
 $menu_broken_item = wp_update_nav_menu_item( $footer_menu, 0, array( 'menu-item-title' => 'Gone', 'menu-item-object' => 'page', 'menu-item-object-id' => 987654321, 'menu-item-type' => 'post_type', 'menu-item-status' => 'publish' ) );
+// Polylang keeps one menu per location per language in its own `nav_menus`
+// setting: the Danish primary menu shows where the English one does.
+if ( $has_polylang ) {
+	$existing_primary_da = wp_get_nav_menu_object( 'Bridge Primær' );
+	$primary_menu_da = $existing_primary_da ? $existing_primary_da->term_id : wp_update_nav_menu_object( 0, array( 'menu-name' => 'Bridge Primær' ) );
+	if ( ! $existing_primary_da ) {
+		wp_update_nav_menu_item( $primary_menu_da, 0, array( 'menu-item-title' => 'Artikel', 'menu-item-object' => 'post', 'menu-item-object-id' => $post_da, 'menu-item-type' => 'post_type', 'menu-item-status' => 'publish' ) );
+	}
+	$pll_nav_menus = (array) PLL()->options->get( 'nav_menus' );
+	$pll_nav_menus[ get_stylesheet() ]['bridge-primary'] = array( 'en' => (int) $primary_menu, 'da' => (int) $primary_menu_da );
+	$pll_nav_menus[ get_stylesheet() ]['bridge-footer'] = array( 'en' => (int) $footer_menu );
+	PLL()->options->set( 'nav_menus', $pll_nav_menus );
+}
 
 $comment = wp_insert_comment( array( 'comment_post_ID' => $post, 'comment_author' => 'Reviewer', 'comment_author_email' => 'private@example.test', 'comment_author_IP' => '192.0.2.1', 'comment_content' => 'Public comment', 'comment_approved' => 1 ) );
 update_comment_meta( $comment, 'other_email', 'private-in-meta@example.test' );
@@ -757,6 +781,31 @@ if ( $has_polylang ) {
 	foreach ( array( 'wp-tax-language', 'wp-tax-post-translations', 'wp-tax-term-language', 'wp-tax-term-translations' ) as $bookkeeping_model ) {
 		check( ! isset( $job['models'][ $bookkeeping_model ] ), "Polylang's own $bookkeeping_model taxonomy never becomes a model" );
 	}
+	// …nor as raw terms: what they record travels as `lang` and the pairs.
+	$raw_terms = json_decode( Files::read( $dir, 'bridge/raw-terms.json' ), true );
+	$raw_taxonomies = array_unique( array_column( $raw_terms, 'taxonomy' ) );
+	check( ! array_intersect( array( 'language', 'term_language', 'post_translations', 'term_translations' ), $raw_taxonomies ), 'no Polylang bookkeeping taxonomy is a raw term: ' . implode( ',', $raw_taxonomies ) );
+	check( 'en' === ( $raw_terms[ (int) $category['term_id'] ]['lang'] ?? null ) && 'da' === ( $raw_terms[ (int) $category_da['term_id'] ]['lang'] ?? null ), 'a term in a translated taxonomy carries its own language' );
+	$term_pairs = json_decode( Files::read( $dir, 'bridge/term-pairs.json' ), true );
+	$category_pair = $term_pairs[ (int) $category['term_id'] ] ?? null;
+	check( $category_pair && 'category' === $category_pair['taxonomy'] && $same_map( array( 'en' => (int) $category['term_id'], 'da' => (int) $category_da['term_id'] ), $category_pair['translations'] ) && ! isset( $category_pair['missing_translations'] ), 'a category and its translation are one term pair, keyed by the default-language member' );
+	check( ! isset( $term_pairs[ (int) $category_da['term_id'] ] ), 'the translation writes no term pair of its own' );
+	$post_raw_lang = json_decode( Files::read( $dir, 'bridge/raw-posts.json' ), true );
+	check( 'da' === ( $post_raw_lang[ $post_da ]['lang'] ?? null ) && 'en' === ( $post_raw_lang[ $post ]['lang'] ?? null ), 'a post\'s lang is Polylang\'s own slug, the key its pair uses' );
+
+	// The language list as Polylang's own pll/v1 names it, unnormalised.
+	$languages_doc = json_decode( Files::read( $dir, 'bridge/languages.json' ), true );
+	$by_slug = array_column( (array) ( $languages_doc['list'] ?? array() ), null, 'slug' );
+	check( 'polylang' === ( $languages_doc['plugin'] ?? null ) && pll_default_language() === ( $languages_doc['default'] ?? null ), 'the language document names Polylang and its default language' );
+	check( isset( $languages_doc['scheme'], $languages_doc['hide_default'], $languages_doc['rewrite'] ) && in_array( $languages_doc['scheme'], array( 'content', 'directory', 'subdomain', 'domain' ), true ), 'the URL scheme and Polylang\'s hide_default and rewrite settings are stated' );
+	check( 'da_DK' === ( $by_slug['da']['locale'] ?? null ) && 'da-DK' === ( $by_slug['da']['w3c'] ?? null ) && 'en_US' === ( $by_slug['en']['locale'] ?? null ), 'locale and w3c keep Polylang\'s own case' );
+	check( isset( $by_slug['da']['home_url'], $by_slug['da']['is_rtl'], $by_slug['da']['order'], $by_slug['da']['name'] ) && false === $by_slug['da']['is_rtl'] && PLL()->model->get_language( 'da' )->get_home_url() === $by_slug['da']['home_url'], 'each language has its home URL, direction, order and name' );
+	check( array_key_exists( 'page_on_front', $by_slug['da'] ) && array_key_exists( 'page_for_posts', $by_slug['da'] ), 'each language names its front page and posts page (null when unset)' );
+
+	// Translated interface strings, from Polylang's own string table.
+	$language_strings = json_decode( Files::read( $dir, 'bridge/language-strings.json' ), true );
+	$title_string = array_values( array_filter( (array) $language_strings, static function ( $s ) { return 'Bridge Acceptance' === $s['string']; } ) )[0] ?? null;
+	check( $title_string && 'Bridge Accept DA' === ( $title_string['translations']['da'] ?? null ) && 'blogname' === ( $title_string['name'] ?? null ), 'the translated site title travels with its translation per language' );
 
 	// Menus: two locations, a post link, a term link, a custom URL, a resolved
 	// parent, an unresolved parent, and a target deleted out from under it.
@@ -768,6 +817,8 @@ if ( $has_polylang ) {
 	$raw_menus = json_decode( Files::read( $dir, 'bridge/raw-menus.json' ), true );
 	$raw_primary = array_values( array_filter( (array) $raw_menus, static function ( $m ) use ( $primary_menu ) { return (int) $m['id'] === (int) $primary_menu; } ) )[0] ?? null;
 	check( $raw_primary && array( 'bridge-primary' ) === ( $raw_primary['locations'] ?? null ), 'RawIR carries a classic menu\'s theme locations' );
+	$raw_primary_da = array_values( array_filter( (array) $raw_menus, static function ( $m ) use ( $primary_menu_da ) { return (int) $m['id'] === (int) $primary_menu_da; } ) )[0] ?? null;
+	check( 'en' === ( $raw_primary['lang'] ?? null ) && $raw_primary_da && 'da' === ( $raw_primary_da['lang'] ?? null ) && array( 'bridge-primary' ) === ( $raw_primary_da['locations'] ?? null ), 'each language\'s menu carries its language and the location Polylang shows it in' );
 	check( ! isset( $post_row['parent'] ), 'a top-level item has no parent field' );
 	$child_row = $menu_items[ $menu_id( $menu_child_item ) ];
 	check( $menu_id( $menu_post_item ) === $child_row['parent'], 'a nested item is a relation to its own parent row, not a raw WordPress id' );

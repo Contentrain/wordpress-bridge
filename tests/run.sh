@@ -92,6 +92,11 @@ fi
 # taxonomy lookups for terms nothing here ever tags with a language.
 "${cli[@]}" plugin deactivate polylang acf-options-for-polylang >/dev/null
 
+# WPML has no licence here: its language filters are faked with WPML's
+# documented shapes, on the same site with Polylang now off, so the one
+# language reader is proven to ask WPML the same questions it asks Polylang.
+"${cli[@]}" eval-file /var/www/html/wp-content/plugins/contentrain-bridge/tests/languages-wpml.php
+
 # SCF stays active: test:delta, test:text and test:integrations all reuse this
 # same KEEP=1 site and expect a real ACF-compatible plugin (any function-name
 # check they run, `acf_add_local_field_group` and friends, is satisfied by

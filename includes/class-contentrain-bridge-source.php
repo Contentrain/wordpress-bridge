@@ -64,7 +64,7 @@ final class Source {
 			'plugins' => $plugins,
 			'theme' => array( 'name' => $theme->get( 'Name' ), 'version' => $theme->get( 'Version' ) ),
 			'acf' => function_exists( 'get_field_objects' ),
-			'languages' => function_exists( 'pll_languages_list' ) ? pll_languages_list() : array( get_locale() ),
+			'languages' => Languages::codes(),
 			'menu_locations' => get_nav_menu_locations(),
 			'media' => $media,
 			'comments' => array_map( 'intval', (array) self::without_curlang( 'wp_count_comments' ) ),
@@ -134,7 +134,7 @@ final class Source {
 			}
 		}
 		if ( ! $translations ) {
-			$translations[ self::language( $post ) ] = $post->ID;
+			$translations[ Languages::post_code( $post ) ] = $post->ID;
 		}
 		return array_map( 'intval', $translations );
 	}
@@ -151,7 +151,7 @@ final class Source {
 	 * one entry id per translation group instead of picking differently.
 	 */
 	public static function canonical( $translations ) {
-		return $translations[ self::default_locale() ] ?? min( array_values( $translations ) );
+		return $translations[ Languages::default_code() ] ?? $translations[ self::default_locale() ] ?? min( array_values( $translations ) );
 	}
 
 	/**
@@ -175,7 +175,8 @@ final class Source {
 	/** Capture source without executing shortcodes or arbitrary theme code. */
 	public static function post( $post, $selected, &$excluded ) {
 		$raw = Exporter::map_post( $post, $selected, $excluded );
-		$raw['lang'] = self::language( $post );
+		// The plugin's own code, as the translation maps key it (`Source::language()` is the store's normalised locale).
+		$raw['lang'] = Languages::post_code( $post );
 		if ( $post->post_password ) {
 			$excluded[] = array( 'source' => 'post/' . $post->ID . '/password', 'reason' => 'password-not-exported' );
 		}
@@ -215,7 +216,7 @@ final class Source {
 	 * fields, not just this one's — scoped instead by the field groups whose
 	 * own location rule names this page.
 	 */
-	public static function acf_fields_for_options_page( $post_id, $slug, $source_prefix, &$excluded ) {
+	public static function acf_fields_for_options_page( $post_id, $slug, $source_prefix, &$excluded, $current_language = false ) {
 		$raw = array();
 		$schema = array();
 		if ( ! function_exists( 'acf_get_field_groups' ) ) {
@@ -230,7 +231,8 @@ final class Source {
 		// `i18n: false` Options Page model only has room for one value, so it
 		// must always be the untranslated one, regardless of who happens to
 		// be running the export and what they last clicked in the admin bar.
-		$untranslated = function_exists( 'bea_aofp_switch_to_untranslated' );
+		// `$current_language` reads the copy of the language the caller switched to (`Languages::in_language()`) instead.
+		$untranslated = ! $current_language && function_exists( 'bea_aofp_switch_to_untranslated' );
 		if ( $untranslated ) {
 			bea_aofp_switch_to_untranslated();
 		}

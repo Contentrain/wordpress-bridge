@@ -66,8 +66,13 @@ const urlDiff = bridge.attachments.filter((a) => wxr.attachments.find((x) => x.i
 check(!urlDiff.length, 'attachments: the same file URLs')
 const tkey = (t) => `${t.taxonomy}:${t.slug}:${t.name}`
 const bterms = new Set(bridge.terms.map(tkey))
-const wmissing = wxr.terms.filter((t) => !bterms.has(tkey(t)))
-check(!wmissing.length, `terms: all ${wxr.terms.length} WXR terms are in Bridge's RawIR with the same slug and name${wmissing.length ? ': ' + wmissing.map(tkey).join(', ') : ''}`)
+// A multilingual plugin's bookkeeping taxonomies (Languages::BOOKKEEPING) are WXR terms but not content: the Bridge
+// carries what they record as `lang`, `language_pairs` and `term_pairs`, never as terms.
+const bookkeeping = new Set(['language', 'term_language', 'post_translations', 'term_translations', 'translation_priority'])
+const wcontent = wxr.terms.filter((t) => !bookkeeping.has(t.taxonomy))
+const wmissing = wcontent.filter((t) => !bterms.has(tkey(t)))
+check(!wmissing.length, `terms: all ${wcontent.length} WXR content terms are in Bridge's RawIR with the same slug and name${wmissing.length ? ': ' + wmissing.map(tkey).join(', ') : ''}`)
+check(!bridge.terms.some((t) => bookkeeping.has(t.taxonomy)), `terms: none of WXR's ${wxr.terms.length - wcontent.length} bookkeeping terms is a Bridge RawIR term`)
 const wauthors = new Set(wxr.authors.map((a) => a.login))
 check(bridge.authors.every((a) => wauthors.has(a.login)) && bridge.authors.every((a) => !a.email), `authors: Bridge's ${bridge.authors.length} are among WXR's ${wxr.authors.length}, and carry no email`)
 const wc = new Map(wxr.comments.map((c) => [c.id, c]))

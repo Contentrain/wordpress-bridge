@@ -175,9 +175,10 @@ final class Models {
 		}
 	}
 
-	/** Every locale the site's multilingual plugin knows about, normalized the same way `Jobs::create()` derives `$job['i18n']`. */
+	/** Every language code the site's multilingual plugin knows about, as the plugin names it — the keys of every translation map. */
 	private static function site_locales( $job ) {
-		return array_values( array_unique( array_map( array( Source::class, 'locale' ), (array) $job['inventory']['languages'] ) ) );
+		// Without a plugin the one language is the install locale, keyed the way `Languages::post_code()` keys it.
+		return array_values( array_unique( array_map( Languages::plugin() ? 'strval' : array( Source::class, 'locale' ), (array) $job['inventory']['languages'] ) ) );
 	}
 
 	/** Locales the site has but this specific translation group does not. */
@@ -339,8 +340,10 @@ final class Models {
 	/**
 	 * Raw evidence for one term, independent of whether it becomes a model.
 	 * `RawTerm`'s own contract has no "public taxonomy only" carve-out — a
-	 * WXR export of the same site includes every taxonomy, bookkeeping ones
-	 * included, and Bridge's raw completeness claim has to match it. Content
+	 * WXR export of the same site includes every taxonomy, and Bridge's raw
+	 * completeness claim has to match it. The one exception is a multilingual
+	 * plugin's bookkeeping (`Languages::BOOKKEEPING`), which the caller never
+	 * passes here: what it records travels as `lang` and the pairs. Content
 	 * modelling is a separate, narrower decision made by the caller.
 	 */
 	public static function term_raw( &$job, $term ) {
@@ -355,7 +358,31 @@ final class Models {
 			}
 		}
 		ksort( $meta );
-		self::row( $job, 'bridge/raw-terms.json', $term->term_id, array( 'id' => (int) $term->term_id, 'taxonomy' => $term->taxonomy, 'slug' => $term->slug, 'name' => $term->name, 'description' => $term->description, 'parent' => $parent && ! is_wp_error( $parent ) ? $parent->slug : null, 'parent_resolved' => ! $term->parent || ( $parent && ! is_wp_error( $parent ) ), 'meta' => $meta ?: (object) array() ) );
+		$row = array( 'id' => (int) $term->term_id, 'taxonomy' => $term->taxonomy, 'slug' => $term->slug, 'name' => $term->name, 'description' => $term->description, 'parent' => $parent && ! is_wp_error( $parent ) ? $parent->slug : null, 'parent_resolved' => ! $term->parent || ( $parent && ! is_wp_error( $parent ) ), 'meta' => $meta ?: (object) array() );
+		// A term in a taxonomy the multilingual plugin translates carries its language, as a post does.
+		$lang = isset( $term->term_taxonomy_id ) ? Languages::term_code( $term ) : null;
+		if ( null !== $lang ) {
+			$row['lang'] = $lang;
+		}
+		self::row( $job, 'bridge/raw-terms.json', $term->term_id, $row );
+	}
+
+	/**
+	 * `RawIR.term_pairs`: one row per translation group of terms, written by
+	 * its canonical member (the default language's, else the lowest id — the
+	 * post rule), with the languages the group lacks named.
+	 */
+	public static function term_pair( &$job, $term ) {
+		$translations = Languages::term_translations( $term );
+		if ( ! $translations || Source::canonical( $translations ) !== (int) $term->term_id ) {
+			return;
+		}
+		$pair = array( 'term' => (int) $term->term_id, 'taxonomy' => $term->taxonomy, 'translations' => $translations );
+		$missing = self::missing_locales( $job, array_map( 'strval', array_keys( $translations ) ) );
+		if ( $missing ) {
+			$pair['missing_translations'] = $missing;
+		}
+		self::row( $job, 'bridge/term-pairs.json', $term->term_id, $pair );
 	}
 
 	public static function term( &$job, $term, $locale ) {
@@ -521,11 +548,37 @@ final class Models {
 		self::model( $job, $mid, 'singleton', 'site', $page['page_title'] ?: $page['menu_slug'] ?: $slug, $fields, 'page_title', false );
 		self::entry( $job, $mid, $job['default_locale'], '', $data );
 		if ( has_filter( 'wpml_default_language' ) && ( function_exists( 'acfml' ) || class_exists( 'ACFML' ) ) ) {
-			Jobs::warning( $job, array( 'source' => 'acf-options/' . $slug, 'reason' => 'acf-options-translation-plugin-detected: WPML + ACFML can translate this Options Page; only its default-language values are exported' ) );
+			Jobs::warning( $job, array( 'source' => 'acf-options/' . $slug, 'reason' => 'acf-options-translation-plugin-detected: WPML + ACFML can translate this Options Page; the store keeps its default-language values, the RawIR carries every other language\'s copy' ) );
 		} elseif ( defined( 'BEA_ACF_OPTIONS_FOR_POLYLANG_VERSION' ) ) {
-			Jobs::warning( $job, array( 'source' => 'acf-options/' . $slug, 'reason' => 'acf-options-translation-plugin-detected: ACF Options for Polylang can translate this Options Page; only its default-language values are exported' ) );
+			Jobs::warning( $job, array( 'source' => 'acf-options/' . $slug, 'reason' => 'acf-options-translation-plugin-detected: ACF Options for Polylang can translate this Options Page; the store keeps its default-language values, the RawIR carries every other language\'s copy' ) );
 		}
-		return array( 'slug' => $slug, 'title' => $page['page_title'] ?: $page['menu_slug'] ?: $slug, 'post_id' => (string) $post_id, 'fields' => (object) $raw );
+		$result = array( 'slug' => $slug, 'title' => $page['page_title'] ?: $page['menu_slug'] ?: $slug, 'post_id' => (string) $post_id, 'fields' => (object) $raw );
+		// RawIR: the other languages' copies, read through the translation plugin's own language switch, beside the
+		// default's `fields` rather than as pages of their own (one page per slug stays the readers' contract).
+		if ( Languages::translates_options_pages() ) {
+			$result['lang'] = Languages::default_code();
+			$translations = array();
+			foreach ( Languages::codes() as $code ) {
+				if ( $code === $result['lang'] ) {
+					continue;
+				}
+				$ignored = array();
+				list( $translated ) = Languages::in_language( $code, static function () use ( $post_id, $page, $slug, &$ignored ) {
+					return Source::acf_fields_for_options_page( $post_id, $page['menu_slug'] ?? $slug, 'acf-options/' . $slug, $ignored, true );
+				} );
+				// A language with no copy of its own reads the default's value back: that is not a translation.
+				$translated = array_filter( (array) $translated, static function ( $field, $name ) use ( $raw ) {
+					return ! isset( $raw[ $name ] ) || $raw[ $name ]['value'] !== $field['value'];
+				}, ARRAY_FILTER_USE_BOTH );
+				if ( $translated ) {
+					$translations[ $code ] = (object) $translated;
+				}
+			}
+			if ( $translations ) {
+				$result['translations'] = (object) $translations;
+			}
+		}
+		return $result;
 	}
 
 	/** Check short writes so disk exhaustion cannot produce a successful truncated table. */

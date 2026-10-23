@@ -1,0 +1,294 @@
+{
+  "_about": "Bridge 0.8.0 export of migrate golden i18n-polylang (F4: Twenty Twenty-Five, tr_TR, Polylang 3.9.1 free, tr default unprefixed, en at /en/), trimmed to the multilingual fields; site URL is the local golden. Recorded 2026-10-23.",
+  "provenance": {
+    "kind": "bridge",
+    "tool": "contentrain-bridge/0.8.0"
+  },
+  "site": {
+    "url": "http://127.0.0.1:9490/",
+    "language": "tr"
+  },
+  "languages": {
+    "default": "tr",
+    "hide_default": true,
+    "list": [
+      {
+        "home_url": "http://127.0.0.1:9490/",
+        "is_default": true,
+        "is_rtl": false,
+        "locale": "tr_TR",
+        "name": "Türkçe",
+        "order": 0,
+        "page_for_posts": null,
+        "page_on_front": null,
+        "slug": "tr",
+        "w3c": "tr-TR"
+      },
+      {
+        "home_url": "http://127.0.0.1:9490/en/",
+        "is_default": false,
+        "is_rtl": false,
+        "locale": "en_US",
+        "name": "English",
+        "order": 1,
+        "page_for_posts": null,
+        "page_on_front": null,
+        "slug": "en",
+        "w3c": "en-US"
+      }
+    ],
+    "plugin": "polylang",
+    "rewrite": true,
+    "scheme": "directory"
+  },
+  "posts": [
+    {
+      "id": 4,
+      "type": "post",
+      "status": "publish",
+      "slug": "sessiz-arayuzler-tasarlamak",
+      "link": "http://127.0.0.1:9490/sessiz-arayuzler-tasarlamak/",
+      "lang": "tr"
+    },
+    {
+      "id": 5,
+      "type": "post",
+      "status": "publish",
+      "slug": "designing-quiet-interfaces",
+      "link": "http://127.0.0.1:9490/en/designing-quiet-interfaces/",
+      "lang": "en"
+    },
+    {
+      "id": 6,
+      "type": "post",
+      "status": "publish",
+      "slug": "sayfa-agirligini-yariya-indirdik",
+      "link": "http://127.0.0.1:9490/sayfa-agirligini-yariya-indirdik/",
+      "lang": "tr"
+    },
+    {
+      "id": 7,
+      "type": "post",
+      "status": "publish",
+      "slug": "we-halved-our-page-weight",
+      "link": "http://127.0.0.1:9490/en/we-halved-our-page-weight/",
+      "lang": "en"
+    },
+    {
+      "id": 8,
+      "type": "post",
+      "status": "publish",
+      "slug": "ikinci-ofisimizi-aciyoruz",
+      "link": "http://127.0.0.1:9490/ikinci-ofisimizi-aciyoruz/",
+      "lang": "tr"
+    },
+    {
+      "id": 9,
+      "type": "post",
+      "status": "publish",
+      "slug": "opening-our-second-office",
+      "link": "http://127.0.0.1:9490/en/opening-our-second-office/",
+      "lang": "en"
+    },
+    {
+      "id": 10,
+      "type": "post",
+      "status": "publish",
+      "slug": "erisilebilirlik-denetimi-bir-ogleden-sonrada",
+      "link": "http://127.0.0.1:9490/erisilebilirlik-denetimi-bir-ogleden-sonrada/",
+      "lang": "tr"
+    },
+    {
+      "id": 11,
+      "type": "page",
+      "status": "publish",
+      "slug": "hakkimizda",
+      "link": "http://127.0.0.1:9490/hakkimizda/",
+      "lang": "tr"
+    },
+    {
+      "id": 12,
+      "type": "page",
+      "status": "publish",
+      "slug": "about-us",
+      "link": "http://127.0.0.1:9490/en/about-us/",
+      "lang": "en"
+    },
+    {
+      "id": 13,
+      "type": "page",
+      "status": "publish",
+      "slug": "iletisim",
+      "link": "http://127.0.0.1:9490/iletisim/",
+      "lang": "tr"
+    },
+    {
+      "id": 14,
+      "type": "page",
+      "status": "publish",
+      "slug": "contact",
+      "link": "http://127.0.0.1:9490/en/contact/",
+      "lang": "en"
+    },
+    {
+      "id": 17,
+      "type": "wp_navigation",
+      "status": "publish",
+      "slug": "primary",
+      "link": "http://127.0.0.1:9490/primary/",
+      "lang": "tr"
+    }
+  ],
+  "terms": [
+    {
+      "id": 1,
+      "taxonomy": "category",
+      "slug": "general",
+      "name": "General",
+      "lang": "tr"
+    },
+    {
+      "id": 7,
+      "taxonomy": "category",
+      "slug": "uncategorized-en",
+      "name": "Uncategorized",
+      "lang": "en"
+    },
+    {
+      "id": 9,
+      "taxonomy": "category",
+      "slug": "rehberler",
+      "name": "Rehberler",
+      "lang": "tr"
+    },
+    {
+      "id": 11,
+      "taxonomy": "category",
+      "slug": "guides",
+      "name": "Guides",
+      "lang": "en"
+    },
+    {
+      "id": 13,
+      "taxonomy": "category",
+      "slug": "haberler",
+      "name": "Haberler",
+      "lang": "tr"
+    },
+    {
+      "id": 15,
+      "taxonomy": "category",
+      "slug": "news",
+      "name": "News",
+      "lang": "en"
+    }
+  ],
+  "language_pairs": [
+    {
+      "post": 4,
+      "translations": {
+        "en": 5,
+        "tr": 4
+      }
+    },
+    {
+      "post": 6,
+      "translations": {
+        "en": 7,
+        "tr": 6
+      }
+    },
+    {
+      "post": 8,
+      "translations": {
+        "en": 9,
+        "tr": 8
+      }
+    },
+    {
+      "missing_translations": [
+        "en"
+      ],
+      "post": 10,
+      "translations": {
+        "tr": 10
+      }
+    },
+    {
+      "post": 11,
+      "translations": {
+        "en": 12,
+        "tr": 11
+      }
+    },
+    {
+      "post": 13,
+      "translations": {
+        "en": 14,
+        "tr": 13
+      }
+    },
+    {
+      "missing_translations": [
+        "en"
+      ],
+      "post": 17,
+      "translations": {
+        "tr": 17
+      }
+    }
+  ],
+  "term_pairs": [
+    {
+      "taxonomy": "category",
+      "term": 1,
+      "translations": {
+        "en": 7,
+        "tr": 1
+      }
+    },
+    {
+      "taxonomy": "category",
+      "term": 9,
+      "translations": {
+        "en": 11,
+        "tr": 9
+      }
+    },
+    {
+      "taxonomy": "category",
+      "term": 13,
+      "translations": {
+        "en": 15,
+        "tr": 13
+      }
+    }
+  ],
+  "menus": [
+    {
+      "id": 17,
+      "slug": "primary",
+      "name": "Primary",
+      "locations": [
+        "header"
+      ]
+    },
+    {
+      "id": -6,
+      "slug": "footer-navigation-1",
+      "name": "Footer navigation 1",
+      "locations": [
+        "footer"
+      ]
+    },
+    {
+      "id": -11,
+      "slug": "footer-navigation-2",
+      "name": "Footer navigation 2",
+      "locations": [
+        "footer"
+      ]
+    }
+  ],
+  "strings": []
+}
