@@ -275,8 +275,11 @@ final class Models {
 		// one per post: every member of the group carries the identical map, so
 		// only the canonical member writes it. A locale the site has but this
 		// group does not is named, not hidden behind a copy of another
-		// locale's text pretending to be a translation.
-		if ( Source::canonical( $record['translations'] ) === $p['id'] ) {
+		// locale's text pretending to be a translation. A post nobody has
+		// translated is no pair (its language is its own `lang`), and
+		// WordPress's site-building types (`wp_navigation`, template parts, …)
+		// pair nothing: they are not content Migrate moves as entries.
+		if ( count( $record['translations'] ) > 1 && ! in_array( $p['type'], Remote::NOT_CONTENT_TYPES, true ) && Source::canonical( $record['translations'] ) === $p['id'] ) {
 			$pair = array( 'post' => $p['id'], 'translations' => $record['translations'] );
 			$missing = self::missing_locales( $job, array_keys( $record['translations'] ) );
 			if ( $missing ) {
@@ -370,11 +373,12 @@ final class Models {
 	/**
 	 * `RawIR.term_pairs`: one row per translation group of terms, written by
 	 * its canonical member (the default language's, else the lowest id — the
-	 * post rule), with the languages the group lacks named.
+	 * post rule), with the languages the group lacks named. A term nobody has
+	 * translated is no pair: its language is its own `lang`.
 	 */
 	public static function term_pair( &$job, $term ) {
 		$translations = Languages::term_translations( $term );
-		if ( ! $translations || Source::canonical( $translations ) !== (int) $term->term_id ) {
+		if ( count( $translations ) < 2 || Source::canonical( $translations ) !== (int) $term->term_id ) {
 			return;
 		}
 		$pair = array( 'term' => (int) $term->term_id, 'taxonomy' => $term->taxonomy, 'translations' => $translations );

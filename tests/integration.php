@@ -354,6 +354,11 @@ if ( $has_polylang ) {
 	// not merely "unset"), never given a `da` counterpart.
 	$solo_post = wp_insert_post( array( 'post_type' => 'post', 'post_title' => 'English only', 'post_content' => '<p>Never translated.</p>', 'post_status' => 'publish', 'post_author' => $admin->ID ) );
 	pll_set_post_language( $solo_post, 'en' );
+	// The same for a term: a category with a language and no translation.
+	$solo_category = term_exists( 'bridge-fixture-solo', 'category' );
+	if ( ! $solo_category ) { $solo_category = wp_insert_term( 'Bridge solo', 'category', array( 'slug' => 'bridge-fixture-solo' ) ); }
+	pll_set_term_language( (int) $solo_category['term_id'], 'en' );
+	wp_set_post_categories( $solo_post, array( (int) $solo_category['term_id'] ) );
 
 	// A translated page has its own field values, not a copy of the source
 	// language's; mirroring them here (rather than leaving $page_da's ACF
@@ -770,7 +775,8 @@ if ( $has_polylang ) {
 	check( isset( $pairs[ $team_en ] ) && $same_map( array( 'en' => $team_en, 'da' => $team_da ), $pairs[ $team_en ]['translations'] ), 'a third, unrelated translation group is also a single pair' );
 	check( ! isset( $pairs[ $post_da ] ) && ! isset( $pairs[ $page_da ] ) && ! isset( $pairs[ $team_da ] ), 'the non-canonical member of each group writes no pair of its own' );
 	check( ! isset( $pairs[ $post ]['missing_translations'] ) && ! isset( $pairs[ $page ]['missing_translations'] ), 'a fully bilingual group reports no missing translation' );
-	check( isset( $pairs[ $solo_post ] ) && array( 'en' => $solo_post ) === $pairs[ $solo_post ]['translations'] && array( 'da' ) === $pairs[ $solo_post ]['missing_translations'], 'a post nobody has translated yet is its own one-member group, with the gap named rather than hidden' );
+	check( ! isset( $pairs[ $solo_post ] ), 'a post nobody has translated yet is no pair (0.8.1): its language is its own lang' );
+	check( ! array_filter( $pairs, static function ( $pair ) { return count( $pair['translations'] ) < 2; } ), 'no language pair has fewer than two members' );
 	// A re-used test database accumulates earlier runs' groups (RELEASING.md's
 	// own caveat), so this counts at least this run's three rather than an
 	// exact total; each da-tagged member above already proves no duplicate
@@ -790,6 +796,8 @@ if ( $has_polylang ) {
 	$category_pair = $term_pairs[ (int) $category['term_id'] ] ?? null;
 	check( $category_pair && 'category' === $category_pair['taxonomy'] && $same_map( array( 'en' => (int) $category['term_id'], 'da' => (int) $category_da['term_id'] ), $category_pair['translations'] ) && ! isset( $category_pair['missing_translations'] ), 'a category and its translation are one term pair, keyed by the default-language member' );
 	check( ! isset( $term_pairs[ (int) $category_da['term_id'] ] ), 'the translation writes no term pair of its own' );
+	check( ! isset( $term_pairs[ (int) $solo_category['term_id'] ] ) && 'en' === ( $raw_terms[ (int) $solo_category['term_id'] ]['lang'] ?? null ), 'an untranslated term is no term pair, its language stays on the term' );
+	check( ! array_filter( $term_pairs, static function ( $pair ) { return count( $pair['translations'] ) < 2; } ), 'no term pair has fewer than two members' );
 	$post_raw_lang = json_decode( Files::read( $dir, 'bridge/raw-posts.json' ), true );
 	check( 'da' === ( $post_raw_lang[ $post_da ]['lang'] ?? null ) && 'en' === ( $post_raw_lang[ $post ]['lang'] ?? null ), 'a post\'s lang is Polylang\'s own slug, the key its pair uses' );
 
@@ -1286,6 +1294,37 @@ check( null === \Contentrain\Bridge\Exporter::map_attachment( get_post( $draft_a
 
 // The same Redirection rules as @contentrain/wp-import, case by case (tests/fixtures/redirect-parity.json).
 require __DIR__ . '/redirect-parity.php';
+
+// WordPress's site-building types pair nothing even when translated (0.8.1): a
+// translated reusable block exported on its own writes no language pair.
+if ( $has_polylang ) {
+	$block_en = wp_insert_post( array( 'post_type' => 'wp_block', 'post_title' => 'Bridge CTA', 'post_content' => '<!-- wp:paragraph --><p>Call us</p><!-- /wp:paragraph -->', 'post_status' => 'publish', 'post_author' => $admin->ID ) );
+	$block_da = wp_insert_post( array( 'post_type' => 'wp_block', 'post_title' => 'Bridge CTA da', 'post_content' => '<!-- wp:paragraph --><p>Ring til os</p><!-- /wp:paragraph -->', 'post_status' => 'publish', 'post_author' => $admin->ID ) );
+	pll_set_post_language( $block_en, 'en' );
+	pll_set_post_language( $block_da, 'da' );
+	pll_save_post_translations( array( 'en' => $block_en, 'da' => $block_da ) );
+	check( 2 === count( Source::translations( get_post( $block_en ) ) ), 'the reusable block pair is a real two-member Polylang group' );
+	delete_user_meta( $admin->ID, 'contentrain_bridge_job_1' );
+	$blocks = Jobs::create( array( 'types' => array( 'wp_block' ), 'scan_sources' => false ) );
+	for ( $i = 0; $i < 200 && 'review' !== $blocks['phase']; ++$i ) {
+		$blocks = Jobs::step( $blocks['id'], $blocks['step'] );
+	}
+	$block_decisions = array();
+	foreach ( Jobs::read( $blocks['id'] )['candidates'] as $candidate ) { $block_decisions[ $candidate['id'] ] = array( 'decision' => 'include', 'key' => $candidate['key'] ); }
+	$blocks = Jobs::review( $blocks['id'], $block_decisions, true );
+	for ( $i = 0; $i < 300 && 'ready' !== $blocks['phase']; ++$i ) {
+		$blocks = Jobs::step( $blocks['id'], $blocks['step'] );
+	}
+	$blocks_dir = Files::dir( $blocks['id'] ) . '/output';
+	$block_raw = json_decode( Files::read( $blocks_dir, 'bridge/raw-posts.json' ), true );
+	check( isset( $block_raw[ $block_en ] ) && 'en' === ( $block_raw[ $block_en ]['lang'] ?? null ), 'the reusable block is exported with its language' );
+	$block_pairs = file_exists( Files::path( $blocks_dir, 'bridge/language-pairs.json' ) ) ? (array) json_decode( Files::read( $blocks_dir, 'bridge/language-pairs.json' ), true ) : array();
+	check( ! isset( $block_pairs[ $block_en ] ) && ! isset( $block_pairs[ $block_da ] ), 'a translated wp_block writes no language pair' );
+	Files::remove( Files::dir( $blocks['id'] ) );
+	wp_delete_post( $block_en, true );
+	wp_delete_post( $block_da, true );
+	update_user_meta( $admin->ID, 'contentrain_bridge_job_1', $id );
+}
 
 // Snapshot consistency check on a separate job, preserving the finished artifact for external validation.
 delete_user_meta( $admin->ID, 'contentrain_bridge_job_1' );
