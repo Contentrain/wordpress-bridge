@@ -36,11 +36,12 @@ nothing to check. Start from `docker compose -f tests/compose.yml down -v` — a
 reused stack keeps the content of previous runs, which inflates the check and
 entry counts and makes a local number look unlike CI's.
 
-Last full clean run (0.7.1): 399 acceptance checks · Plugin Check 0 errors / 0
-warnings (the four WPML hook names, below, now carry a reasoned `phpcs:ignore`)
-· `contentrain validate` 14 models, 62 entries · canonical byte parity 55 files
+Last full clean run (0.8.0): 414 acceptance checks · 11 WPML checks against its
+faked filters (`tests/languages-wpml.php`, no WPML licence) · Plugin Check 0 errors / 0
+warnings (the WPML hook names, below, carry a reasoned `phpcs:ignore`)
+· `contentrain validate` 14 models, 64 entries · canonical byte parity 55 files
 · 5 documents carry frontmatter · handoff, reader and uninstall pass · archive
-33 runtime files · `composer lint` 0 errors / 0 warnings on 27 packaged files.
+34 runtime files · `composer lint` 0 errors / 0 warnings on 28 packaged files.
 
 ## The reader gate
 
@@ -164,8 +165,10 @@ and since 0.7.1 the WPML hook names do too, so the run shows none of them; `comp
 in CI lists every ignored sniff. Reviewers accept all three with a stated reason; do not silence them by
 weakening the check.
 
-- **Third-party hook names (4):** `wpml_default_language`, `wpml_post_language_details`, `wpml_element_trid` and
-  `wpml_get_element_translations` are WPML's own filters, and have to be spelled WPML's way.
+- **Third-party hook names (12, since 0.8.0):** `wpml_default_language`, `wpml_post_language_details`, `wpml_element_trid`,
+  `wpml_get_element_translations`, `wpml_active_languages`, `wpml_setting`, `wpml_object_id`, `wpml_is_rtl`,
+  `wpml_element_language_details`, `wpml_translate_single_string`, `wpml_current_language` and the
+  `wpml_switch_language` action are WPML's own hooks, and have to be spelled WPML's way.
 - **Direct database queries (20, DirectQuery/NoCaching):** the export's batch and count steps
   (`Jobs`: media, posts, terms, comments) read the next batch by id. A cached value would be stale by the next step.
   `Source::revision()` reads the change counter uncached on purpose.

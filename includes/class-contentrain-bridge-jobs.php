@@ -63,10 +63,24 @@ final class Jobs {
 		Models::file( $job, 'bridge/seo.json', Policy::json( Seo::document() ) );
 		Models::file( $job, 'bridge/redirects.json', Policy::json( Redirects::document() ) );
 		Models::file( $job, 'bridge/routing.json', Policy::json( Routing::document() ) );
+		// The languages and translated interface strings, as the multilingual plugin declares them; no file without one.
+		$languages = Languages::document();
+		if ( $languages ) {
+			Models::file( $job, 'bridge/languages.json', Policy::json( $languages ) );
+			Models::file( $job, 'bridge/language-strings.json', Policy::json( Languages::strings() ) );
+		}
 		Models::model( $job, 'site', 'singleton', 'site', 'Site', array( 'title' => array( 'type' => 'string' ), 'description' => array( 'type' => 'text' ), 'source_url' => array( 'type' => 'url' ) ), 'title', false );
 		Models::entry( $job, 'site', $locale, '', array( 'title' => $site['title'], 'description' => $site['description'], 'source_url' => $site['url'] ) );
 		$dropped_links = 0;
 		$menus = Exporter::menus( $dropped_links );
+		// A menu's language and, for Polylang, the locations it holds in that language (one menu per location per language).
+		$menu_languages = Languages::menus( $menus, $inventory['menu_locations'] );
+		foreach ( $menus as &$menu ) {
+			if ( isset( $menu['id'], $menu_languages[ (int) $menu['id'] ] ) ) {
+				$menu = array_merge( $menu, $menu_languages[ (int) $menu['id'] ] );
+			}
+		}
+		unset( $menu );
 		if ( $dropped_links ) {
 			self::warning( $job, array( 'source' => 'menus', 'reason' => 'menu-link-target-not-public: ' . $dropped_links . ' block navigation link(s) left out' ) );
 		}
@@ -674,6 +688,19 @@ final class Jobs {
 		}
 		foreach ( $rows as $row ) {
 			$id = (int) $row->term_taxonomy_id;
+			// A multilingual plugin's own bookkeeping (Polylang's `language`,
+			// `post_translations`, …) is not content in any form, raw included:
+			// what it records travels as `lang`, `language_pairs` and `term_pairs`.
+			if ( Languages::bookkeeping( $row->taxonomy ) ) {
+				Coverage::tally( $job, array( 'terms', $row->taxonomy ), 'excluded:language-bookkeeping' );
+				// Its meta too (Polylang keeps each language's string translations there; they travel as `strings`).
+				foreach ( get_term_meta( (int) $row->term_id ) as $values ) {
+					Coverage::tally( $job, array( 'term_meta' ), 'excluded:language-bookkeeping', count( (array) $values ) );
+				}
+				$job['cursor'] = $id;
+				self::progressed( $job, $row->name );
+				continue;
+			}
 			// A plugin that registers a taxonomy only while active (Polylang's
 			// `language`, `term_language`, `term_translations`) can leave its rows
 			// behind after deactivation; `get_term_by()` cannot resolve a term
@@ -695,6 +722,7 @@ final class Jobs {
 			// multilingual plugin's own bookkeeping) is not content.
 			if ( get_taxonomy( $t->taxonomy )->public ) {
 				Models::term( $job, $t, $job['default_locale'] );
+				Models::term_pair( $job, $t );
 				Coverage::tally( $job, array( 'terms', $t->taxonomy ), 'exported' );
 				foreach ( get_term_meta( $t->term_id ) as $key => $values ) {
 					Coverage::tally( $job, array( 'term_meta' ), Policy::sensitive( $key ) ? 'excluded:sensitive-key' : 'exported', count( (array) $values ) );

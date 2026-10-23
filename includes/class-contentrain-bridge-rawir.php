@@ -51,8 +51,17 @@ final class Rawir {
 			$field( 'menus', $file( 'bridge/raw-menus.json' ) ?? '[]' );
 			$field( 'language_pairs' );
 			self::rows( $stream, $job, 'bridge/language-pairs.json', false );
+			// A multilingual site's languages, term translation groups and translated interface strings (proposed RawIR
+			// fields), only when a multilingual plugin declared them.
+			$languages = $file( 'bridge/languages.json' );
+			if ( null !== $languages ) {
+				$field( 'languages', $languages );
+				$field( 'term_pairs' );
+				self::rows( $stream, $job, 'bridge/term-pairs.json', false );
+				$field( 'strings', $file( 'bridge/language-strings.json' ) ?? '[]' );
+			}
 			$field( 'options', $file( 'bridge/options.json' ) ?? '{}' );
-			// RawAcfOptionsPage[]: each ACF Options Page's site-wide fields, default language only.
+			// RawAcfOptionsPage[]: each ACF Options Page's site-wide fields; with a translation plugin, the other languages' copies in `translations`.
 			$acf_options = $file( 'bridge/acf-options.json' );
 			if ( null !== $acf_options ) {
 				$field( 'acf_options', $acf_options );

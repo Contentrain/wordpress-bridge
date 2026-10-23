@@ -4,7 +4,7 @@ Tags: export, migration, headless, astro, content
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 0.7.1
+Stable tag: 0.8.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -89,6 +89,17 @@ The active theme and child theme, and optionally the source files of active plug
 The plugin stores export ownership and a source revision marker. It sends nothing anywhere on its own; an export leaves the site only when you download it, deliver it to GitHub, or authorize a program to read it through the REST export API with an administrator's application password or a Contentrain Migrate connection key. For a connection key the plugin stores a fingerprint of the key (never the key), the administrator who created it, the Migrate order it is paired with, the list of exports it started, and the time and IP address of its last use; creating a new key or revoking it, and uninstalling the plugin, removes them. A request made with the key runs with no WordPress user. Export files are written to a private, per-site directory outside the web root that only the server can read, are removed on uninstall, and expire after a day. An export can contain site content, authors' display names and WordPress usernames, selected post metadata and, if you or the program you authorized chose it, privacy-minimized comments of every status (approved, pending, spam and trash) and draft, pending, scheduled, private and password-protected posts (never the password). A program authorized through the REST API chooses the scope; Contentrain Migrate asks for private content. Treat a downloaded export as you would a WordPress export file. If you deliver to GitHub, the exported content is sent to GitHub under the account whose token you provide; choose a private repository when the export includes draft or private content.
 
 == Changelog ==
+
+= 0.8.0 =
+
+* A multilingual site's languages now travel to Contentrain Migrate as Polylang or WPML declares them: each language's code, locale, tag, name, home address, direction and order, which one is the default, the language's own front page and posts page, and how the site's addresses carry the language (a directory, a subdomain, a domain, or a URL parameter, plus whether the default language is left out of them). Every value is the plugin's own, unchanged.
+* Categories, tags and other translated terms now carry their language, and a term and its translations travel as one group, as posts and pages already did. A language a group lacks is named.
+* Polylang's and WPML's own bookkeeping taxonomies (which post is in which language, which ones translate each other) are no longer exported as terms beside your real categories. What they record travels as each post's and term's language and as the translation groups.
+* Menus carry their language, and with Polylang, the theme locations they are shown in for that language.
+* Interface strings the plugin translates travel with their translations per language: the site title and tagline, and, with Polylang, the strings themes and plugins register in its Strings screen.
+* With WPML + ACFML or ACF Options for Polylang, an ACF Options Page's other-language values now travel beside its default-language ones. The Contentrain store keeps its default-language values, as before.
+* A post's language is now Polylang's or WPML's own code, the same one its translation group uses. With neither plugin nothing changes.
+* WPML is supported through WPML's own documented filters. There is no WPML licence in this plugin's tests: the WPML path is tested against those filters' documented answers, not against a live WPML site.
 
 = 0.7.1 =
 

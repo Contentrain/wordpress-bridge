@@ -40,6 +40,14 @@ export function prepareMigrate(source, destination) {
     comments: values('bridge/raw-comments.json'), menus: json('bridge/raw-menus.json', []),
     language_pairs: values('bridge/language-pairs.json'), options: json('bridge/options.json', {}),
   }
+  // A multilingual site's languages, term translation groups and translated interface strings (proposed RawIR fields),
+  // only when a multilingual plugin declared them.
+  const languages = json('bridge/languages.json', null)
+  if (languages) {
+    raw.languages = languages
+    raw.term_pairs = values('bridge/term-pairs.json')
+    raw.strings = json('bridge/language-strings.json', [])
+  }
   // RawIR.redirects is RawRedirect[]: what the site serves; redirects_excluded what it holds but does not serve
   // as a plain redirect, each with its reason. Sources and counts stay in bridge/redirects.json.
   const redirects = json('bridge/redirects.json', { redirects: [], excluded: [] })
@@ -50,7 +58,7 @@ export function prepareMigrate(source, destination) {
   if (seo) raw.seo = { ...seo, entries: json('bridge/seo-entries.json', {}) }
   const routing = json('bridge/routing.json', null)
   if (routing) raw.routing = routing
-  // RawAcfOptionsPage[]: each ACF Options Page's site-wide fields, default language only.
+  // RawAcfOptionsPage[]: each ACF Options Page's site-wide fields; with a translation plugin, the other languages' copies in `translations`.
   const acfOptions = json('bridge/acf-options.json', null)
   if (acfOptions) raw.acf_options = acfOptions
   // B-08: every interface-text candidate with its one outcome; not yet a RawIR field (proposed).
