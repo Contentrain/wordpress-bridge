@@ -36,6 +36,9 @@ nothing to check. Start from `docker compose -f tests/compose.yml down -v` — a
 reused stack keeps the content of previous runs, which inflates the check and
 entry counts and makes a local number look unlike CI's.
 
+0.8.1 (local, clean stack): 428 acceptance checks · 11 WPML checks · `npm run test:coverage` passes · Plugin Check
+2.1.0 0 errors / 0 warnings · `composer lint` 0 / 0 on 28 files; the rest below is 0.8.0's run.
+
 Last full clean run (0.8.0): 414 acceptance checks · 11 WPML checks against its
 faked filters (`tests/languages-wpml.php`, no WPML licence) · Plugin Check 0 errors / 0
 warnings (the WPML hook names, below, carry a reasoned `phpcs:ignore`)
