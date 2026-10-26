@@ -68,7 +68,7 @@ final class Remote {
 		) );
 		// Migrate closes its own key when the order is done (BR-27).
 		register_rest_route( 'contentrain-bridge/v1', '/key', array( 'methods' => 'DELETE', 'permission_callback' => array( Key::class, 'permitted_self' ), 'callback' => array( Key::class, 'revoke_self' ), 'args' => self::key_args() ) );
-		register_rest_route( 'contentrain-bridge/v1', '/exports/(?P<id>[a-f0-9]{32})/advance', array( 'methods' => 'POST', 'permission_callback' => $permitted, 'callback' => array( self::class, 'advance' ), 'args' => self::key_args() ) );
+		register_rest_route( 'contentrain-bridge/v1', '/exports/(?P<id>[a-f0-9]{32})/advance', array( 'methods' => 'POST', 'permission_callback' => array( self::class, 'permitted_export' ), 'callback' => array( self::class, 'advance' ), 'args' => self::key_args() ) );
 	}
 
 	/**
@@ -142,6 +142,29 @@ final class Remote {
 			return self::error( 'auth_missing', 'No sign-in reached WordPress. If the application password was sent, the host removed the Authorization header: create a connection key on the Contentrain Bridge screen and send it as X-Contentrain-Key.', 401 );
 		}
 		return Admin::permitted();
+	}
+
+	/**
+	 * The permission of every route with an export `{id}` in its path: `permitted()`, then the export must be the
+	 * caller's (`Jobs::owned()`: with a key, one this key started; otherwise the signed-in user's). Anyone else's, or
+	 * none, is 404, never told apart. The handlers still read it with `Jobs::read()`, which also tells an expired one.
+	 */
+	public static function permitted_export( $request ) {
+		$permitted = self::permitted( $request );
+		if ( true !== $permitted ) {
+			return $permitted;
+		}
+		// The export in the route itself, never a body or query field of the same name.
+		$id = (string) ( $request->get_url_params()['id'] ?? '' );
+		try {
+			$job = Jobs::state( $id );
+		} catch ( \Throwable $missing ) {
+			$job = null;
+		}
+		if ( ! Jobs::owned( $job ) ) {
+			return self::error( 'not_found', Key::active() ? 'No such export for this connection key.' : 'No such export for this user.', 404 );
+		}
+		return true;
 	}
 
 	public static function about() {

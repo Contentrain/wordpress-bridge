@@ -22,6 +22,10 @@ final class Languages {
 	 * or term is in which language, which ones translate each other. Never
 	 * content; what they say travels as `lang`, `language_pairs` and `term_pairs`.
 	 */
+	/** The only options `strings()` reads untranslated: the site title and tagline, never a name found in the database. */
+	const STRING_OPTIONS = array( 'blogname', 'blogdescription' );
+	/** WPML String Translation's own names for `STRING_OPTIONS`. */
+	const WPML_STRING_NAMES = array( 'blogname' => 'Blog Title', 'blogdescription' => 'Tagline' );
 	const BOOKKEEPING = array( 'language', 'term_language', 'post_translations', 'term_translations', 'translation_priority' );
 
 	/** `polylang`, `wpml`, or null when neither manages the site's languages. */
@@ -271,7 +275,7 @@ final class Languages {
 					$registered[ (string) $item['string'] ] = $item;
 				}
 			}
-			foreach ( array( 'blogname', 'blogdescription' ) as $option ) {
+			foreach ( self::STRING_OPTIONS as $option ) {
 				$value = self::untranslated_option( $option );
 				if ( '' !== $value && ! isset( $registered[ $value ] ) ) {
 					$registered[ $value ] = array( 'name' => $option, 'context' => 'WordPress' );
@@ -294,8 +298,8 @@ final class Languages {
 			}
 			unset( $item );
 		} elseif ( 'wpml' === $plugin ) {
-			// WPML String Translation's own names for the two WordPress options.
-			foreach ( array( 'blogname' => 'Blog Title', 'blogdescription' => 'Tagline' ) as $option => $name ) {
+			foreach ( self::STRING_OPTIONS as $option ) {
+				$name = self::WPML_STRING_NAMES[ $option ];
 				$value = self::untranslated_option( $option );
 				if ( '' === $value ) {
 					continue;
@@ -347,9 +351,12 @@ final class Languages {
 
 	/**
 	 * An option as stored, before a multilingual plugin's `option_{name}` filter
-	 * translates it into whatever language happens to be current.
+	 * translates it into whatever language happens to be current. Only `STRING_OPTIONS`; any other name is ''.
 	 */
 	private static function untranslated_option( $option ) {
+		if ( ! in_array( $option, self::STRING_OPTIONS, true ) ) {
+			return '';
+		}
 		$stored = wp_load_alloptions();
 		return (string) ( $stored[ $option ] ?? get_option( $option ) );
 	}

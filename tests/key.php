@@ -183,6 +183,9 @@ $state = json_decode( Files::read( Files::dir( $b ), 'state.json' ), true );
 check( $admin->ID === (int) $state['owner'] && 'app_password' === $state['via'] && array( $b ) === (array) get_user_meta( $admin->ID, $meta, true ), 'its state says via app_password, and it is listed in the administrator\'s user meta, not the key\'s option' );
 list( $status, $body ) = call( 'POST', "/exports/$b/advance", array( 'contentrain_pairing' => $pair ), $key );
 check( 404 === $status && 'bridge_not_found' === code( $body ), 'the key cannot advance it: 404' );
+list( $get_status, $get_body ) = call( 'GET', "/exports/$b", array( 'contentrain_pairing' => $pair ), $key );
+list( $read_status, $read_body ) = call( 'POST', "/exports/$b/read", array( 'contentrain_pairing' => $pair ), $key, 'json' );
+check( 404 === $get_status && 'bridge_not_found' === code( $get_body ) && 404 === $read_status && 'bridge_not_found' === code( $read_body ), 'nor read it, by GET or by POST /read: 404 at the route' );
 list( $status, $index ) = call( 'GET', '/exports', array( 'contentrain_pairing' => $pair ), $key );
 check( 200 === $status && array( $a ) === array_column( $index['exports'], 'id' ), 'GET /exports with the key lists the key\'s export only' );
 

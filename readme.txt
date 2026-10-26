@@ -4,7 +4,7 @@ Tags: export, migration, headless, astro, content
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 0.8.1
+Stable tag: 0.8.2
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -89,6 +89,11 @@ The active theme and child theme, and optionally the source files of active plug
 The plugin stores export ownership and a source revision marker. It sends nothing anywhere on its own; an export leaves the site only when you download it, deliver it to GitHub, or authorize a program to read it through the REST export API with an administrator's application password or a Contentrain Migrate connection key. For a connection key the plugin stores a fingerprint of the key (never the key), the administrator who created it, the Migrate order it is paired with, the list of exports it started, and the time and IP address of its last use; creating a new key or revoking it, and uninstalling the plugin, removes them. A request made with the key runs with no WordPress user. Export files are written to a private, per-site directory outside the web root that only the server can read, are removed on uninstall, and expire after a day. An export can contain site content, authors' display names and WordPress usernames, selected post metadata and, if you or the program you authorized chose it, privacy-minimized comments of every status (approved, pending, spam and trash) and draft, pending, scheduled, private and password-protected posts (never the password). A program authorized through the REST API chooses the scope; Contentrain Migrate asks for private content. Treat a downloaded export as you would a WordPress export file. If you deliver to GitHub, the exported content is sent to GitHub under the account whose token you provide; choose a private repository when the export includes draft or private content.
 
 == Changelog ==
+
+= 0.8.2 =
+
+* Every REST route with an export id in its path checks, in its own permission callback, that the export is the caller's (the connection key's own, or the signed-in user's), and answers 404 otherwise. This replaces the id check that sat inside the connection key's authorization, which covered key requests only; the handlers still read the export through the same ownership check. Nothing a caller can do changes.
+* The site title and tagline are the only options read untranslated for language strings, from a fixed list; any other name reads as empty. Same output as 0.8.1.
 
 = 0.8.1 =
 

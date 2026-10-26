@@ -224,11 +224,7 @@ final class Key {
 			update_option( self::OPTION, $record, false );
 		}
 		update_option( self::SEEN, array( 'at' => time(), 'ip' => $ip ), false );
-		// The export in the route itself, never a body or query field of the same name.
-		$id = $request->get_url_params()['id'] ?? null;
-		if ( null !== $id && ! in_array( $id, self::exports(), true ) ) {
-			return new \WP_Error( 'bridge_not_found', 'No such export for this connection key.', array( 'status' => 404 ) );
-		}
+		// A route with an export `{id}` checks that it is this key's in `Remote::permitted_export()`.
 		self::$active = true;
 		return true;
 	}

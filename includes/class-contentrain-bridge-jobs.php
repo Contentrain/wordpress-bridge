@@ -120,8 +120,13 @@ final class Jobs {
 		return 'key' !== $via && get_current_user_id() > 0 && (int) $job['owner'] === get_current_user_id();
 	}
 
+	/** An export's state as stored, whoever owns it: `read()` and `Remote::permitted_export()` check it with `owned()`. */
+	public static function state( $id ) {
+		return json_decode( Files::read( Files::dir( $id ), 'state.json' ), true );
+	}
+
 	public static function read( $id ) {
-		$job = json_decode( Files::read( Files::dir( $id ), 'state.json' ), true );
+		$job = self::state( $id );
 		if ( ! self::owned( $job ) ) {
 			throw new \RuntimeException( 'Export is not owned by the current user.' );
 		}
