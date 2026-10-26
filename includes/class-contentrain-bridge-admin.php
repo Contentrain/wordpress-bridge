@@ -392,7 +392,7 @@ final class Admin {
 	}
 
 	public static function routes() {
-		$read = array( 'permission_callback' => array( Remote::class, 'permitted' ), 'callback' => array( self::class, 'read_export' ), 'args' => self::read_args() );
+		$read = array( 'permission_callback' => array( Remote::class, 'permitted_export' ), 'callback' => array( self::class, 'read_export' ), 'args' => self::read_args() );
 		register_rest_route( 'contentrain-bridge/v1', '/exports/(?P<id>[a-f0-9]{32})', array( 'methods' => 'GET' ) + $read );
 		// The same read for a caller whose key travels in the body (BR-27): a GET has none.
 		register_rest_route( 'contentrain-bridge/v1', '/exports/(?P<id>[a-f0-9]{32})/read', array( 'methods' => 'POST' ) + $read );
