@@ -36,6 +36,11 @@ nothing to check. Start from `docker compose -f tests/compose.yml down -v` — a
 reused stack keeps the content of previous runs, which inflates the check and
 entry counts and makes a local number look unlike CI's.
 
+0.8.3 (local, clean stack): 420 acceptance checks (same as 0.8.2) · 11 WPML checks · `npm run test:text` 74 checks
+(new: admin-only, minified and code-token exclusions, bulk decision) · `npm run test:coverage` passes · Plugin Check 0 errors /
+0 warnings · `composer lint` 0 / 0 on 28 files · `contentrain validate` 14 models, 65 entries · canonical byte parity 55 files
+· handoff 13 · uninstall passes.
+
 0.8.2 (local, clean stack): 420 acceptance checks (origin/main at 0.8.1 gives the same 420 on the same stack) · 11 WPML
 checks · `npm run test:coverage` passes (key 76) · Plugin Check 0 errors / 0 warnings · `composer lint` 0 / 0 on 28 files
 · `contentrain validate` 14 models, 65 entries · canonical byte parity 55 files · handoff 13 · uninstall passes.

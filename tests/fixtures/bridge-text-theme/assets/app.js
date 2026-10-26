@@ -6,3 +6,4 @@ const api = 'https://example.org/api/v1';
 const token = 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ab';
 const year = '2026';
 document.querySelector(selector)?.setAttribute(attr, labels.more);
+const states = ['collapsing', 'fade', 'pswp__img'];

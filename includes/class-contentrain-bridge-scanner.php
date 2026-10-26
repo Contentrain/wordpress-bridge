@@ -24,6 +24,17 @@ final class Scanner {
 	/** Excluded occurrences listed one by one per file; beyond this they are counted by reason. */
 	const EXCLUDED_LISTED = 500;
 
+	/**
+	 * Source files whose text only an administrator sees: a directory named
+	 * `admin`, and the files themes bundle for options panels, plugin
+	 * activation and meta boxes (Redux `options-init.php`, TGM
+	 * `class-tgm-plugin-activation.php`, `theme-options.php`…).
+	 */
+	const ADMIN_PATH = '#(^|/)admin/|(^|/)[^/]*(options-init|theme-options|option-tree|redux|tgm|plugin-activation|meta-?box)[^/]*\.php$#i';
+
+	/** What the code of an options panel or a plugin installer calls; a theme's templates never do. */
+	const ADMIN_CODE = '/\b(class\s+TGM_Plugin_Activation|tgmpa\s*\(|Redux::set[A-Za-z]*\s*\(|new\s+ReduxFramework\b|Kirki::add_[a-z_]+\s*\(|add_(menu|submenu|theme|options)_page\s*\()/';
+
 	public static function files( $plugins = false ) {
 		$roots = array( get_stylesheet_directory(), get_template_directory() );
 		if ( $plugins ) {
@@ -79,6 +90,7 @@ final class Scanner {
 		$hash = hash( 'sha256', $source );
 		$found = array();
 		$extension = strtolower( pathinfo( $file, PATHINFO_EXTENSION ) );
+		$scope = self::scope( $label, $source, $extension );
 		if ( 'php' === $extension ) {
 			$found = self::php( $source, $label, $locale, $hash );
 		} elseif ( 'html' === $extension ) {
@@ -91,6 +103,10 @@ final class Scanner {
 			}
 		}
 		foreach ( $found as $occurrence ) {
+			// A file no visitor sees: every string in it is accounted for, none offered for review.
+			if ( null !== $scope && ! isset( $occurrence['reason'] ) ) {
+				$occurrence = self::excluded( $occurrence['value'], $occurrence['source'], $occurrence['line'], $occurrence['locale'], $occurrence['context'], $occurrence['kind'], $scope );
+			}
 			if ( isset( $occurrence['reason'] ) ) {
 				$result['excluded_counts'][ $occurrence['reason'] ] = ( $result['excluded_counts'][ $occurrence['reason'] ] ?? 0 ) + 1;
 				if ( count( $result['excluded'] ) < self::EXCLUDED_LISTED ) {
@@ -101,6 +117,23 @@ final class Scanner {
 			}
 		}
 		return $result;
+	}
+
+	/**
+	 * Why no visitor sees any text of this file, or null: `admin-only` for an
+	 * options panel, a plugin installer or an admin directory (functions.php
+	 * mixes admin and front-end code, so it never counts as admin-only), and
+	 * `minified` for a JavaScript bundle (a `.min.js`, or a line over 1,000
+	 * characters), whose literals are class names and selectors in the main.
+	 */
+	private static function scope( $label, $source, $extension ) {
+		if ( 'php' === $extension && 'functions.php' !== basename( $label ) && ( preg_match( self::ADMIN_PATH, $label ) || preg_match( self::ADMIN_CODE, $source ) ) ) {
+			return 'admin-only';
+		}
+		if ( in_array( $extension, array( 'js', 'jsx', 'tsx' ), true ) && ( preg_match( '/\.min\.js$/i', $label ) || preg_match( '/[^\n]{1000}/', $source ) ) ) {
+			return 'minified';
+		}
+		return null;
 	}
 
 	/** PHP: gettext calls (literal or not), literal HTML between tags, and `echo`/`print` of a string literal. */
@@ -259,8 +292,12 @@ final class Scanner {
 		return $out;
 	}
 
-	/** Why a string is not interface text, or null when it is. */
-	public static function classify( $text ) {
+	/**
+	 * Why a string is not interface text, or null when it is. `$kind` `js`: a
+	 * JavaScript literal, where one lowercase word ("fade", "collapsing") is a
+	 * class name, an event or a key, not something a visitor reads.
+	 */
+	public static function classify( $text, $kind = null ) {
 		$text = trim( (string) $text );
 		if ( '' === $text ) {
 			return 'empty';
@@ -286,17 +323,20 @@ final class Scanner {
 			return preg_match( '/%(\d+\$)?[sdf]/', $text ) ? 'placeholder-only' : 'no-letters';
 		}
 		// An identifier, a hook or handle, a CSS class or a file name: one code-shaped token.
-		if ( ! preg_match( '/\s/u', $text ) && ( preg_match( '/^[.#][a-z_][\w-]*$/i', $text ) || preg_match( '/^[a-z0-9]+([_\-.:\/][a-z0-9]+)+$/i', $text ) || preg_match( '/^[a-z]+[A-Z][A-Za-z0-9]*$/', $text ) || preg_match( '/[{}();=<>$\[\]]/', $text ) ) ) {
+		if ( ! preg_match( '/\s/u', $text ) && ( preg_match( '/^[.#][a-z_][\w-]*$/i', $text ) || preg_match( '/^[a-z0-9]+([_\-.:\/]+[a-z0-9]+)+$/i', $text ) || preg_match( '/^[a-z]+[A-Z][A-Za-z0-9]*$/', $text ) || preg_match( '/[{}();=<>$\[\]]/', $text ) ) ) {
 			return 'code';
 		}
 		if ( preg_match( '/[{};]\s*$|^\s*(function|return|var|const|let|if)\b|=>/', $text ) ) {
+			return 'code';
+		}
+		if ( 'js' === $kind && preg_match( '/^[a-z][a-z0-9_-]*$/', $text ) ) {
 			return 'code';
 		}
 		return null;
 	}
 
 	private static function candidate( $text, $source, $line, $locale, $context, $hash, $kind ) {
-		$reason = self::classify( $text );
+		$reason = self::classify( $text, $kind );
 		if ( null !== $reason ) {
 			return self::excluded( $text, $source, $line, $locale, $context, $kind, $reason );
 		}

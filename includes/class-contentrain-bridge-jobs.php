@@ -867,10 +867,17 @@ final class Jobs {
 		++$job['cursor'];
 	}
 
-	public static function review( $id, $decisions, $finish = false ) {
-		return self::mutate( $id, static function ( &$job ) use ( $decisions, $finish ) {
+	/**
+	 * Per-candidate decisions, then `$all` (`include` or `exclude`) for every
+	 * candidate still waiting on one, on every page, then `$finish`.
+	 */
+	public static function review( $id, $decisions, $finish = false, $all = null ) {
+		return self::mutate( $id, static function ( &$job ) use ( $decisions, $finish, $all ) {
 			if ( 'review' !== $job['phase'] ) {
 				throw new \RuntimeException( 'Export is not awaiting model/text review.' );
+			}
+			if ( null !== $all && ! in_array( $all, array( 'include', 'exclude' ), true ) ) {
+				throw new \RuntimeException( 'Invalid text review decision.' );
 			}
 			foreach ( $decisions as $id => $decision ) {
 				if ( ! isset( $job['candidates'][ $id ] ) || ! in_array( $decision['decision'] ?? '', array( 'include', 'exclude' ), true ) ) {
@@ -889,6 +896,13 @@ final class Jobs {
 				$candidate['decision'] = $decision['decision'];
 				unset( $candidate );
 			}
+			foreach ( $job['candidates'] as &$candidate ) {
+				// Only a dictionary transfer waits on a person, never a secret or a dynamic argument.
+				if ( null !== $all && 'review' === $candidate['decision'] ) {
+					$candidate['decision'] = $all;
+				}
+			}
+			unset( $candidate );
 			if ( $finish ) {
 				$seen = array();
 				$settings = array();

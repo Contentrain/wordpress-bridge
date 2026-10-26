@@ -280,9 +280,9 @@
     summary.textContent = sprintf(__('%1$d sources; %2$d do not add up; %3$d records cannot be read by this export.', 'contentrain-bridge'), report.totals.sources, report.totals.unbalanced, report.totals.unsupported);
     $('coverage').replaceChildren(summary, table);
   }
-  async function saveReview(finish = false) {
+  async function saveReview(finish = false, all = undefined) {
     const decisions = Object.fromEntries(candidates.filter(c => c.decision !== 'review').map(c => [c.id, { key: c.key, decision: c.decision }]));
-    job = await api({ op: 'review', id: job.id, decisions, finish });
+    job = await api({ op: 'review', id: job.id, decisions, finish, all });
     render();
   }
   function action(id, fn) {
@@ -312,6 +312,9 @@
   action('next', async () => { await saveReview(); offset += 30; await loadCandidates(); });
   action('prev', async () => { await saveReview(); offset = Math.max(0, offset - 30); await loadCandidates(); });
   action('finish', async () => { await saveReview(true); await loop(); });
+  // Every candidate still waiting on a decision, on every page; what this page already says is saved first.
+  action('include-all', async () => { await saveReview(false, 'include'); await loadCandidates(); });
+  action('exclude-all', async () => { await saveReview(false, 'exclude'); await loadCandidates(); });
   action('zip', async () => {
     let result;
     const advanced = stall(__('archive', 'contentrain-bridge'), 'zip');
@@ -371,7 +374,12 @@
         const row = document.createElement('div'); row.className = 'cr-type';
         const label = document.createElement('label');
         const input = document.createElement('input'); input.type = 'checkbox'; input.value = type; input.checked = true;
-        label.append(input, document.createTextNode(`${info.label} (${Object.values(info.counts).reduce((a, b) => a + b, 0)})`));
+        // What the export carries by default: the published entries (media: its files, status inherit). Private ones only when asked for.
+        const published = Number(info.counts[type === 'attachment' ? 'inherit' : 'publish']) || 0;
+        const hidden = type === 'attachment' ? 0 : Number(info.counts.private) || 0;
+        label.append(input, document.createTextNode(hidden
+          ? sprintf(__('%1$s (%2$d published, %3$d private)', 'contentrain-bridge'), info.label, published, hidden)
+          : sprintf(__('%1$s (%2$d published)', 'contentrain-bridge'), info.label, published)));
         const name = document.createElement('input'); name.type = 'text'; name.dataset.type = type; name.value = info.label; name.setAttribute('aria-label', sprintf(__('Model name for %s', 'contentrain-bridge'), type));
         row.append(label, name); $('types').append(row);
       }

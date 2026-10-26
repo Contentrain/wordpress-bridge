@@ -130,12 +130,14 @@ final class Admin {
 			<section id="cr-review" class="card cr-card" hidden>
 				<h2 id="cr-review-title" class="cr-card-title" tabindex="-1"><span class="dashicons dashicons-edit" aria-hidden="true"></span> <?php esc_html_e( '2. Review models and interface text', 'contentrain-bridge' ); ?></h2>
 				<div id="cr-models"></div>
-				<p><?php esc_html_e( 'Review each candidate in context. Change the key to group equivalent messages. Exclude code constants and unrelated text. Source code is never patched by this export.', 'contentrain-bridge' ); ?></p>
+				<p><?php esc_html_e( 'Review each candidate in context, or decide every undecided one at once. Change the key to group equivalent messages. Exclude code constants and unrelated text. Text only administrators see (options panels, plugin installers) and minified scripts is left out and listed in the export. Source code is never patched by this export.', 'contentrain-bridge' ); ?></p>
 				<div id="cr-candidates"></div>
 				<p class="cr-actions">
 					<button type="button" id="cr-save-review" class="button"><?php esc_html_e( 'Save this page', 'contentrain-bridge' ); ?></button>
 					<button type="button" id="cr-prev" class="button"><?php esc_html_e( 'Previous', 'contentrain-bridge' ); ?></button>
 					<button type="button" id="cr-next" class="button"><?php esc_html_e( 'Next', 'contentrain-bridge' ); ?></button>
+					<button type="button" id="cr-include-all" class="button"><?php esc_html_e( 'Include all undecided', 'contentrain-bridge' ); ?></button>
+					<button type="button" id="cr-exclude-all" class="button"><?php esc_html_e( 'Exclude all undecided', 'contentrain-bridge' ); ?></button>
 					<button type="button" id="cr-finish" class="button button-primary"><?php esc_html_e( 'Validate and finalize', 'contentrain-bridge' ); ?></button>
 				</p>
 			</section>
@@ -259,6 +261,8 @@ final class Admin {
 				}
 			}
 		}
+		// all: one decision for every candidate still waiting on one (Jobs::review checks it).
+		$in['all'] = isset( $_POST['all'] ) ? sanitize_key( wp_unslash( $_POST['all'] ) ) : '';
 		// The token is a credential: whitespace-free and bounded, which GitHub::start() checks again; never logged or stored.
 		$in['token'] = isset( $_POST['token'] ) ? trim( sanitize_text_field( wp_unslash( $_POST['token'] ) ) ) : '';
 		$in['repository'] = isset( $_POST['repository'] ) ? sanitize_text_field( wp_unslash( $_POST['repository'] ) ) : '';
@@ -287,9 +291,13 @@ final class Admin {
 				case 'step': $result = Jobs::advance( $id, $in['step'] ); break;
 				case 'candidates':
 					$job = Jobs::read( $id );
-					$result = array_slice( array_values( $job['candidates'] ), max( 0, $in['offset'] ), 30 );
+					// The ones a person decides first: a dictionary transfer, in a fixed order a saved decision does not reshuffle.
+					$asked = static function ( $c ) { return 'transfer' === $c['outcome'] && 0 === strpos( $c['target'] ?? '', 'dictionary:' ); };
+					$list = array_values( $job['candidates'] );
+					$list = array_merge( array_filter( $list, $asked ), array_filter( $list, static function ( $c ) use ( $asked ) { return ! $asked( $c ); } ) );
+					$result = array_slice( $list, max( 0, $in['offset'] ), 30 );
 					break;
-				case 'review': $result = Jobs::review( $id, $in['decisions'], $in['finish'] ); break;
+				case 'review': $result = Jobs::review( $id, $in['decisions'], $in['finish'], '' === $in['all'] ? null : $in['all'] ); break;
 				case 'github-start':
 					if ( ! is_ssl() && 'local' !== wp_get_environment_type() ) {
 						throw new \RuntimeException( 'Use HTTPS in WordPress administration before sending a GitHub credential.' );
