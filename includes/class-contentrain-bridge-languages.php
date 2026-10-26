@@ -22,11 +22,11 @@ final class Languages {
 	 * or term is in which language, which ones translate each other. Never
 	 * content; what they say travels as `lang`, `language_pairs` and `term_pairs`.
 	 */
+	const BOOKKEEPING = array( 'language', 'term_language', 'post_translations', 'term_translations', 'translation_priority' );
 	/** The only options `strings()` reads untranslated: the site title and tagline, never a name found in the database. */
 	const STRING_OPTIONS = array( 'blogname', 'blogdescription' );
 	/** WPML String Translation's own names for `STRING_OPTIONS`. */
 	const WPML_STRING_NAMES = array( 'blogname' => 'Blog Title', 'blogdescription' => 'Tagline' );
-	const BOOKKEEPING = array( 'language', 'term_language', 'post_translations', 'term_translations', 'translation_priority' );
 
 	/** `polylang`, `wpml`, or null when neither manages the site's languages. */
 	public static function plugin() {
