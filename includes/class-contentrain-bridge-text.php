@@ -144,6 +144,8 @@ final class Text {
 			$candidates[ $id ]['occurrences'][] = array_intersect_key( $o, array_flip( array( 'kind', 'source', 'line' ) ) );
 			if ( isset( $o['reason'] ) ) {
 				$candidates[ $id ]['reasons'][ $o['reason'] ] = true;
+			} else {
+				$candidates[ $id ]['shown'] = true;
 			}
 			if ( isset( $o['target'] ) ) {
 				$candidates[ $id ]['targets'][ $o['target'] ] = true;
@@ -153,6 +155,10 @@ final class Text {
 			// One outcome per candidate. Text and context are the same across its
 			// occurrences, so a reason found on one applies to all; every reason is kept.
 			$reasons = array_keys( $c['reasons'] );
+			// Where a string sits, not what it is: the same words in a template a visitor sees keep them.
+			if ( ! empty( $c['shown'] ) ) {
+				$reasons = array_values( array_diff( $reasons, array( 'admin-only', 'minified' ) ) );
+			}
 			$targets = array_keys( $c['targets'] );
 			sort( $reasons );
 			sort( $targets );
@@ -168,7 +174,7 @@ final class Text {
 			$c['line'] = $c['occurrences'][0]['line'] ?? 0;
 			$c['kind'] = $c['occurrences'][0]['kind'];
 			$c['decision'] = 'transfer' === $c['outcome'] && 0 === strpos( $c['target'], 'dictionary:' ) ? 'review' : ( 'transfer' === $c['outcome'] ? 'include' : 'exclude' );
-			unset( $c['reasons'], $c['targets'] );
+			unset( $c['reasons'], $c['targets'], $c['shown'] );
 		}
 		unset( $c );
 		// What a page renders is often a source string rendered: link it to that

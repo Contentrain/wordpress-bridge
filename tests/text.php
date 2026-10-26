@@ -133,6 +133,12 @@ $expect = array(
 	array( 'https://example.org/api/v1', 'js', 'exclude', 'url' ),
 	array( '2026', 'js', 'exclude', 'number' ),
 	array( '[redacted]', 'js', 'exclude', 'secret' ),
+	array( 'collapsing', 'js', 'exclude', 'code' ),
+	array( 'fade', 'js', 'exclude', 'code' ),
+	array( 'pswp__img', 'js', 'exclude', 'code' ),
+	array( 'Close (Esc)', 'js', 'exclude', 'minified' ),
+	array( 'Control the top and bottom padding of the header.', 'gettext', 'exclude', 'admin-only' ),
+	array( 'Install Required Plugins', 'gettext', 'exclude', 'admin-only' ),
 	array( '$label', 'gettext', 'exclude', 'dynamic' ),
 	array( '%s', 'gettext', 'exclude', 'placeholder-only' ),
 	array( 'https://example.org/privacy', 'a', 'exclude', 'url' ),
@@ -187,6 +193,7 @@ check( (bool) preg_match( '/^ui\.button\.menu-[0-9a-f]{6}$/', $find( 'Menu', 'bu
 // ---- Finish: dictionary, Customizer singleton, the inventory file; no secret anywhere. ----
 $decisions = array();
 foreach ( $candidates as $id => $c ) { if ( 'review' === $c['decision'] ) { $decisions[ $id ] = array( 'decision' => 'include', 'key' => $c['key'] ); } }
+check( ! array_filter( $candidates, static function ( $c ) { return 'review' === $c['decision'] && in_array( $c['reason'] ?? '', array( 'admin-only', 'minified', 'code' ), true ); } ), count( $decisions ) . ' candidates wait on a person; none of them admin-only, minified or code' );
 $secret = array_values( array_filter( $candidates, static function ( $c ) { return 'secret' === ( $c['reason'] ?? '' ); } ) )[0];
 try {
 	Jobs::review( $s['id'], array( $secret['id'] => array( 'decision' => 'include', 'key' => $secret['key'] ) ) );
@@ -194,7 +201,14 @@ try {
 } catch ( RuntimeException $e ) {
 	check( false !== strpos( $e->getMessage(), 'cannot be included' ), 'a redacted secret cannot be included' );
 }
-$s = Jobs::review( $s['id'], $decisions, true );
+try {
+	Jobs::review( $s['id'], array(), false, 'maybe' );
+	check( false, 'a bulk decision is include or exclude' );
+} catch ( RuntimeException $e ) {
+	check( false !== strpos( $e->getMessage(), 'Invalid text review decision' ), 'a bulk decision is include or exclude' );
+}
+// One decision for every undecided candidate, on every page: what "Include all undecided" sends.
+$s = Jobs::review( $s['id'], array(), true, 'include' );
 for ( $i = 0; $i < 3000 && 'ready' !== $s['phase']; ++$i ) { $s = Jobs::step( $s['id'], $s['step'] ); }
 check( 'ready' === $s['phase'], 'the export finishes with ' . count( $decisions ) . ' reviewed strings' );
 $job = Jobs::read( $s['id'] );

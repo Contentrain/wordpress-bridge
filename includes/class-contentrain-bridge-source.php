@@ -30,7 +30,7 @@ final class Source {
 		}
 		$types = array();
 		foreach ( self::content_types() as $type ) {
-			$types[ $type->name ] = array( 'label' => $type->label, 'rest' => (bool) $type->show_in_rest, 'public' => (bool) $type->public, 'counts' => (array) wp_count_posts( $type->name ) );
+			$types[ $type->name ] = array( 'label' => $type->label, 'rest' => (bool) $type->show_in_rest, 'public' => (bool) $type->public, 'counts' => array_map( 'intval', (array) wp_count_posts( $type->name ) ) );
 		}
 		$plugins = array();
 		foreach ( get_plugins() as $path => $plugin ) {
