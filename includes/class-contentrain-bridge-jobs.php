@@ -935,6 +935,9 @@ final class Jobs {
 					Models::file( $job, 'bridge/hardcoded-text.json', Policy::json( Text::document( $job['candidates'], $job['text']['errors'], $job['text']['counts'] ) ) );
 				}
 				foreach ( $job['models'] as $model ) {
+					if ( ! empty( $job['derived'][ $model['id'] ] ) ) {
+						self::warning( $job, array( 'source' => 'model/' . $model['id'], 'reason' => 'empty-title-derived: ' . $job['derived'][ $model['id'] ] . ' record(s) had an empty title; a label was taken from the slug or id' ) );
+					}
 					Models::file( $job, '.contentrain/models/' . $model['id'] . '.json', Policy::json( $model, Policy::MODEL_ORDER ) );
 					if ( in_array( $model['kind'], array( 'collection', 'dictionary' ), true ) ) {
 						foreach ( array_keys( $job['locales'] ) as $locale ) {
