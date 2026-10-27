@@ -87,6 +87,10 @@ final class Models {
 		if ( 'dictionary' !== $kind && isset( $fields[ $title ] ) ) {
 			$fields[ $title ]['required'] = true;
 		}
+		// A field an earlier record found empty stays optional (see `filled()`).
+		foreach ( array_keys( $job['relaxed'][ $id ] ?? array() ) as $key ) {
+			unset( $fields[ $key ]['required'] );
+		}
 		$existing = $job['models'][ $id ] ?? null;
 		if ( $existing ) {
 			foreach ( $fields as $key => $definition ) {
@@ -105,6 +109,32 @@ final class Models {
 		if ( 'dictionary' !== $kind ) {
 			$job['models'][ $id ]['fields'] = $fields ?: (object) array();
 		}
+	}
+
+	/**
+	 * WordPress saves a record with no title, and ACF does not hold a draft, an
+	 * import or an older row to a field made required later. An empty title gets
+	 * a label from the record's slug or id, counted per model; any other
+	 * required field that is empty is left out and stops being required, said
+	 * once per field. Nothing is invented and no record is dropped: other
+	 * records point at it.
+	 */
+	private static function filled( &$job, $model, $id, $data ) {
+		$m = $job['models'][ $model ];
+		foreach ( (array) $m['fields'] as $name => $field ) {
+			if ( empty( $field['required'] ) || ( isset( $data[ $name ] ) && '' !== $data[ $name ] ) ) {
+				continue;
+			}
+			if ( $name === $m['title_field'] ) {
+				$data[ $name ] = (string) ( ( $data['source_slug'] ?? '' ) ?: ( isset( $data['wp_id'] ) ? '#' . $data['wp_id'] : '' ) ?: ( '' !== (string) $id ? '#' . $id : $m['name'] ) );
+				$job['derived'][ $model ] = ( $job['derived'][ $model ] ?? 0 ) + 1;
+				continue;
+			}
+			unset( $data[ $name ], $job['models'][ $model ]['fields'][ $name ]['required'] );
+			$job['relaxed'][ $model ][ $name ] = true;
+			Jobs::warning( $job, array( 'source' => 'model/' . $model . '.' . $name, 'reason' => 'required-value-empty: a record has no value for this required field, so the field is optional in this export' ) );
+		}
+		return $data;
 	}
 
 	/**
@@ -144,6 +174,9 @@ final class Models {
 
 	public static function entry( &$job, $model, $locale, $id, $data, $meta = null, $body = '' ) {
 		$job['locales'][ $locale ] = true;
+		if ( is_array( $data ) && 'dictionary' !== $job['models'][ $model ]['kind'] ) {
+			$data = self::filled( $job, $model, $id, $data );
+		}
 		$m = $job['models'][ $model ];
 		// `url` fields are addresses, not content: the media record's own source
 		// URL and a post's original permalink must survive relinking. Everything
@@ -192,7 +225,7 @@ final class Models {
 		$kind = 'post' === $p['type'] ? 'document' : 'collection';
 		$domain = 'post' === $p['type'] ? 'blog' : 'site';
 		$fields = array( 'title' => array( 'type' => 'string', 'required' => true ), 'source_slug' => array( 'type' => 'string' ), 'source_url' => array( 'type' => 'url' ), 'excerpt' => array( 'type' => 'richtext' ), 'wp_id' => array( 'type' => 'integer' ) );
-		$data = array( 'title' => wp_strip_all_tags( $p['title'] ) ?: '#' . $p['id'], 'source_slug' => $p['slug'], 'excerpt' => $p['excerpt'], 'wp_id' => $p['id'] );
+		$data = array( 'title' => wp_strip_all_tags( $p['title'] ), 'source_slug' => $p['slug'], 'excerpt' => $p['excerpt'], 'wp_id' => $p['id'] );
 		if ( $p['link'] ) {
 			$data['source_url'] = $p['link'];
 		}

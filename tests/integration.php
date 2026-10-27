@@ -1074,6 +1074,20 @@ check( Validator::run( $job )['valid'], 'generated relation graph validates' );
 $broken = $job;
 $broken['tables'][ Models::content_path( $job, 'wp-authors', $address['locale'] ) ] = array();
 rejects( static function () use ( $broken ) { Validator::run( $broken ); }, 'missing author relation fails validation' );
+// An empty required value still fails closed, and says where.
+$empty_excerpt = $job;
+$empty_message = '';
+foreach ( $empty_excerpt['models'] as $mid => $model ) {
+	if ( 'document' === $model['kind'] && isset( $model['fields']['excerpt'] ) ) {
+		$empty_excerpt['models'][ $mid ]['fields']['excerpt']['required'] = true;
+	}
+}
+try {
+	Validator::run( $empty_excerpt );
+} catch ( \RuntimeException $e ) {
+	$empty_message = $e->getMessage();
+}
+check( (bool) preg_match( '/^Required content value is empty: [a-z0-9-]+\.excerpt \([a-z_A-Z-]+\)$/', $empty_message ), 'an empty required value names its model, field and locale' );
 foreach ( $job['files'] as $path => $info ) {
 	check( hash_file( 'sha256', Files::path( $dir, $path ) ) === $info['sha256'], 'file hash: ' . $path );
 }
@@ -1325,6 +1339,56 @@ if ( $has_polylang ) {
 	wp_delete_post( $block_da, true );
 	update_user_meta( $admin->ID, 'contentrain_bridge_job_1', $id );
 }
+
+// WordPress saves a record with no title, and ACF does not hold a private or
+// draft post to a required field (P1, 0.8.3): the export is ready, an empty
+// title gets a label from the slug or id, and the empty field is optional.
+register_post_type( 'bridge_note', array( 'public' => true, 'show_in_rest' => false, 'label' => 'Notes' ) );
+if ( $has_acf ) {
+	acf_add_local_field_group( array(
+		'key' => 'group_bridge_note',
+		'title' => 'Note fields',
+		'location' => array( array( array( 'param' => 'post_type', 'operator' => '==', 'value' => 'bridge_note' ) ) ),
+		'fields' => array( array( 'key' => 'field_bridge_note_lead', 'name' => 'lead', 'label' => 'Lead', 'type' => 'text', 'required' => 1 ) ),
+	) );
+}
+$note_titled = wp_insert_post( array( 'post_type' => 'bridge_note', 'post_title' => 'Bridge note', 'post_status' => 'publish', 'post_author' => $admin->ID ) );
+$note_empty = wp_insert_post( array( 'post_type' => 'bridge_note', 'post_title' => '', 'post_name' => '', 'post_status' => 'private', 'post_author' => $admin->ID ) );
+if ( $has_acf ) {
+	update_field( 'field_bridge_note_lead', 'A lead', $note_titled );
+	update_field( 'field_bridge_note_lead', '', $note_empty );
+}
+$untitled = wp_insert_attachment( array( 'post_mime_type' => 'image/png', 'post_title' => '', 'post_status' => 'inherit' ), $image_path );
+delete_user_meta( $admin->ID, 'contentrain_bridge_job_1' );
+$notes = Jobs::create( array( 'types' => array( 'bridge_note', 'attachment' ), 'private' => true, 'media_files' => false, 'scan_sources' => false ) );
+for ( $i = 0; $i < 300 && ! in_array( $notes['phase'], array( 'review', 'ready', 'failed' ), true ); ++$i ) {
+	$notes = Jobs::step( $notes['id'], $notes['step'] );
+}
+if ( 'review' === $notes['phase'] ) {
+	$notes = Jobs::review( $notes['id'], array(), true );
+	for ( $i = 0; $i < 300 && ! in_array( $notes['phase'], array( 'ready', 'failed' ), true ); ++$i ) {
+		$notes = Jobs::step( $notes['id'], $notes['step'] );
+	}
+}
+check( 'ready' === $notes['phase'], 'an export with an untitled record and an empty required field is ready' );
+$notes_dir = Files::dir( $notes['id'] ) . '/output';
+$notes_warnings = array_column( json_decode( Files::read( $notes_dir, 'bridge/warnings.json' ), true ), 'reason', 'source' );
+$media_rows = json_decode( Files::read( $notes_dir, '.contentrain/content/assets/wp-media/data.json' ), true );
+$untitled_row = array_values( array_filter( $media_rows, static function ( $row ) use ( $untitled ) { return $untitled === ( $row['wp_id'] ?? null ); } ) );
+check( 1 === count( $untitled_row ) && '#' . $untitled === $untitled_row[0]['title'], 'an untitled attachment is kept, labelled by its id' );
+check( 0 === strpos( $notes_warnings['model/wp-media'] ?? '', 'empty-title-derived: ' ), 'and the export counts the derived labels' );
+$note_model = json_decode( Files::read( $notes_dir, '.contentrain/models/wp-bridge-note.json' ), true );
+check( ! empty( $note_model['fields']['title']['required'] ), 'a derived title stays required' );
+if ( $has_acf ) {
+	$lead = array_values( array_filter( array_keys( $note_model['fields'] ), static function ( $name ) { return false !== strpos( $name, 'lead' ); } ) );
+	check( 1 === count( $lead ) && empty( $note_model['fields'][ $lead[0] ]['required'] ), 'a required ACF field one record left empty is optional in the model' );
+	check( isset( $notes_warnings[ 'model/wp-bridge-note.' . $lead[0] ] ), 'and the export names that field' );
+}
+Files::remove( Files::dir( $notes['id'] ) );
+wp_delete_post( $note_titled, true );
+wp_delete_post( $note_empty, true );
+wp_delete_post( $untitled, true );
+update_user_meta( $admin->ID, 'contentrain_bridge_job_1', $id );
 
 // Snapshot consistency check on a separate job, preserving the finished artifact for external validation.
 delete_user_meta( $admin->ID, 'contentrain_bridge_job_1' );

@@ -95,6 +95,7 @@ The plugin stores export ownership and a source revision marker. It sends nothin
 * The content type list on the export screen shows each type's published count as a number ("Pages (7 published)", plus private ones when there are any). It used to join the per-status counts as text ("Pages (07010000000000)").
 * Interface text only an administrator sees is no longer offered for review: an options panel (Redux, Kirki, a theme-options file), a bundled plugin installer (TGM), an `admin` directory, and minified scripts. JavaScript literals that are one lowercase word or a BEM class name ("fade", "collapsing", "pswp__img") are code. Each is still listed in bridge/hardcoded-text.json with its reason; the same words in a template a visitor sees stay a candidate.
 * "Include all undecided" and "Exclude all undecided" decide every text candidate still waiting, on every page, in one step. Menu labels keep their default.
+* A record with an empty title, or an empty ACF field marked required, no longer stops the export with "Required content value is empty." WordPress saves both: a title-less post, attachment or menu link, and a private or draft post that ACF never held to its required field. An empty title gets a label from the record's slug or id, counted per model in bridge/warnings.json; an empty required field is left out, becomes optional in that model, and is named in the warnings. No record is dropped. When a required value is still empty, the message names the model, the field and the language.
 
 = 0.8.2 =
 
