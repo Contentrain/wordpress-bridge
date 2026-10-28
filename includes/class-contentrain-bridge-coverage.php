@@ -156,8 +156,8 @@ final class Coverage {
 		// ---- Widgets and Customizer: exported as interface text when that scan ran. ----
 		$text = ! empty( $job['options']['scan_sources'] ) ? 'exported:interface-text' : 'excluded:interface-text-scan-off';
 		$widgets = 0;
-		foreach ( $wpdb->get_col( "SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE 'widget\\_%'" ) as $name ) { // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Independent enumeration.
-			$widgets += count( array_filter( (array) get_option( $name ), 'is_array' ) );
+		foreach ( Text::widgets() as $widget ) {
+			$widgets += count( array_filter( (array) $widget->get_settings(), 'is_array' ) );
 		}
 		$sources[] = self::source( 'widgets', 'site', $widgets, $widgets ? array( $text => $widgets ) : array() );
 		$mods = array_filter( (array) get_theme_mods(), 'is_string' );

@@ -43,12 +43,15 @@ final class Text {
 			$found[] = self::occurrence( (string) get_option( $option ), 'option:' . $option, 'option', $option, $locale, array( 'target' => $target ) );
 		}
 		// Classic widgets keep a title and sometimes HTML text; block widgets keep block markup.
-		foreach ( self::widget_options() as $option ) {
-			foreach ( (array) get_option( $option, array() ) as $number => $instance ) {
+		foreach ( self::widgets() as $widget ) {
+			if ( 'recent-comments' === $widget->id_base ) {
+				continue;
+			}
+			foreach ( (array) $widget->get_settings() as $number => $instance ) {
 				if ( ! is_array( $instance ) ) {
 					continue;
 				}
-				$source = $option . '#' . $number;
+				$source = $widget->option_name . '#' . $number;
 				if ( isset( $instance['title'] ) ) {
 					$found[] = self::occurrence( (string) $instance['title'], 'widget:title', 'widget', $source, $locale );
 				}
@@ -303,9 +306,17 @@ final class Text {
 		return $out;
 	}
 
-	private static function widget_options() {
-		global $wpdb;
-		return (array) $wpdb->get_col( "SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE 'widget\\_%' AND option_name <> 'widget_recent-comments' ORDER BY option_name" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Enumerates widget option names; no API lists them.
+	/** The widgets WordPress has registered, by option name; each reads only its own settings. */
+	public static function widgets() {
+		global $wp_widget_factory;
+		$widgets = array();
+		foreach ( (array) ( $wp_widget_factory->widgets ?? array() ) as $widget ) {
+			if ( $widget instanceof \WP_Widget ) {
+				$widgets[ $widget->option_name ] = $widget;
+			}
+		}
+		ksort( $widgets );
+		return array_values( $widgets );
 	}
 
 	private static function landmark( $element ) {
