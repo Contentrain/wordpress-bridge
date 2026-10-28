@@ -93,13 +93,12 @@ final class Integrations {
 			}
 		}
 
-		// 2. Settings, by option name. The value is inspected for "is a credential set", never kept.
+		// 2. Settings, by option name. A credential-named setting that is not empty counts as a credential set; no value is read.
 		global $wpdb;
-		$names = $wpdb->get_col( "SELECT option_name FROM {$wpdb->options} WHERE option_name NOT LIKE '\\_%transient\\_%'" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Enumerates option names only.
+		$names = $wpdb->get_results( "SELECT option_name, option_value <> '' AS has_value FROM {$wpdb->options} WHERE option_name NOT LIKE '\\_%transient\\_%'", OBJECT_K ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Enumerates option names, and whether each is empty; no value is read.
 		foreach ( $catalog as $id => list( $name, $category, , $pattern ) ) {
-			foreach ( preg_grep( $pattern, $names ) as $option ) {
-				$set = self::secret_keys( get_option( $option ), preg_match( self::SECRET_KEY, $option ) ? $option : '' );
-				$add( $id, $name, $category, 'option-key', $option . ( $set ? ' (' . implode( ', ', $set ) . ')' : '' ), true, (bool) $set );
+			foreach ( preg_grep( $pattern, array_keys( $names ) ) as $option ) {
+				$add( $id, $name, $category, 'option-key', $option, true, $names[ $option ]->has_value && preg_match( self::SECRET_KEY, $option ) );
 			}
 		}
 		foreach ( (array) get_option( 'jetpack_active_modules', array() ) as $module ) {
@@ -165,35 +164,6 @@ final class Integrations {
 		);
 	}
 
-	/**
-	 * Names of credential settings that hold a value. The value is looked at to
-	 * tell "set" from "empty" and discarded; only the key name comes back.
-	 */
-	private static function secret_keys( $value, $option_name = '' ) {
-		$set = array();
-		if ( '' !== $option_name && is_scalar( $value ) && '' !== trim( (string) $value ) ) {
-			$set[] = $option_name;
-		}
-		$walk = static function ( $node, $path ) use ( &$walk, &$set ) {
-			if ( is_object( $node ) ) {
-				$node = get_object_vars( $node );
-			}
-			if ( ! is_array( $node ) ) {
-				return;
-			}
-			foreach ( $node as $key => $child ) {
-				$name = '' === $path ? (string) $key : $path . '.' . $key;
-				if ( is_scalar( $child ) && preg_match( self::SECRET_KEY, (string) $key ) && '' !== trim( (string) $child ) ) {
-					$set[] = $name;
-				} else {
-					$walk( $child, $name );
-				}
-			}
-		};
-		$walk( is_string( $value ) && is_serialized( $value ) ? unserialize( $value, array( 'allowed_classes' => false, 'max_depth' => 16 ) ) : $value, '' ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_unserialize -- Class instantiation is explicitly disabled; nothing is kept but key names.
-		return array_values( array_unique( $set ) );
-	}
-
 	/** Forms connected to a service: Contact Form 7 integrations, WPForms providers, Gravity Forms feeds. */
 	private static function form_links() {
 		global $wpdb;
@@ -202,7 +172,7 @@ final class Integrations {
 		if ( is_array( $cf7 ) ) {
 			foreach ( array( 'recaptcha' => 'recaptcha', 'sendinblue' => 'brevo', 'constant_contact' => 'constant-contact', 'stripe' => 'stripe' ) as $key => $service ) {
 				if ( ! empty( $cf7[ $key ] ) ) {
-					$out[] = array( $service, 'contact-form-7 integration: ' . $key, (bool) self::secret_keys( $cf7[ $key ] ) || ! empty( $cf7[ $key ] ) );
+					$out[] = array( $service, 'contact-form-7 integration: ' . $key, true );
 				}
 			}
 		}
@@ -210,7 +180,7 @@ final class Integrations {
 		foreach ( is_array( $providers ) ? array_keys( $providers ) : array() as $provider ) {
 			$service = array( 'mailchimpv3' => 'mailchimp', 'hubspot' => 'hubspot', 'convertkit' => 'convertkit', 'sendinblue' => 'brevo', 'zapier' => 'zapier', 'salesforce' => 'salesforce' )[ $provider ] ?? null;
 			if ( $service ) {
-				$out[] = array( $service, 'wpforms provider: ' . $provider, (bool) self::secret_keys( $providers[ $provider ] ) );
+				$out[] = array( $service, 'wpforms provider: ' . $provider, ! empty( $providers[ $provider ] ) );
 			}
 		}
 		$feeds = $wpdb->prefix . 'gf_addon_feed';

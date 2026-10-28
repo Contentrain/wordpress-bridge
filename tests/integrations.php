@@ -121,7 +121,7 @@ foreach ( $secrets + array( 'gf' => 'never-export-gf-feed-key' ) as $name => $va
 $all = '';
 foreach ( array_keys( $job['files'] ) as $path ) { if ( 0 !== strpos( $path, 'media/' ) ) { $all .= Files::read( $dir, $path ); } }
 check( ! array_filter( $secrets, static function ( $v ) use ( $all ) { return false !== strpos( $all, $v ); } ) && false === strpos( $all, 'never-export-gf-feed-key' ), 'no credential in any of ' . count( $job['files'] ) . ' exported files' );
-check( (bool) preg_grep( '/^mc4wp \(api_key\)$/', array_column( $by['mailchimp']['evidence'], 'detail' ) ), 'evidence names the setting that holds the key ("mc4wp (api_key)"), never its value' );
+check( in_array( 'mc4wp', array_column( $by['mailchimp']['evidence'], 'detail' ), true ), 'evidence names the setting by its name ("mc4wp"), never its value' );
 
 // ---- What the admin screen and Migrate get. ----
 $summary = Jobs::summary( $job );

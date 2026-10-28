@@ -4,7 +4,7 @@ Tags: export, migration, headless, astro, content
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 0.8.3
+Stable tag: 0.8.4
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -89,6 +89,11 @@ The active theme and child theme, and optionally the source files of active plug
 The plugin stores export ownership and a source revision marker. It sends nothing anywhere on its own; an export leaves the site only when you download it, deliver it to GitHub, or authorize a program to read it through the REST export API with an administrator's application password or a Contentrain Migrate connection key. For a connection key the plugin stores a fingerprint of the key (never the key), the administrator who created it, the Migrate order it is paired with, the list of exports it started, and the time and IP address of its last use; creating a new key or revoking it, and uninstalling the plugin, removes them. A request made with the key runs with no WordPress user. Export files are written to a private, per-site directory outside the web root that only the server can read, are removed on uninstall, and expire after a day. An export can contain site content, authors' display names and WordPress usernames, selected post metadata and, if you or the program you authorized chose it, privacy-minimized comments of every status (approved, pending, spam and trash) and draft, pending, scheduled, private and password-protected posts (never the password). A program authorized through the REST API chooses the scope; Contentrain Migrate asks for private content. Treat a downloaded export as you would a WordPress export file. If you deliver to GitHub, the exported content is sent to GitHub under the account whose token you provide; choose a private repository when the export includes draft or private content.
 
 == Changelog ==
+
+= 0.8.4 =
+
+* Widgets are read through WordPress's own widget registry: each registered widget reads only its own settings. The export no longer lists option names from the database to find widgets, so a widget whose plugin is inactive is not counted or scanned, as WordPress does not show it either.
+* Connected services are found by setting names only. A setting whose name marks a credential (key, token, secret) counts as set when it is not empty; the database answers that, and the value is never read. Evidence names the setting ("mc4wp"), not the keys inside it. A form wired to a service (Contact Form 7, WPForms) counts as connected when its account entry exists; the keys inside it are not read.
 
 = 0.8.3 =
 

@@ -277,8 +277,9 @@ analytics, CRM, newsletter, ads, comments, captcha, CDN — with the evidence fo
 each: an active plugin, a settings option by name, a script host in the theme or
 on the rendered home page, a form wired to the service, or embedded content. Each
 says whether an account must be reconnected and whether a credential is set on
-WordPress. No key, token or password is exported: a credential is only checked
-for being set, in memory, and the export names the setting, never its value. The
+WordPress. No key, token or password is exported or read: a setting whose name
+says credential counts as set when it is not empty (the database answers that,
+not the value), and the export names the setting, never its value. The
 list is shown on the Bridge screen and reaches Migrate's intake as an
 `integration_reconnect_required` issue.
 
