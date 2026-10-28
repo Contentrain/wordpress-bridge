@@ -10,9 +10,10 @@ defined( 'ABSPATH' ) || exit;
  * a settings option by name, a script loaded from the service's domain, a form
  * wired to it, or content embedded from it.
  *
- * Credentials never leave. An option's value is read only to answer "is a key
- * set?" as a boolean, in memory; what is written is the option's *name*, the
- * setting's *name*, a domain, a plugin slug. A migrated site has to connect
+ * Credentials never leave, and no setting is opened to look for one: a
+ * credential-named option that is not empty counts as set (the database
+ * answers that); what is written is the option's *name*, the setting's
+ * *name*, a domain, a plugin slug. A migrated site has to connect
  * again with its own credentials, and this is the list of what to connect.
  */
 final class Integrations {

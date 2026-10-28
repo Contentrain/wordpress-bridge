@@ -93,7 +93,7 @@ The plugin stores export ownership and a source revision marker. It sends nothin
 = 0.8.4 =
 
 * Widgets are read through WordPress's own widget registry: each registered widget reads only its own settings. The export no longer lists option names from the database to find widgets, so a widget whose plugin is inactive is not counted or scanned, as WordPress does not show it either.
-* Connected services are found by setting names only. A setting whose name marks a credential (key, token, secret) counts as set when it is not empty; the database answers that, and the value is never read. Evidence names the setting ("mc4wp"), not the keys inside it. A form wired to a service (Contact Form 7, WPForms) counts as connected when its account entry exists; the keys inside it are not read.
+* Connected services are found by setting names only. A setting whose name marks a credential (key, token, secret) counts as set when it is not empty; the database answers that, and the value is never read. Evidence names the setting ("mc4wp"), not the keys inside it. A form wired to a service (Contact Form 7, WPForms) counts as connected when its account entry exists; the keys inside it are not inspected.
 
 = 0.8.3 =
 
