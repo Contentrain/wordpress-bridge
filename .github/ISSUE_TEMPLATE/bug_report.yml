@@ -1,0 +1,52 @@
+name: Bug report
+description: An export that fails, or content that comes out missing or wrong.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security issues go to security@contentrain.io, not here (see SECURITY.md).
+        Do not attach production credentials or a full WordPress export.
+  - type: input
+    id: bridge-version
+    attributes:
+      label: Bridge version
+      placeholder: "0.8.4"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: WordPress and PHP versions
+      placeholder: "WordPress 6.8, PHP 8.2"
+    validations:
+      required: true
+  - type: textarea
+    id: plugins
+    attributes:
+      label: Relevant plugins and theme
+      description: For example ACF, Yoast SEO, Elementor, the active theme.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: What you expected in the export, and what you got.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Create a post with ...
+        2. Run the export from Tools > Contentrain Bridge
+        3. Open ... in the export
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Extra context
+      description: Warnings from the export report, PHP error log lines, screenshots.

@@ -1,0 +1,23 @@
+name: Feature request
+description: A source the plugin should read, or an improvement to the export.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What content or setting is not exported today, or what is hard to use?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: What the export or admin screen should do.
+  - type: textarea
+    id: context
+    attributes:
+      label: Extra context
+      description: Plugins involved, example sites (public only), links.
