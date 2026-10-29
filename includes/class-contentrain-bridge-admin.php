@@ -179,8 +179,8 @@ final class Admin {
 			</section>
 			<section id="cr-migrate" class="card cr-card" hidden>
 				<?php self::heading( 'admin-site-alt3', __( 'Want an Astro website?', 'contentrain-bridge' ) ); ?>
-				<p><?php esc_html_e( 'Your content export is already yours. Migrate can use the content models, source mappings and WordPress inventory to build an Astro website. No data is sent by opening this link; connect your export in Migrate when you choose to continue.', 'contentrain-bridge' ); ?></p>
-				<a class="button" href="https://migrate.contentrain.io/?source=wordpress-bridge" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Explore Astro migration', 'contentrain-bridge' ); ?></a>
+				<p><?php esc_html_e( 'Your content export is already yours. Contentrain Migrate, a separate paid service, can build an Astro website from this site: it reads the content through a connection key you create on this screen and uses the content models, source mappings and WordPress inventory. Opening this link sends no data.', 'contentrain-bridge' ); ?></p>
+				<a class="button" href="https://migrate.contentrain.io/?utm_source=bridge&amp;utm_medium=plugin&amp;utm_campaign=export-done" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Explore Astro migration', 'contentrain-bridge' ); ?></a>
 			</section>
 		</div>
 		<?php
