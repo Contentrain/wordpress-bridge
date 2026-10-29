@@ -25,12 +25,14 @@ Moving the whole site rather than exporting its content? [Contentrain Migrate](h
 
 ## Install and update
 
-Download `contentrain-bridge.zip` from the
+Install it from the WordPress.org directory: in **Plugins > Add New**, search for
+"Contentrain Bridge" ([plugin page](https://wordpress.org/plugins/contentrain-bridge/)).
+WordPress then offers each new version as a normal plugin update.
+
+You can also download `contentrain-bridge.zip` from the
 [latest release](https://github.com/Contentrain/wordpress-bridge/releases/latest)
-and install it in **Plugins > Add New > Upload Plugin**. Updates are manual while
-the plugin is distributed outside WordPress.org: upload the new release ZIP the
-same way and WordPress replaces the installed version. Each release is the exact
-archive CI built and tested ([RELEASING.md](RELEASING.md)).
+and install it in **Plugins > Add New > Upload Plugin**. It is the same archive
+CI built and tested ([RELEASING.md](RELEASING.md)).
 
 ## Development
 
