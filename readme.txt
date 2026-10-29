@@ -1,6 +1,6 @@
 === Contentrain Bridge ===
 Contributors: abb65
-Tags: export, migration, headless, astro, content
+Tags: markdown, export, static site, headless, astro
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
@@ -8,7 +8,7 @@ Stable tag: 0.8.4
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Model and export WordPress content and interface text as Contentrain JSON/Markdown, locally or to your own GitHub repository.
+Export posts, pages, media and ACF fields as Markdown/JSON to a ZIP or your GitHub repo, ready for Astro or any framework that reads Markdown.
 
 == Description ==
 
@@ -24,6 +24,8 @@ Contentrain Bridge turns your WordPress content into editable JSON and Markdown 
 * Exported site data remains the site owner's data and is not placed under the plugin's GPL license merely by being exported.
 
 Media travels with the content: uploads are copied into `media/` and the content is relinked to them, so the delivered repository does not depend on this site for images. A file over 8 MB, or one missing from the uploads directory, keeps its WordPress URL and is named in the coverage report. Dynamic WordPress and plugin output is not rendered during a source scan. These limits are written into the coverage report rather than implied to be complete.
+
+Want a working Astro website instead of files? Contentrain Migrate, a separate paid service, connects to this plugin with a key you create and builds a complete Astro site from your content: https://migrate.contentrain.io/?utm_source=wordpress-org&utm_medium=readme
 
 = External services =
 
@@ -83,6 +85,13 @@ Only when explicitly selected: author name, URL, content, status, dates and rela
 = What does the source scan read? =
 
 The active theme and child theme, and optionally the source files of active plugins. It reads PHP, HTML and JavaScript text to find interface strings, never executes them, skips vendor and dependency directories, and stops at 10,000 files. Every string it finds is a candidate you review before it becomes content.
+
+== Screenshots ==
+
+1. Step 1: choose the content types to export, whether drafts and comments travel, and where interface text is read from.
+2. Step 2: review the content models and the interface text that travels with them.
+3. Step 3: download a ZIP or deliver the export to a new branch in your own GitHub repository.
+4. The coverage report: every place WordPress keeps content, counted and split into what was exported, what was left out and why.
 
 == Privacy ==
 
