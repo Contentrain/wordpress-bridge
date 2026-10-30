@@ -1,10 +1,14 @@
+<p align="center"><img src=".github/cover.png" alt="Contentrain Bridge — export WordPress, own it in Git" width="100%"></p>
+
 # Contentrain Bridge
 
 Free, local-first WordPress bridge: models site content and interface text as Contentrain JSON/Markdown, delivered as a ZIP or to a branch in your own GitHub repository.
 
+For WordPress site owners and developers who want their content out of the database and in Git as structured files: posts, pages, custom post types, ACF fields, media, menus and the interface text the theme shows.
+
 - License: GPL-2.0-or-later
 - No account or paid service required
-- No telemetry, and no network request until you start a GitHub delivery yourself
+- No telemetry, and no host other than your own site is contacted until you start a GitHub delivery yourself (the optional rendered-text scan reads your site's own pages, like a visitor)
 - Explicit, nonce-protected administrator export
 - Comment export off by default and privacy-minimized
 - ACF groups and repeaters modelled as real collections rather than one anonymous value bag
@@ -21,7 +25,18 @@ Free, local-first WordPress bridge: models site content and interface text as Co
 
 The JSON contract is defined by the MIT-licensed `@contentrain/types` package in `Contentrain/ai`; the plugin does not import or embed private Migrate or proprietary Studio code.
 
-Moving the whole site rather than exporting its content? [Contentrain Migrate](https://migrate.contentrain.io) moves a WordPress site to an Astro project in your own GitHub, with layouts as Astro components and old URLs kept or redirected. This plugin is optional there: Migrate can read your public pages without it.
+Moving the whole site rather than exporting its content? [Contentrain Migrate](https://migrate.contentrain.io), a separate paid service, moves a WordPress site to an Astro project in your own GitHub, with layouts as Astro components and old URLs kept or redirected. This plugin is optional there: Migrate can read your public pages without it.
+
+## Part of Contentrain
+
+Contentrain is a content governance ecosystem for teams and AI agents: content lives in Git as structured JSON and Markdown, agents propose changes, people approve them, and Git records every change. Bridge is its free WordPress entry point. The ecosystem has four parts:
+
+- **Open-source tools** — MCP, CLI, SDK, rules and skills (MIT): [Contentrain/ai](https://github.com/Contentrain/ai), docs at [ai.contentrain.io](https://ai.contentrain.io). They read and validate the store Bridge writes.
+- **Studio** — the team surface for reviewing, governing and delivering that content: [Contentrain/studio](https://github.com/Contentrain/studio), [studio.contentrain.io](https://studio.contentrain.io), docs at [docs.contentrain.io](https://docs.contentrain.io).
+- **Migrate** — the paid service that moves a whole WordPress site to Astro: [migrate.contentrain.io](https://migrate.contentrain.io).
+- **Bridge** — this plugin: [Contentrain/wordpress-bridge](https://github.com/Contentrain/wordpress-bridge), [WordPress.org](https://wordpress.org/plugins/contentrain-bridge/).
+
+None of the others is required to use Bridge.
 
 ## Install and update
 
@@ -33,6 +48,13 @@ You can also download `contentrain-bridge.zip` from the
 [latest release](https://github.com/Contentrain/wordpress-bridge/releases/latest)
 and install it in **Plugins > Add New > Upload Plugin**. It is the same archive
 CI built and tested ([RELEASING.md](RELEASING.md)).
+
+## Quick start
+
+1. Activate Contentrain Bridge and open **Tools > Contentrain Bridge**.
+2. Choose content types and options, then prepare the content.
+3. Review the generated models and the interface-text candidates, then validate and finalize.
+4. Download the ZIP, or deliver to a new branch in your own GitHub repository (a repository and a token you enter; the default branch is never written).
 
 ## Development
 
@@ -318,3 +340,7 @@ It is no longer taken on faith. `npm run test:reader` reads this writer's own
 output back with the pinned reader and compares it to the values that went in, and
 it runs in CI — so the compatibility cannot regress silently. Metadata that is not
 valid UTF-8 still stops the export.
+
+## License
+
+GPL-2.0-or-later — see [LICENSE](LICENSE). Exported site data remains the site owner's data and is not placed under the plugin's license by being exported.
