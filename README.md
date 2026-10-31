@@ -31,8 +31,8 @@ Moving the whole site rather than exporting its content? [Contentrain Migrate](h
 
 Contentrain is a content governance ecosystem for teams and AI agents: content lives in Git as structured JSON and Markdown, agents propose changes, people approve them, and Git records every change. Bridge is its free WordPress entry point. The ecosystem has four parts:
 
-- **Open-source tools** — MCP, CLI, SDK, rules and skills (MIT): [Contentrain/ai](https://github.com/Contentrain/ai), docs at [ai.contentrain.io](https://ai.contentrain.io). They read and validate the store Bridge writes.
-- **Studio** — the team surface for reviewing, governing and delivering that content: [Contentrain/studio](https://github.com/Contentrain/studio), [studio.contentrain.io](https://studio.contentrain.io), docs at [docs.contentrain.io](https://docs.contentrain.io).
+- **Open-source tools** — MCP, CLI, SDK, rules and skills (MIT): [Contentrain/ai](https://github.com/Contentrain/ai), docs at [ai.contentrain.io](https://ai.contentrain.io), the MCP server at [ai.contentrain.io/packages/mcp](https://ai.contentrain.io/packages/mcp). They read and validate the store Bridge writes.
+- **Studio** — the team surface for reviewing, governing and delivering that content: [Contentrain/studio](https://github.com/Contentrain/studio), [contentrain.io/studio](https://contentrain.io/studio), [studio.contentrain.io](https://studio.contentrain.io), docs at [docs.contentrain.io](https://docs.contentrain.io). Its MCP Cloud is a hosted MCP endpoint that lets an AI agent work on a Studio project: [docs.contentrain.io/developer/mcp-cloud](https://docs.contentrain.io/developer/mcp-cloud).
 - **Migrate** — the paid service that moves a whole WordPress site to Astro: [migrate.contentrain.io](https://migrate.contentrain.io).
 - **Bridge** — this plugin: [Contentrain/wordpress-bridge](https://github.com/Contentrain/wordpress-bridge), [WordPress.org](https://wordpress.org/plugins/contentrain-bridge/).
 
