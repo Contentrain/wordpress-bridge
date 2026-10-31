@@ -27,6 +27,8 @@ Media travels with the content: uploads are copied into `media/` and the content
 
 Want a working Astro website instead of files? Contentrain Migrate, a separate paid service, connects to this plugin with a key you create and builds a complete Astro site from your content: https://migrate.contentrain.io/?utm_source=wordpress-org&utm_medium=readme
 
+Contentrain ecosystem: Contentrain Studio, where a team reviews and publishes this content (https://contentrain.io/studio); the open-source AI packages, CLI and MCP server (https://ai.contentrain.io); and Studio MCP Cloud, a hosted MCP endpoint that lets an AI agent work on a Studio project (https://docs.contentrain.io/developer/mcp-cloud). None of them is required to use this plugin.
+
 = External services =
 
 The plugin contacts no host other than this site unless you choose GitHub delivery. Two options read this site's own pages over HTTP, the way a visitor would, and send nothing elsewhere: "Also read the text your pages render" (the home page, a post, a page, search and not-found) and, with it, the connected-services check (the home page's script hosts).

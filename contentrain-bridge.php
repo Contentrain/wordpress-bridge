@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name:       Contentrain Bridge – Export to Markdown, JSON & Git
- * Plugin URI:        https://github.com/Contentrain/wordpress-bridge
+ * Plugin URI:        https://contentrain.io/bridge
  * Description:       Model and export WordPress content and interface text as Contentrain JSON/Markdown, with optional GitHub delivery.
  * Version:           0.8.5
  * Requires at least: 6.2
