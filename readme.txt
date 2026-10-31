@@ -4,7 +4,7 @@ Tags: markdown, export, static site, headless, astro
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 0.8.5
+Stable tag: 0.8.6
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -100,6 +100,11 @@ The active theme and child theme, and optionally the source files of active plug
 The plugin stores export ownership and a source revision marker. It sends nothing anywhere on its own; an export leaves the site only when you download it, deliver it to GitHub, or authorize a program to read it through the REST export API with an administrator's application password or a Contentrain Migrate connection key. For a connection key the plugin stores a fingerprint of the key (never the key), the administrator who created it, the Migrate order it is paired with, the list of exports it started, and the time and IP address of its last use; creating a new key or revoking it, and uninstalling the plugin, removes them. A request made with the key runs with no WordPress user. Export files are written to a private, per-site directory outside the web root that only the server can read, are removed on uninstall, and expire after a day. An export can contain site content, authors' display names and WordPress usernames, selected post metadata and, if you or the program you authorized chose it, privacy-minimized comments of every status (approved, pending, spam and trash) and draft, pending, scheduled, private and password-protected posts (never the password). A program authorized through the REST API chooses the scope; Contentrain Migrate asks for private content. Treat a downloaded export as you would a WordPress export file. If you deliver to GitHub, the exported content is sent to GitHub under the account whose token you provide; choose a private repository when the export includes draft or private content.
 
 == Changelog ==
+
+= 0.8.6 =
+
+* The plugin's homepage is contentrain.io/bridge.
+* The readme installs from the WordPress.org directory and links the rest of Contentrain: Studio, the open-source AI packages, CLI and MCP server, and Studio MCP Cloud. None of them is required to use the plugin.
 
 = 0.8.5 =
 
